@@ -96,6 +96,41 @@ int main() {
         assert(events[0].type == "heartbeat");
     }
 
+    // Regresja: nowy świat = nowy storage_dir, ale ta sama baza brain. Offsety są
+    // kluczowane pełną ścieżką, więc krótszy events.jsonl innego świata musi być
+    // przeczytany od zera (bug z 2026-07-19: klucz samą nazwą pliku → "brak odczytów").
+    const fs::path storage_dir2 = tmp / "storage2";
+    fs::create_directories(storage_dir2);
+    append_line(storage_dir2 / "events.jsonl", {
+        {"v", 1}, {"seq", 1}, {"ts", 9000},
+        {"type", "session_start"},
+        {"data", {{"world", "NowySwiat"}, {"player_id", 1}, {"player_name", "Minik"}, {"mod_version", "0.1"}}},
+    });
+    {
+        zf::Db db(db_path.string());
+        zf::EventReader reader(storage_dir2.string(), db);
+        const std::vector<zf::Event> events = reader.poll();
+        assert(events.size() == 1 && "zdarzenia nowego świata muszą być czytane mimo offsetów starego");
+        assert(events[0].data.at("world") == "NowySwiat");
+    }
+
+    // Regresja: świat odtworzony pod TĄ SAMĄ ścieżką (plik krótszy niż offset)
+    // — reader ma zresetować offset i przeczytać od początku, nie czekać w nieskończoność.
+    fs::remove(storage_dir / "events.jsonl");
+    append_line(storage_dir / "events.jsonl", {
+        {"v", 1}, {"seq", 1}, {"ts", 9500},
+        {"type", "session_start"},
+        {"data", {{"world", "OdtworzonySwiat"}, {"player_id", 1}, {"player_name", "Minik"}, {"mod_version", "0.1"}}},
+    });
+    {
+        zf::Db db(db_path.string());
+        zf::EventReader reader(storage_dir.string(), db);
+        const std::vector<zf::Event> events = reader.poll();
+        assert(events.size() == 1 && "po skróceniu pliku offset musi się zresetować");
+        assert(events[0].data.at("world") == "OdtworzonySwiat");
+        assert(reader.poll().empty() && "po resecie offset musi być znów utrwalony");
+    }
+
     std::cout << "zf_bridge_test: OK\n";
     return 0;
 }

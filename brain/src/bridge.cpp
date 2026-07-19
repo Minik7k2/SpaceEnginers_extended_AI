@@ -75,9 +75,20 @@ std::vector<Event> EventReader::poll() {
     for (int idx = 1; idx <= active_index; ++idx) {
         const std::string filename = rotated_filename("events", idx);
         const fs::path path = dir / filename;
+        // Klucz offsetu to pełna ścieżka: baza brain przeżywa zmianę świata/storage,
+        // a offsety z jednego świata nie mogą przesłaniać pliku z innego.
+        const std::string offset_key = path.generic_string();
 
         const std::vector<std::string> lines = read_complete_lines(path);
-        const std::int64_t offset = std::max<std::int64_t>(db_.get_line_offset(filename), 0);
+        std::int64_t offset = std::max<std::int64_t>(db_.get_line_offset(offset_key), 0);
+        if (static_cast<std::size_t>(offset) > lines.size()) {
+            // Plik krótszy niż zapamiętany offset — świat odtworzony pod tą samą
+            // ścieżką. Czytamy od zera zamiast czekać w nieskończoność.
+            std::cerr << "[brain] " << offset_key << " krótszy niż offset (" << offset
+                      << ") — reset, czytam od początku\n";
+            offset = 0;
+            db_.set_line_offset(offset_key, 0); // od razu do bazy, inaczej warning wracałby co poll
+        }
 
         for (std::size_t i = static_cast<std::size_t>(offset); i < lines.size(); ++i) {
             const std::string& line = lines[i];
@@ -102,10 +113,10 @@ std::vector<Event> EventReader::poll() {
         }
 
         if (static_cast<std::size_t>(offset) < lines.size()) {
-            db_.set_line_offset(filename, static_cast<std::int64_t>(lines.size()));
+            db_.set_line_offset(offset_key, static_cast<std::int64_t>(lines.size()));
         }
 
-        if (idx < active_index && lines.size() == static_cast<std::size_t>(db_.get_line_offset(filename))) {
+        if (idx < active_index && lines.size() == static_cast<std::size_t>(db_.get_line_offset(offset_key))) {
             std::error_code ec;
             fs::remove(path, ec); // plik już rotowany i w pełni przetworzony — bezpiecznie skasować
         }
