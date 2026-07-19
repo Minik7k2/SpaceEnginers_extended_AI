@@ -1,0 +1,55 @@
+#pragma once
+
+#include <cstdint>
+#include <fstream>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "db.hpp"
+
+namespace zf {
+
+struct Event {
+    std::string type;
+    nlohmann::json data;
+};
+
+// Czyta events.jsonl (+ rotowane events-NNNN.jsonl) pisane przez mod. Offsety (liczba
+// przetworzonych linii na plik) trzymane w SQLite, patrz docs/protocol.md.
+class EventReader {
+public:
+    EventReader(std::string storage_dir, Db& db);
+
+    // Zwraca nowe, kompletne (zakończone \n) zdarzenia od ostatniego pollu. Linie niekompletne
+    // lub z niepoprawnym JSON-em / nieznanym "type" są pomijane (spec: "pomiń i czekaj").
+    std::vector<Event> poll();
+
+private:
+    std::string storage_dir_;
+    Db& db_;
+};
+
+// Pisze commands.jsonl (+ rotacja po rotate_bytes) czytane przez mod co ~60 tików.
+class CommandWriter {
+public:
+    CommandWriter(std::string storage_dir, Db& db, std::uint64_t rotate_bytes);
+
+    void write_radio_message(const std::string& faction, const std::string& text,
+                              const std::string& color, int priority);
+
+private:
+    void write_line(const nlohmann::json& line);
+    void rotate_if_needed();
+    void open_active_file();
+
+    std::string storage_dir_;
+    Db& db_;
+    std::uint64_t rotate_bytes_;
+    int current_index_ = 1;
+    std::uint64_t current_bytes_ = 0;
+    std::ofstream out_;
+};
+
+} // namespace zf
