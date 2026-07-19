@@ -205,4 +205,16 @@ void Db::add_memory(std::int64_t ts, const std::string& faction, const std::stri
     s.i64(1, ts).text(2, faction).text(3, type).i64(4, weight).text(5, summary).done();
 }
 
+std::vector<std::string> Db::recent_memories(const std::string& faction, int n) const {
+    Stmt s(handle_,
+           "SELECT summary FROM events WHERE faction = ? ORDER BY id DESC LIMIT ?;");
+    s.text(1, faction).i64(2, n);
+    std::vector<std::string> rows;
+    while (s.row()) {
+        rows.push_back(s.col_text(0));
+    }
+    std::reverse(rows.begin(), rows.end());
+    return rows;
+}
+
 } // namespace zf

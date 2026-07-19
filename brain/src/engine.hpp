@@ -15,11 +15,16 @@
 namespace zf {
 
 // Wiadomość radiowa do wysłania przez CommandWriter (albo na stdout w --replay).
+// text to zawsze gotowy szablon fallback; kind+context to intencja dla LLM (Etap 4):
+// gdy model działa, main podmienia text na wypowiedź wygenerowaną z person.
+// Pusty kind (np. raport /zf rel) = nigdy nie przechodzi przez LLM.
 struct RadioOut {
     std::string faction;
     std::string text;
     std::string color = "white";
     int priority = 0;   // 1 = bojowe/wojna (krótszy cooldown radia)
+    std::string kind;      // grozba/kpina/neutral/... — rodzaj wypowiedzi
+    std::string context;   // opis sytuacji po polsku do promptu LLM
 };
 
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
@@ -50,8 +55,10 @@ private:
     std::string render_first(const std::string& faction, std::initializer_list<const char*> kinds,
                              const std::map<std::string, std::string>& vars = {}) const;
     // Emisja z limitem częstotliwości per frakcja (priority 1 = krótszy cooldown).
+    // kind/context opisują intencję dla LLM; do context doklejany jest stan relacji.
     void emit(std::vector<RadioOut>& out, const std::string& faction, const std::string& text,
-              int priority, const Config& cfg, std::int64_t now_ms);
+              int priority, const Config& cfg, std::int64_t now_ms,
+              const std::string& kind = {}, std::string context = {});
     // Przejścia spokoj/napiecie/wojna wg relacji do gracza (histereza wyjścia z wojny).
     void update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);

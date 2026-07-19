@@ -2,7 +2,6 @@
 brain/configs/*.local.toml
 brain/build/
 brain/models/
-brain/third_party/llama.cpp/
 brain/state/
 *.sqlite3
 *.sqlite3-wal

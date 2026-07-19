@@ -58,6 +58,8 @@ public:
     // Pamięć długoterminowa (kontekst LLM w Etapie 4). weight: 0 zwykłe, 2 ciężkie.
     void add_memory(std::int64_t ts, const std::string& faction, const std::string& type,
                     int weight, const std::string& summary);
+    // Ostatnie n wpisów pamięci frakcji, od najstarszego do najnowszego.
+    std::vector<std::string> recent_memories(const std::string& faction, int n) const;
 
     // Małe wartości int64 (np. znacznik ostatniego ticku) — współdzieli tabelę bridge_state,
     // klucze zaczynają się od "__" żeby nie kolidowały ze ścieżkami plików.

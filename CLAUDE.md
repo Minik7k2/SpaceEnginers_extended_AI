@@ -70,7 +70,10 @@ docs/protocol.md                # spec mostka JSONL
 ## Etapy implementacji
 
 - **Etap 0** ✅ struktura repo, ten plik, spec protokołu, schema, persony.
-  Pozostało ręcznie: instalacja MES z Workshopu, model GGUF, submoduł llama.cpp.
+  Submoduł llama.cpp ✅ (shallow, b10068) i model GGUF ✅ (brain/models/) —
+  dodane 2026-07-20. Pozostało ręcznie: MES z Workshopu na każdej maszynie.
+  Uwaga toolchain: CUDA wymaga MSVC — z MinGW (CLion) llama.cpp buduje się
+  CPU-only; na laptopie brain gada z CPU, backend GPU ewentualnie na desktopie.
 - **Etap 1 — most:** ✅ mod pisze `session_start`+`heartbeat`+`chat_message`;
   brain (bez LLM) czyta, loguje, odpisuje testowe `radio_message`; mod wyświetla.
   Kryterium: napisz coś na czacie → po <3 s wraca echo jako [RADIO | TEST].
@@ -91,8 +94,9 @@ docs/protocol.md                # spec mostka JSONL
   kluczowane pełną ścieżką (offset starego świata przesłaniał krótszy
   events.jsonl nowego → „brak odczytów") + config per maszyna
   (rules.local.toml).
-- **Etap 3 — silnik:** SQLite wg schema.sql, reguły relacji, tick, maszyna
-  stanów, tryb `--mock-llm` (same szablony fallback).
+- **Etap 3 — silnik:** ✅ (kod + testy + --replay na prawdziwej sesji; do
+  weryfikacji w grze wg docs/testy-reczne.md) SQLite wg schema.sql, reguły
+  relacji, tick, maszyna stanów, tryb `--mock-llm` (same szablony fallback).
 - **Etap 4 — głos:** integracja llama.cpp, GBNF, karty person, walidacja+retry.
 - **Etap 5 — ręce:** radio na czacie (format `[RADIO | NAZWA]`, kolor frakcji,
   limit 1/min/frakcję poza walką, kolejka priorytetowa, TTL 2 min),

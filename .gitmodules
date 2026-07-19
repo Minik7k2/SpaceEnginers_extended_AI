@@ -1,0 +1,4 @@
+[submodule "brain/third_party/llama.cpp"]
+	shallow = true
+	path = brain/third_party/llama.cpp
+	url = https://github.com/ggml-org/llama.cpp

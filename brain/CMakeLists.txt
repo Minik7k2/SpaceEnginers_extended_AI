@@ -5,10 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Warningi-jako-błędy tylko dla NASZYCH targetów (llama.cpp i sqlite by ich nie przeszły).
 if(MSVC)
-  add_compile_options(/W4 /WX)
+  set(ZF_WARNINGS /W4 /WX)
 else()
-  add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+  set(ZF_WARNINGS -Wall -Wextra -Wpedantic -Werror)
 endif()
 
 # Systemowy SQLite3 jeśli jest; inaczej amalgamacja z third_party/sqlite3
@@ -44,6 +45,7 @@ add_library(zf_core STATIC
   src/bridge.cpp
   src/engine.cpp
   src/fallback.cpp
+  src/llm.cpp
 )
 
 target_include_directories(zf_core PUBLIC
@@ -52,9 +54,31 @@ target_include_directories(zf_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_options(zf_core PRIVATE ${ZF_WARNINGS})
 target_link_libraries(zf_core PUBLIC SQLite::SQLite3)
 
+# Etap 4: llama.cpp jako submoduł. Bez niego (albo z -DZF_WITH_LLM=OFF) brain
+# buduje się dalej, a radio zostaje na szablonach fallback.
+option(ZF_WITH_LLM "Buduj z llama.cpp (głos LLM)" ON)
+if(ZF_WITH_LLM AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp/CMakeLists.txt)
+  set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+  # MinGW + statyczne libgcc: OpenMP nie dolinkowuje GOMP do naszego exe — ggml
+  # i tak ma własny thread pool, więc OpenMP wyłączamy.
+  set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
+  target_link_libraries(zf_core PUBLIC llama)
+  target_compile_definitions(zf_core PUBLIC ZF_WITH_LLM)
+  message(STATUS "LLM: llama.cpp włączony")
+else()
+  message(STATUS "LLM: brak third_party/llama.cpp/CMakeLists.txt — buduję bez LLM (szablony fallback)")
+endif()
+
 add_executable(zf_brain src/main.cpp)
+target_compile_options(zf_brain PRIVATE ${ZF_WARNINGS})
 target_link_libraries(zf_brain PRIVATE zf_core)
 
 # MinGW: runtime statycznie, inaczej exe uruchomiony poza CLionem pada bez

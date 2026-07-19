@@ -80,8 +80,9 @@ std::string Engine::render_first(const std::string& faction, std::initializer_li
 }
 
 void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const std::string& text,
-                  int priority, const Config& cfg, std::int64_t now_ms) {
-    if (text.empty()) {
+                  int priority, const Config& cfg, std::int64_t now_ms,
+                  const std::string& kind, std::string context) {
+    if (text.empty() && kind.empty()) {
         return;
     }
     // Limit z configu dotyczy spokojnego radia; zdarzenia bojowe (priority 1)
@@ -93,7 +94,19 @@ void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const 
         return;
     }
     last_radio_ms_[faction] = now_ms;
-    out.push_back({faction, text, faction_color(faction), priority});
+
+    if (!kind.empty()) {
+        const RelationRow rel = db_.get_relation(faction, kPlayer);
+        std::string state = "spokoj";
+        for (const FactionRow& row : db_.list_factions()) {
+            if (row.tag == faction) {
+                state = row.state;
+            }
+        }
+        context += " Wasza relacja z graczem: " + format_value(rel.value) + " (" +
+                   state_display(state) + ").";
+    }
+    out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context)});
 }
 
 void Engine::update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
@@ -133,10 +146,11 @@ void Engine::update_state(const std::string& faction, const Config& cfg, std::in
     if (next == "wojna") {
         db_.add_memory(now_ms, faction, "wojna", 2, "Frakcja " + faction + " wypowiedziała wojnę graczowi.");
         emit(out, faction, render_first(faction, {"grozba", "kpina", "neutral"}, {{"sekundy", "30"}}),
-             1, cfg, now_ms);
+             1, cfg, now_ms, "grozba", "Miarka się przebrała — wasza frakcja właśnie wypowiedziała graczowi wojnę.");
     } else if (row->state == "wojna") {
         db_.add_memory(now_ms, faction, "koniec_wojny", 2, "Frakcja " + faction + " zakończyła wojnę z graczem.");
-        emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms);
+        emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms,
+             "neutral", "Wojna z graczem właśnie się zakończyła — ogłoś zawieszenie broni po swojemu.");
     }
 }
 
@@ -189,7 +203,8 @@ void Engine::handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t 
 
     update_state(faction, cfg, now_ms, out);
     emit(out, faction, render_first(faction, {"grozba", "zal", "neutral"}, {{"sekundy", "60"}}),
-         1, cfg, now_ms);
+         1, cfg, now_ms, "grozba",
+         "Gracz właśnie ostrzelał wasz statek (broń: " + data_str(ev, "weapon") + "). Zareaguj.");
 }
 
 void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -210,7 +225,8 @@ void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int6
 
     update_state(faction, cfg, now_ms, out);
     emit(out, faction, render_first(faction, {"grozba", "zal", "neutral"}, {{"sekundy", "30"}}),
-         1, cfg, now_ms);
+         1, cfg, now_ms, "grozba",
+         "Gracz właśnie zniszczył wasz statek \"" + data_str(ev, "grid") + "\". Zareaguj.");
 }
 
 void Engine::handle_proximity(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -225,9 +241,11 @@ void Engine::handle_proximity(const Event& ev, const Config& cfg, std::int64_t n
     const double value = db_.get_relation(faction, kPlayer).value;
     if (value <= cfg.prog_wrogi) {
         emit(out, faction, render_first(faction, {"grozba", "kpina", "neutral"}, {{"sekundy", "20"}}),
-             1, cfg, now_ms);
+             1, cfg, now_ms, "grozba",
+             "Gracz zbliżył się do waszego statku, a nie jesteście z nim w dobrych stosunkach. Ostrzeż go.");
     } else {
-        emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms);
+        emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms,
+             "neutral", "Gracz zbliżył się do waszego statku. Zagadaj do niego po swojemu.");
     }
 }
 
@@ -243,7 +261,8 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
         if (row.tag == target) {
             const double value = db_.get_relation(target, kPlayer).value;
             const char* kind = value <= cfg.prog_wrogi ? "kpina" : "neutral";
-            emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms);
+            emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
+                 kind, "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") + "\". Odpowiedz mu.");
             return;
         }
     }
@@ -253,10 +272,10 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
                           std::vector<RadioOut>& out) {
     const std::string cmd = data_str(ev, "cmd");
     if (cmd == "rel") {
-        out.push_back({"SYSTEM", relations_report(), "white", 0});
+        out.push_back({"SYSTEM", relations_report(), "white", 0, {}, {}});
     } else if (cmd == "tick") {
         std::vector<RadioOut> tick_out = tick(cfg, now_ms, /*force=*/true);
-        out.push_back({"SYSTEM", "Tick wymuszony.", "white", 0});
+        out.push_back({"SYSTEM", "Tick wymuszony.", "white", 0, {}, {}});
         out.insert(out.end(), tick_out.begin(), tick_out.end());
     }
 }
@@ -315,7 +334,8 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
                                                                 : "neutral";
                 emit(out, chosen.tag,
                      render_first(chosen.tag, {kind, "neutral"}, {{"sekundy", "45"}}),
-                     chosen.state == "wojna" ? 1 : 0, cfg, now_ms);
+                     chosen.state == "wojna" ? 1 : 0, cfg, now_ms, kind,
+                     "Nic szczególnego się nie dzieje — nadaj krótką rutynową transmisję w waszym stylu.");
             }
         }
     }

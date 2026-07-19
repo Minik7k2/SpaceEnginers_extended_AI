@@ -24,6 +24,7 @@
 #include "db.hpp"
 #include "engine.hpp"
 #include "fallback.hpp"
+#include "llm.hpp"
 
 namespace {
 
@@ -96,6 +97,25 @@ void log_event(const zf::Event& ev) {
         std::cout << "[brain] debug_command: " << str("cmd") << "\n";
     }
     // heartbeat celowo bez logu — od Etapu 3 tylko zaśmiecał konsolę.
+}
+
+// Prompt systemowy: karta persony z pliku + świeża pamięć frakcji z SQLite.
+std::string build_system_prompt(const std::string& faction, zf::Db& db) {
+    std::string prompt;
+    std::ifstream in(zf::persona_path(faction), std::ios::binary);
+    if (in) {
+        std::ostringstream buf;
+        buf << in.rdbuf();
+        prompt = buf.str();
+    }
+    const std::vector<std::string> memories = db.recent_memories(faction, 5);
+    if (!memories.empty()) {
+        prompt += "\n\nOstatnie wydarzenia, które pamiętasz:\n";
+        for (const std::string& m : memories) {
+            prompt += "- " + m + "\n";
+        }
+    }
+    return prompt;
 }
 
 // Tryb --replay: odtwarza zdarzenia z pliku JSONL bez gry i bez trwałego stanu
@@ -179,12 +199,6 @@ int main(int argc, char** argv) {
 
     anchor_to_config_dir(argv[0], config_path);
 
-    // Do Etapu 4 głos to zawsze szablony fallback; flaga --mock-llm już istnieje,
-    // żeby skrypty testowe nie musiały się zmieniać, gdy dojdzie prawdziwy LLM.
-    if (!mock_llm) {
-        std::cout << "[brain] uwaga: LLM jeszcze niepodłączony (Etap 4) — działam jak --mock-llm\n";
-    }
-
     try {
         zf::ConfigWatcher watcher(config_path);
 
@@ -198,12 +212,26 @@ int main(int argc, char** argv) {
         zf::Fallback fallback(kFallbackPath);
         zf::Engine engine(db, fallback, std::random_device{}());
 
+        // --mock-llm = celowe pominięcie modelu (testy silnika bez kosztu generacji).
+        zf::LlmWorker llm(mock_llm ? zf::Config{} : watcher.get());
+
         std::cout << "[brain] start, storage=" << watcher.get().storage_dir
                   << " poll_ms=" << watcher.get().poll_ms << "\n";
         std::cout << "[brain] relacje: " << engine.relations_report() << "\n";
 
-        const auto send_all = [&commands](const std::vector<zf::RadioOut>& msgs) {
+        // Intencje z personą idą do LLM (fallback w zadaniu na wypadek porażki);
+        // reszta (SYSTEM, frakcje bez persony, brak modelu) — od razu szablonem.
+        const auto send_all = [&commands, &llm, &db](const std::vector<zf::RadioOut>& msgs) {
             for (const zf::RadioOut& msg : msgs) {
+                if (llm.enabled() && !msg.kind.empty() && !zf::persona_path(msg.faction).empty()) {
+                    llm.submit({msg.faction, build_system_prompt(msg.faction, db),
+                                msg.context + " Rodzaj wypowiedzi: " + msg.kind + ".",
+                                msg.text, msg.color, msg.priority});
+                    continue;
+                }
+                if (msg.text.empty()) {
+                    continue;
+                }
                 commands.write_radio_message(msg.faction, msg.text, msg.color, msg.priority);
                 std::cout << "[brain] radio [" << msg.faction << "]: " << msg.text << "\n";
             }
@@ -227,6 +255,13 @@ int main(int argc, char** argv) {
                 }
             }
             send_all(engine.tick(cfg, now));
+
+            // Gotowe wypowiedzi z wątku LLM (albo fallbacki po nieudanej generacji).
+            for (const zf::LlmResult& res : llm.poll_results()) {
+                commands.write_radio_message(res.faction, res.text, res.color, res.priority);
+                std::cout << "[brain] radio" << (res.from_llm ? " (LLM)" : " (fallback)") << " ["
+                          << res.faction << "]: " << res.text << "\n";
+            }
 
             if (!once) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(cfg.poll_ms));
