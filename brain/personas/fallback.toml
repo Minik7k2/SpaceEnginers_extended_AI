@@ -1,0 +1,18 @@
+# Szablony radiowe bez LLM (tryb --mock-llm i awarie). {zmienne} podstawia silnik.
+
+[HEL]
+grozba = "Szanowny kontrahencie, odnotowano incydent. Wdrażamy korektę warunków współpracy."
+oferta = "Korporacja Helion przedstawia ofertę: {oferta}. Oczekujemy decyzji."
+neutral = "Helion potwierdza odbiór transmisji."
+
+[KRW]
+grozba = "Znowu ty?! Masz {sekundy} sekund, żeby spierdalać z naszego sektora."
+okup = "Dobra, słuchaj. {kwota} kredytów i zapominamy. Na razie."
+kpina = "Ha! Widziałem lepszych pilotów w kostnicy."
+neutral = "[SZUM] ...Krwawa Ręka słyszy wszystko..."
+
+[WGR]
+prosba = "Ej, słuchaj... piraci łażą koło naszego konwoju. Pomożesz? Nie zapomnimy."
+dzieki = "No i to rozumiem! Urobek z nami zawsze po taniości, słowo."
+zal = "Cholera... nie spodziewaliśmy się tego po tobie."
+neutral = "Szychta leci, hałda rośnie. Czego trzeba?"

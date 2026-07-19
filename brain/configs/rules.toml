@@ -1,0 +1,39 @@
+# Reguły świata (hot-reload). Świat MŚCIWY.
+
+[llm]
+model_path = "models/qwen2.5-3b-instruct-q4_k_m.gguf"
+use_gpu = true          # false => CPU (gdy SE zjada VRAM)
+max_chars = 200
+
+[bridge]
+storage_dir = ""        # ścieżka do storage moda — uzupełnij
+poll_ms = 500
+
+[relacje]
+prog_sojusznik = 40
+prog_wrogi = -30
+prog_wojna = -60
+histereza_wyjscie_z_wojny = -50
+dryf_pkt = 1
+dryf_co_minut = 120
+
+[zmiany]
+ostrzal_min = -5
+ostrzal_max = -15
+zniszczenie_statku = -30
+zniszczenie_stacji = -50
+sufit_po_zniszczeniu_stacji = 20
+handel_min = 1
+handel_max = 3
+kontrakt_min = 10
+kontrakt_max = 20
+atak_na_wroga_bonus = 5
+
+[tick]
+co_minut = 4
+szansa_zdarzenia_losowego = 0.35
+budzet_akcji_na_tick = 1
+
+[radio]
+limit_na_frakcje_na_min = 1
+ttl_sekund = 120
