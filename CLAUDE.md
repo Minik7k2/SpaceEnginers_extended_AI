@@ -69,9 +69,13 @@ docs/protocol.md                # spec mostka JSONL
 
 - **Etap 0** ✅ struktura repo, ten plik, spec protokołu, schema, persony.
   Pozostało ręcznie: instalacja MES z Workshopu, model GGUF, submoduł llama.cpp.
-- **Etap 1 — most:** mod pisze `session_start`+`heartbeat`+`chat_message`;
+- **Etap 1 — most:** ✅ mod pisze `session_start`+`heartbeat`+`chat_message`;
   brain (bez LLM) czyta, loguje, odpisuje testowe `radio_message`; mod wyświetla.
   Kryterium: napisz coś na czacie → po <3 s wraca echo jako [RADIO | TEST].
+  Zweryfikowane bez SE: `brain/tests` (ctest) + testy mostka moda uruchamiane
+  przez mono/mcs + test międzyjęzykowy (prawdziwy `zf_brain` czytający plik
+  napisany przez prawdziwy `EventWriter` moda). Pozostało ręcznie: sprawdzenie
+  w samej grze (kompilacja przeciw prawdziwemu SE SDK — nie było tu dostępne).
 - **Etap 2 — zdarzenia bojowe:** handler MyDamageInformation, resolver
   atrybucji (broń→siatka→BigOwners→gracz), agregacja combat_hit 3 s,
   grid_destroyed (MarkedForClose + świeże dmg; odróżnić od despawnu MES),

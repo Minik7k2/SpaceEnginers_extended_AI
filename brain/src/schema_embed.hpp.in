@@ -1,0 +1,7 @@
+#pragma once
+
+namespace zf {
+
+inline constexpr const char* kSchemaSql = R"SQL(@SCHEMA_SQL_CONTENT@)SQL";
+
+} // namespace zf

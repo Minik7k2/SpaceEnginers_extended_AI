@@ -1,0 +1,21 @@
+# brain (C++)
+brain/build/
+brain/models/
+brain/third_party/llama.cpp/
+brain/state/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# mostek JSONL — dane runtime, nie kod
+storage/
+*.jsonl
+
+# mod (C#)
+mod/bin/
+mod/obj/
+
+# ogólne
+*.log
+.vs/
+.vscode/
