@@ -81,10 +81,16 @@ docs/protocol.md                # spec mostka JSONL
   (→ DateTime) oraz crash gry przez trzymany uchwyt zapisu commands.jsonl
   (ReadFileInWorldStorage nie otwiera pliku z cudzym uchwytem zapisu — brain
   otwiera plik tylko na czas dopisania linii, mod czyta w try/catch).
-- **Etap 2 — zdarzenia bojowe:** handler MyDamageInformation, resolver
+- **Etap 2 — zdarzenia bojowe:** ✅ handler MyDamageInformation, resolver
   atrybucji (broń→siatka→BigOwners→gracz), agregacja combat_hit 3 s,
   grid_destroyed (MarkedForClose + świeże dmg; odróżnić od despawnu MES),
-  proximity z histerezą 3/4 km.
+  proximity z histerezą 3/4 km. Zweryfikowane W GRZE 2026-07-19: proximity
+  enter/exit, combat_hit (broń ręczna i Explosion), grid_destroyed.
+  Do zrobienia przy okazji: kontrtest, że despawn MES NIE generuje
+  grid_destroyed. Po drodze naprawiony mostek braina: offsety linii
+  kluczowane pełną ścieżką (offset starego świata przesłaniał krótszy
+  events.jsonl nowego → „brak odczytów") + config per maszyna
+  (rules.local.toml).
 - **Etap 3 — silnik:** SQLite wg schema.sql, reguły relacji, tick, maszyna
   stanów, tryb `--mock-llm` (same szablony fallback).
 - **Etap 4 — głos:** integracja llama.cpp, GBNF, karty person, walidacja+retry.
