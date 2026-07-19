@@ -1,5 +1,6 @@
 #include "db.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <sqlite3.h>
 #include <stdexcept>
@@ -83,6 +84,125 @@ std::int64_t Db::next_commands_seq() {
     const std::int64_t next = current + 1;
     set_line_offset(kCommandsSeqKey, next);
     return next;
+}
+
+namespace {
+
+// Wspólny szkielet: przygotuj, zbinduj tekst/liczby, wykonaj do SQLITE_DONE.
+class Stmt {
+public:
+    Stmt(sqlite3* handle, const char* sql) {
+        if (sqlite3_prepare_v2(handle, sql, -1, &stmt_, nullptr) != SQLITE_OK) {
+            throw std::runtime_error(std::string("sqlite prepare nieudane: ") + sql);
+        }
+    }
+    ~Stmt() { sqlite3_finalize(stmt_); }
+    Stmt(const Stmt&) = delete;
+    Stmt& operator=(const Stmt&) = delete;
+
+    Stmt& text(int idx, const std::string& v) {
+        sqlite3_bind_text(stmt_, idx, v.c_str(), -1, SQLITE_TRANSIENT);
+        return *this;
+    }
+    Stmt& num(int idx, double v) {
+        sqlite3_bind_double(stmt_, idx, v);
+        return *this;
+    }
+    Stmt& i64(int idx, std::int64_t v) {
+        sqlite3_bind_int64(stmt_, idx, v);
+        return *this;
+    }
+    bool row() { return sqlite3_step(stmt_) == SQLITE_ROW; }
+    void done() {
+        if (sqlite3_step(stmt_) != SQLITE_DONE) {
+            throw std::runtime_error("sqlite step nieudane");
+        }
+    }
+    std::string col_text(int idx) const {
+        const unsigned char* v = sqlite3_column_text(stmt_, idx);
+        return v != nullptr ? reinterpret_cast<const char*>(v) : "";
+    }
+    double col_num(int idx) const { return sqlite3_column_double(stmt_, idx); }
+    int col_int(int idx) const { return sqlite3_column_int(stmt_, idx); }
+
+private:
+    sqlite3_stmt* stmt_ = nullptr;
+};
+
+} // namespace
+
+void Db::ensure_faction(const std::string& tag, const std::string& name) {
+    Stmt s(handle_, "INSERT INTO factions (tag, name) VALUES (?, ?) ON CONFLICT(tag) DO NOTHING;");
+    s.text(1, tag).text(2, name).done();
+}
+
+std::vector<FactionRow> Db::list_factions() const {
+    Stmt s(handle_, "SELECT tag, name, state, action_budget FROM factions ORDER BY tag;");
+    std::vector<FactionRow> rows;
+    while (s.row()) {
+        rows.push_back({s.col_text(0), s.col_text(1), s.col_text(2), s.col_int(3)});
+    }
+    return rows;
+}
+
+void Db::set_faction_state(const std::string& tag, const std::string& state) {
+    Stmt s(handle_, "UPDATE factions SET state = ? WHERE tag = ?;");
+    s.text(1, state).text(2, tag).done();
+}
+
+void Db::set_faction_budget(const std::string& tag, int budget) {
+    Stmt s(handle_, "UPDATE factions SET action_budget = ? WHERE tag = ?;");
+    s.i64(1, budget).text(2, tag).done();
+}
+
+RelationRow Db::get_relation(const std::string& a, const std::string& b) const {
+    Stmt s(handle_, "SELECT value, cap FROM relations WHERE a = ? AND b = ?;");
+    s.text(1, a).text(2, b);
+    RelationRow row;
+    if (s.row()) {
+        row.value = s.col_num(0);
+        row.cap = s.col_num(1);
+    }
+    return row;
+}
+
+double Db::adjust_relation(const std::string& a, const std::string& b, double delta) {
+    const RelationRow current = get_relation(a, b);
+    double next = current.value + delta;
+    next = std::min(next, current.cap);
+    next = std::max(next, -100.0);
+
+    Stmt s(handle_,
+           "INSERT INTO relations (a, b, value, cap) VALUES (?, ?, ?, ?) "
+           "ON CONFLICT(a, b) DO UPDATE SET value = excluded.value;");
+    s.text(1, a).text(2, b).num(3, next).num(4, current.cap).done();
+    return next;
+}
+
+void Db::lower_relation_cap(const std::string& a, const std::string& b, double cap) {
+    const RelationRow current = get_relation(a, b);
+    const double next_cap = std::min(current.cap, cap);
+    const double next_value = std::min(current.value, next_cap);
+    Stmt s(handle_,
+           "INSERT INTO relations (a, b, value, cap) VALUES (?, ?, ?, ?) "
+           "ON CONFLICT(a, b) DO UPDATE SET value = excluded.value, cap = excluded.cap;");
+    s.text(1, a).text(2, b).num(3, next_value).num(4, next_cap).done();
+}
+
+std::vector<std::pair<std::string, std::string>> Db::list_relation_pairs() const {
+    Stmt s(handle_, "SELECT a, b FROM relations ORDER BY a, b;");
+    std::vector<std::pair<std::string, std::string>> pairs;
+    while (s.row()) {
+        pairs.emplace_back(s.col_text(0), s.col_text(1));
+    }
+    return pairs;
+}
+
+void Db::add_memory(std::int64_t ts, const std::string& faction, const std::string& type,
+                    int weight, const std::string& summary) {
+    Stmt s(handle_,
+           "INSERT INTO events (ts, faction, type, weight, summary) VALUES (?, ?, ?, ?, ?);");
+    s.i64(1, ts).text(2, faction).text(3, type).i64(4, weight).text(5, summary).done();
 }
 
 } // namespace zf

@@ -42,6 +42,8 @@ add_library(zf_core STATIC
   src/config.cpp
   src/db.cpp
   src/bridge.cpp
+  src/engine.cpp
+  src/fallback.cpp
 )
 
 target_include_directories(zf_core PUBLIC

@@ -130,10 +130,24 @@ namespace ZyweFrakcje
                 return;
             }
 
+            if (messageText.Trim().Equals("/zf rel", StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                _events.WriteDebugCommand("rel");
+                return;
+            }
+
+            if (messageText.Trim().Equals("/zf tick", StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                _events.WriteDebugCommand("tick");
+                return;
+            }
+
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
-                // rel/tick wymagają silnika relacji (Etap 3) — jeszcze nie tutaj.
                 sendToOthers = false;
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf spawn <frakcja>, /zf event <json>");
                 return;
             }
 

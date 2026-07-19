@@ -142,6 +142,15 @@ namespace ZyweFrakcje
             WriteLine("proximity", data);
         }
 
+        /// <summary>Komendy testowe "/zf rel" i "/zf tick" — brain odpowiada przez radio_message.</summary>
+        public void WriteDebugCommand(string cmd)
+        {
+            string data = new Json.Builder()
+                .Add("cmd", cmd)
+                .Build();
+            WriteLine("debug_command", data);
+        }
+
         /// <summary>Komenda czatu "/zf event {"type":"...","data":{...}}" — testy mostka bez SE.</summary>
         public void WriteRawEvent(string json)
         {
