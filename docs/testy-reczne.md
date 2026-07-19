@@ -1,4 +1,4 @@
-# Testy ręczne w grze — Etapy 1–3
+# Testy ręczne w grze — Etapy 1–4
 
 Przygotowanie: uruchom świat z modami SE_ZyweFrakcje + MES, obok odpal
 `brain\cmake-build-debug\zf_brain.exe` (konsola musi pokazać `[brain] start,
@@ -53,6 +53,24 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 - [ ] **C2. Szablony:** zmień tekst w `brain/personas/fallback.toml`, zapisz →
   konsola `szablony fallback: 3 frakcji`; `@KRW ...` odpowiada nowym tekstem.
   Cofnij zmianę po teście.
+
+## D. Głos LLM (Etap 4)
+
+- [ ] **D1. Start modelu:** konsola braina przy starcie pokazuje `LLM gotowy:
+  models/qwen2.5-3b-instruct-q4_k_m.gguf (CPU)`. Jeśli zamiast tego jest
+  `model LLM nieobecny` — brak pliku modelu w brain/models/.
+- [ ] **D2. Rozmowa z personą:** `@KRW oddaj wrak` → odpowiedź pisana przez
+  model w stylu pirata (za każdym razem inna). Na CPU pierwsza odpowiedź może
+  zająć do ~30 s, kolejne szybciej. `@HEL` — korpomowa, `@WGR` — górniczy luz.
+- [ ] **D3. Reakcje bojowe głosem LLM:** ostrzelaj statek HEL/KRW/WGR (spawn
+  własnej siatki z ich frakcją albo poczekaj na Etap 5 spawny) — groźba
+  z kontekstem sytuacji, nie sztywny szablon. Konsola: `radio (LLM) [...]`.
+- [ ] **D4. Fallback:** zatrzymaj brain, w `rules.local.toml` ustaw
+  `[llm] model_path = "brak.gguf"`, odpal → `@KRW test` odpowiada sztywnym
+  szablonem (konsola: `radio [KRW]` bez dopisku LLM). Cofnij zmianę.
+- [ ] **D5. Pamięć w prompcie:** po walce z KRW napisz `@KRW co o mnie
+  myślisz?` → odpowiedź powinna nawiązywać do ostrzału/zniszczeń (model
+  dostaje ostatnie 5 wpisów pamięci frakcji).
 
 ## Znane zachowania (to nie błędy)
 

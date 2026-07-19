@@ -97,7 +97,10 @@ docs/protocol.md                # spec mostka JSONL
 - **Etap 3 — silnik:** ✅ (kod + testy + --replay na prawdziwej sesji; do
   weryfikacji w grze wg docs/testy-reczne.md) SQLite wg schema.sql, reguły
   relacji, tick, maszyna stanów, tryb `--mock-llm` (same szablony fallback).
-- **Etap 4 — głos:** integracja llama.cpp, GBNF, karty person, walidacja+retry.
+- **Etap 4 — głos:** ✅ (kod + smoke test na sucho: @KRW → odpowiedź modelu
+  w commands.jsonl; do weryfikacji w grze wg docs/testy-reczne.md sekcja D)
+  integracja llama.cpp, GBNF, karty person, walidacja+retry. Wątek LlmWorker,
+  prompt = persona + pamięć frakcji + kontekst z silnika, fallback na szablony.
 - **Etap 5 — ręce:** radio na czacie (format `[RADIO | NAZWA]`, kolor frakcji,
   limit 1/min/frakcję poza walką, kolejka priorytetowa, TTL 2 min),
   spawn_request → MES API, adresowanie czatu (@frakcja / zasięg / szum).
