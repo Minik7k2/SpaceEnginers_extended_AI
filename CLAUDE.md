@@ -74,8 +74,11 @@ docs/protocol.md                # spec mostka JSONL
   Kryterium: napisz coś na czacie → po <3 s wraca echo jako [RADIO | TEST].
   Zweryfikowane bez SE: `brain/tests` (ctest) + testy mostka moda uruchamiane
   przez mono/mcs + test międzyjęzykowy (prawdziwy `zf_brain` czytający plik
-  napisany przez prawdziwy `EventWriter` moda). Pozostało ręcznie: sprawdzenie
-  w samej grze (kompilacja przeciw prawdziwemu SE SDK — nie było tu dostępne).
+  napisany przez prawdziwy `EventWriter` moda). Zweryfikowane W GRZE 2026-07-19
+  (echo ~1 s) po dwóch naprawach: DateTimeOffset poza whitelistą ModAPI
+  (→ DateTime) oraz crash gry przez trzymany uchwyt zapisu commands.jsonl
+  (ReadFileInWorldStorage nie otwiera pliku z cudzym uchwytem zapisu — brain
+  otwiera plik tylko na czas dopisania linii, mod czyta w try/catch).
 - **Etap 2 — zdarzenia bojowe:** handler MyDamageInformation, resolver
   atrybucji (broń→siatka→BigOwners→gracz), agregacja combat_hit 3 s,
   grid_destroyed (MarkedForClose + świeże dmg; odróżnić od despawnu MES),

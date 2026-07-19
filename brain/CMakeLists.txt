@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(zf_brain CXX)
+project(zf_brain C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,23 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
-find_package(SQLite3 REQUIRED)
+# Systemowy SQLite3 jeśli jest; inaczej amalgamacja z third_party/sqlite3
+# (MinGW z reguły nie ma nagłówków deweloperskich SQLite).
+find_package(SQLite3 QUIET)
+if(NOT SQLite3_FOUND)
+  add_library(sqlite3_vendored STATIC third_party/sqlite3/sqlite3.c)
+  target_include_directories(sqlite3_vendored PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite3
+  )
+  # Kod third-party: nie egzekwujemy naszych warningów-jako-błędów.
+  if(MSVC)
+    target_compile_options(sqlite3_vendored PRIVATE /W0 /WX-)
+  else()
+    target_compile_options(sqlite3_vendored PRIVATE -w)
+  endif()
+  add_library(SQLite::SQLite3 ALIAS sqlite3_vendored)
+  message(STATUS "SQLite3: uzywam amalgamacji z third_party/sqlite3")
+endif()
 
 # db/schema.sql jest jedynym źródłem prawdy dla schematu; wbijamy go do binarki,
 # żeby brain nie zależał od względnej ścieżki do repo w runtime.

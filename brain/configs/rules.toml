@@ -6,7 +6,7 @@ use_gpu = true          # false => CPU (gdy SE zjada VRAM)
 max_chars = 200
 
 [bridge]
-storage_dir = ""        # ścieżka do storage moda — uzupełnij
+storage_dir = "C:/Users/Jarvis/AppData/Roaming/SpaceEngineers/Saves/76561198131324169/System Gwiezdny 2026-07-19 19-22/Storage/SE_ZyweFrakcje_ZyweFrakcje"
 poll_ms = 500
 db_path = "state/zf_state.sqlite3"   # ścieżka do bazy brain (offsety, relacje)
 rotate_bytes = 5242880               # 5 MB, próg rotacji plików JSONL

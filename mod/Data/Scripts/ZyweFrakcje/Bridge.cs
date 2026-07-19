@@ -125,10 +125,13 @@ namespace ZyweFrakcje
             WriteLine((string)typeObj, Json.Stringify(dataObj ?? new Dictionary<string, object>()));
         }
 
+        // DateTimeOffset jest poza whitelistą ModAPI — epokę liczymy z DateTime.
+        private static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
         private void WriteLine(string type, string dataJson)
         {
             _seq++;
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long ts = (long)(DateTime.UtcNow - UnixEpoch).TotalMilliseconds;
             string line = new Json.Builder()
                 .Add("v", 1L)
                 .Add("seq", _seq)
@@ -227,9 +230,18 @@ namespace ZyweFrakcje
                 string fileName = BridgeNaming.RotatedFileName("commands", idx);
 
                 string content;
-                using (TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(fileName, _owner))
+                try
                 {
-                    content = reader.ReadToEnd();
+                    using (TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(fileName, _owner))
+                    {
+                        content = reader.ReadToEnd();
+                    }
+                }
+                catch (Exception)
+                {
+                    // Wyścig z zapisem po stronie brainu (plik chwilowo niedostępny) —
+                    // nie wywalamy gry, wracamy w następnym pollu za ~60 tików.
+                    continue;
                 }
                 List<string> lines = BridgeNaming.SplitCompleteLines(content);
 

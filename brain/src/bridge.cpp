@@ -124,33 +124,32 @@ CommandWriter::CommandWriter(std::string storage_dir, Db& db, std::uint64_t rota
         }
         current_index_ = idx;
     }
-    open_active_file();
+    std::error_code ec;
+    const fs::path path = active_path();
+    current_bytes_ = fs::exists(path) ? fs::file_size(path, ec) : 0;
 }
 
-void CommandWriter::open_active_file() {
-    const fs::path path = fs::path(storage_dir_) / rotated_filename("commands", current_index_);
-    std::error_code ec;
-    current_bytes_ = fs::exists(path) ? fs::file_size(path, ec) : 0;
-    out_.open(path, std::ios::app | std::ios::binary);
-    if (!out_) {
-        throw std::runtime_error("nie można otworzyć do zapisu: " + path.string());
-    }
+std::string CommandWriter::active_path() const {
+    return (fs::path(storage_dir_) / rotated_filename("commands", current_index_)).string();
 }
 
 void CommandWriter::rotate_if_needed() {
     if (current_bytes_ < rotate_bytes_) {
         return;
     }
-    out_.close();
     ++current_index_;
     current_bytes_ = 0;
-    open_active_file();
 }
 
 void CommandWriter::write_line(const nlohmann::json& line) {
     const std::string text = line.dump() + "\n";
-    out_ << text;
-    out_.flush();
+    std::ofstream out(active_path(), std::ios::app | std::ios::binary);
+    if (!out) {
+        std::cerr << "[brain] nie można dopisać do " << active_path() << " — komenda pominięta\n";
+        return;
+    }
+    out << text;
+    out.close();
     current_bytes_ += text.size();
     rotate_if_needed();
 }

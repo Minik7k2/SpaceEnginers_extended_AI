@@ -32,6 +32,8 @@ private:
 };
 
 // Pisze commands.jsonl (+ rotacja po rotate_bytes) czytane przez mod co ~60 tików.
+// Plik otwierany tylko na czas dopisania linii: trzymanie uchwytu do zapisu blokuje
+// ReadFileInWorldStorage po stronie moda (sharing violation → crash gry).
 class CommandWriter {
 public:
     CommandWriter(std::string storage_dir, Db& db, std::uint64_t rotate_bytes);
@@ -42,14 +44,13 @@ public:
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();
-    void open_active_file();
+    std::string active_path() const;
 
     std::string storage_dir_;
     Db& db_;
     std::uint64_t rotate_bytes_;
     int current_index_ = 1;
     std::uint64_t current_bytes_ = 0;
-    std::ofstream out_;
 };
 
 } // namespace zf

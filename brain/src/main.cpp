@@ -2,9 +2,20 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <thread>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include "bridge.hpp"
 #include "config.hpp"
@@ -13,6 +24,34 @@
 namespace {
 
 std::atomic<bool> g_should_stop{false};
+
+// CLion i konsola startują z różnych katalogów roboczych, a config (i ścieżki
+// względne w nim, np. db_path) zakładają katalog brain/. Gdy configu nie ma
+// w bieżącym katalogu, szukamy go w górę od położenia binarki i tam się
+// przenosimy — binarka nie zależy wtedy od miejsca uruchomienia.
+void anchor_to_config_dir(const char* argv0, const std::string& config_rel) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (fs::exists(config_rel, ec)) {
+        return;
+    }
+    const fs::path exe = fs::absolute(fs::path(argv0), ec);
+    if (ec) {
+        return;
+    }
+    for (fs::path dir = exe.parent_path(); !dir.empty(); dir = dir.parent_path()) {
+        if (fs::exists(dir / config_rel, ec)) {
+            fs::current_path(dir, ec);
+            if (!ec) {
+                std::cout << "[brain] katalog roboczy: " << dir.string() << "\n";
+            }
+            return;
+        }
+        if (dir == dir.root_path()) {
+            return;
+        }
+    }
+}
 
 void handle_signal(int) {
     g_should_stop.store(true);
@@ -53,8 +92,14 @@ int main(int argc, char** argv) {
         }
     }
 
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
+
+    anchor_to_config_dir(argv[0], config_path);
 
     try {
         const zf::Config config = zf::load_config(config_path);
