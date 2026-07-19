@@ -1,4 +1,5 @@
 # brain (C++)
+brain/configs/*.local.toml
 brain/build/
 brain/models/
 brain/third_party/llama.cpp/

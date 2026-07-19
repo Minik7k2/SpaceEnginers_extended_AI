@@ -18,7 +18,12 @@ struct Config {
     int llm_max_chars = 200;
 };
 
-// Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola [bridge].storage_dir.
+// Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola
+// [bridge].storage_dir. Po wczytaniu pliku głównego nakłada wartości z pliku
+// lokalnego maszyny (rules.local.toml obok rules.toml, poza gitem), jeśli istnieje.
 Config load_config(const std::string& path);
+
+// "configs/rules.toml" -> "configs/rules.local.toml"
+std::string local_config_path(const std::string& path);
 
 } // namespace zf

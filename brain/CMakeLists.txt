@@ -55,5 +55,20 @@ target_link_libraries(zf_core PUBLIC SQLite::SQLite3)
 add_executable(zf_brain src/main.cpp)
 target_link_libraries(zf_brain PRIVATE zf_core)
 
+# MinGW: runtime statycznie, inaczej exe uruchomiony poza CLionem pada bez
+# komunikatu (STATUS_DLL_NOT_FOUND — libstdc++-6.dll itd. nie są w PATH).
+# Pełny -static nie linkuje się z MinGW bundlowanym w CLion (braki w libpthread.a).
+if(MINGW)
+  target_link_options(zf_brain PRIVATE -static-libstdc++ -static-libgcc)
+  # winpthread nie da się zlinkować statycznie w tym bundlu — kopiujemy DLL obok exe.
+  get_filename_component(ZF_MINGW_BIN ${CMAKE_CXX_COMPILER} DIRECTORY)
+  if(EXISTS "${ZF_MINGW_BIN}/libwinpthread-1.dll")
+    add_custom_command(TARGET zf_brain POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ZF_MINGW_BIN}/libwinpthread-1.dll" "$<TARGET_FILE_DIR:zf_brain>"
+    )
+  endif()
+endif()
+
 enable_testing()
 add_subdirectory(tests)

@@ -6,7 +6,9 @@ use_gpu = true          # false => CPU (gdy SE zjada VRAM)
 max_chars = 200
 
 [bridge]
-storage_dir = "C:/Users/Jarvis/AppData/Roaming/SpaceEngineers/Saves/76561198131324169/System Gwiezdny 2026-07-19 19-22/Storage/SE_ZyweFrakcje_ZyweFrakcje"
+# storage_dir jest per maszyna — ustaw go w rules.local.toml (obok tego pliku,
+# poza gitem). Wartości z rules.local.toml nadpisują te z rules.toml.
+storage_dir = ""
 poll_ms = 500
 db_path = "state/zf_state.sqlite3"   # ścieżka do bazy brain (offsety, relacje)
 rotate_bytes = 5242880               # 5 MB, próg rotacji plików JSONL

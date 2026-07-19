@@ -14,6 +14,8 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
 - **Mózg:** osobny proces **C++20** (`brain/`), llama.cpp linkowany jako biblioteka
   (submoduł, backend CUDA), SQLite przez C API, nlohmann/json, toml++ do configów.
   Configi i persony hot-reloadowane (mtime check co tick pętli).
+  Ścieżki per maszyna (np. `[bridge].storage_dir`) w `brain/configs/rules.local.toml`
+  (poza gitem) — nadpisuje wartości z `rules.toml`; każdy komputer ma własny.
 - **Most:** pliki JSONL w storage moda (append-only).
   - `events.jsonl` — mod pisze, brain czyta.
   - `commands.jsonl` — brain pisze, mod czyta co ~60 tików.
