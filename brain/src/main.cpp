@@ -57,8 +57,20 @@ void handle_signal(int) {
     g_should_stop.store(true);
 }
 
+// Bezpieczne odczyty pól data: value() nlohmanna rzuca przy polu obecnym-ale-null,
+// a w pętli głównej mostka wyjątków być nie może.
+std::string data_str(const zf::Event& ev, const char* key) {
+    return ev.data.contains(key) && ev.data[key].is_string() ? ev.data[key].get<std::string>()
+                                                             : std::string{};
+}
+
+double data_num(const zf::Event& ev, const char* key) {
+    return ev.data.contains(key) && ev.data[key].is_number() ? ev.data[key].get<double>() : 0.0;
+}
+
 // Etap 1: mózg bez LLM. Loguje zdarzenia i odpowiada na chat_message testowym
 // echem [RADIO | TEST] — kryterium: <3 s od wiadomości na czacie do echa.
+// Etap 2: zdarzenia bojowe i proximity na razie tylko logujemy — silnik w Etapie 3.
 void handle_event(const zf::Event& ev, zf::CommandWriter& commands) {
     if (ev.type == "session_start") {
         std::cout << "[brain] session_start: świat=" << ev.data.value("world", std::string{})
@@ -69,6 +81,17 @@ void handle_event(const zf::Event& ev, zf::CommandWriter& commands) {
         const std::string text = ev.data.value("text", std::string{});
         std::cout << "[brain] chat_message: \"" << text << "\" -> echo testowe\n";
         commands.write_radio_message("TEST", "Echo: " + text, "white", 0);
+    } else if (ev.type == "combat_hit") {
+        std::cout << "[brain] combat_hit: frakcja=" << data_str(ev, "faction")
+                  << " dmg=" << data_num(ev, "damage") << " trafień=" << data_num(ev, "hits")
+                  << " broń=" << data_str(ev, "weapon") << "\n";
+    } else if (ev.type == "grid_destroyed") {
+        std::cout << "[brain] grid_destroyed: frakcja=" << data_str(ev, "faction")
+                  << " siatka=\"" << data_str(ev, "grid") << "\"\n";
+    } else if (ev.type == "proximity") {
+        std::cout << "[brain] proximity: frakcja=" << data_str(ev, "faction")
+                  << " stan=" << data_str(ev, "state") << " dystans=" << data_num(ev, "dist")
+                  << " m\n";
     } else {
         std::cout << "[brain] pominięto zdarzenie typu \"" << ev.type << "\" (obsługa w kolejnych etapach)\n";
     }

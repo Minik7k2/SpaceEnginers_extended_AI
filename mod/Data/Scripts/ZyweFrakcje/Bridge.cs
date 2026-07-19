@@ -101,6 +101,47 @@ namespace ZyweFrakcje
             WriteLine("chat_message", builder.Build());
         }
 
+        /// <summary>Agregat obrażeń zadanych frakcji przez gracza w oknie 3 s (Etap 2).</summary>
+        public void WriteCombatHit(long attacker, string faction, double damage, int hits, string weapon)
+        {
+            var builder = new Json.Builder();
+            if (attacker == 0)
+            {
+                builder.AddRaw("attacker", "null");
+            }
+            else
+            {
+                builder.Add("attacker", attacker);
+            }
+            string data = builder
+                .Add("faction", faction)
+                .Add("damage", damage)
+                .Add("hits", (long)hits)
+                .Add("weapon", weapon)
+                .Build();
+            WriteLine("combat_hit", data);
+        }
+
+        public void WriteGridDestroyed(string faction, string grid, bool byPlayer)
+        {
+            string data = new Json.Builder()
+                .Add("faction", faction)
+                .Add("grid", grid)
+                .Add("by_player", byPlayer)
+                .Build();
+            WriteLine("grid_destroyed", data);
+        }
+
+        public void WriteProximity(string faction, string state, long dist)
+        {
+            string data = new Json.Builder()
+                .Add("faction", faction)
+                .Add("state", state)
+                .Add("dist", dist)
+                .Build();
+            WriteLine("proximity", data);
+        }
+
         /// <summary>Komenda czatu "/zf event {"type":"...","data":{...}}" — testy mostka bez SE.</summary>
         public void WriteRawEvent(string json)
         {

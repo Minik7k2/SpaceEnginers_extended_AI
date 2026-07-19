@@ -19,3 +19,4 @@ mod/obj/
 *.log
 .vs/
 .vscode/
+.idea/

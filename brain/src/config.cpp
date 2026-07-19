@@ -20,18 +20,20 @@ Config load_config(const std::string& path) {
     if (bridge == nullptr) {
         throw std::runtime_error("config " + path + ": brak sekcji [bridge]");
     }
-    cfg.storage_dir = bridge->at("storage_dir").value_or(std::string{});
+    // Uwaga: at() rzuca przy braku klucza, przez co value_or nigdy by nie zadziałało —
+    // dla kluczy opcjonalnych używamy operator[], defaulty z value_or są wtedy realne.
+    cfg.storage_dir = (*bridge)["storage_dir"].value_or(std::string{});
     if (cfg.storage_dir.empty()) {
         throw std::runtime_error("config " + path + ": [bridge].storage_dir jest puste — uzupełnij ścieżkę do storage moda");
     }
-    cfg.poll_ms = bridge->at("poll_ms").value_or(500);
-    cfg.db_path = bridge->at("db_path").value_or(std::string("state/zf_state.sqlite3"));
-    cfg.rotate_bytes = bridge->at("rotate_bytes").value_or<std::uint64_t>(5 * 1024 * 1024);
+    cfg.poll_ms = (*bridge)["poll_ms"].value_or(500);
+    cfg.db_path = (*bridge)["db_path"].value_or(std::string("state/zf_state.sqlite3"));
+    cfg.rotate_bytes = (*bridge)["rotate_bytes"].value_or<std::uint64_t>(5 * 1024 * 1024);
 
     if (const auto* llm = tbl["llm"].as_table()) {
-        cfg.llm_model_path = llm->at("model_path").value_or(std::string{});
-        cfg.llm_use_gpu = llm->at("use_gpu").value_or(true);
-        cfg.llm_max_chars = llm->at("max_chars").value_or(200);
+        cfg.llm_model_path = (*llm)["model_path"].value_or(std::string{});
+        cfg.llm_use_gpu = (*llm)["use_gpu"].value_or(true);
+        cfg.llm_max_chars = (*llm)["max_chars"].value_or(200);
     }
 
     return cfg;

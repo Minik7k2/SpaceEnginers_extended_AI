@@ -22,6 +22,8 @@ namespace ZyweFrakcje
 
         private EventWriter _events;
         private CommandReader _commands;
+        private CombatTracker _combat;
+        private ProximityWatcher _proximity;
         private int _tick;
 
         public override void LoadData()
@@ -31,11 +33,22 @@ namespace ZyweFrakcje
             MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
         }
 
+        public override void BeforeStart()
+        {
+            // DamageSystem jest dostępny dopiero tu, nie w LoadData.
+            _combat = new CombatTracker(_events);
+            _proximity = new ProximityWatcher(_events);
+        }
+
         protected override void UnloadData()
         {
             if (MyAPIGateway.Utilities != null)
             {
                 MyAPIGateway.Utilities.MessageEntered -= OnMessageEntered;
+            }
+            if (_combat != null)
+            {
+                _combat.Dispose();
             }
             if (_events != null)
             {
@@ -58,6 +71,14 @@ namespace ZyweFrakcje
             if (_tick % CommandsPollEveryTicks == 0)
             {
                 PollCommands();
+            }
+            if (_combat != null)
+            {
+                _combat.Update();
+            }
+            if (_proximity != null)
+            {
+                _proximity.Update();
             }
         }
 
@@ -101,10 +122,24 @@ namespace ZyweFrakcje
                 return;
             }
 
+            const string spawnPrefix = "/zf spawn";
+            if (messageText.StartsWith(spawnPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                TestSpawner.HandleCommand(messageText.Substring(spawnPrefix.Length));
+                return;
+            }
+
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
-                // rel/tick/spawn wymagają silnika relacji (Etap 3) i MES (Etap 5) — jeszcze nie tutaj.
+                // rel/tick wymagają silnika relacji (Etap 3) — jeszcze nie tutaj.
                 sendToOthers = false;
+                return;
+            }
+
+            if (messageText.StartsWith("/"))
+            {
+                // Komendy innych modów (np. /MES.*) — nie są rozmową, nie idą do brainu.
                 return;
             }
 
