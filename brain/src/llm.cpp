@@ -97,6 +97,9 @@ struct LlmWorker::Impl {
         llama_context_params cparams = llama_context_default_params();
         cparams.n_ctx = 2048;
         cparams.n_batch = 512;
+        // AUTO probuje Flash Attention realnym obliczeniem przy starcie (świeży,
+        // niepewny kod w tej wersji llama.cpp) — wyłączamy jawnie zamiast zgadywać.
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
         const unsigned hw = std::thread::hardware_concurrency();
         const int threads = static_cast<int>(hw > 2 ? hw / 2 : 2);
         cparams.n_threads = threads;
