@@ -1,6 +1,7 @@
 #include "llm.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
@@ -101,7 +102,8 @@ struct LlmWorker::Impl {
         // niepewny kod w tej wersji llama.cpp) — wyłączamy jawnie zamiast zgadywać.
         cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
         const unsigned hw = std::thread::hardware_concurrency();
-        const int threads = static_cast<int>(hw > 2 ? hw / 2 : 2);
+        const int threads = cfg.llm_threads > 0 ? cfg.llm_threads
+                                                 : static_cast<int>(hw > 2 ? hw / 2 : 2);
         cparams.n_threads = threads;
         cparams.n_threads_batch = threads;
         ctx = llama_init_from_model(model, cparams);
@@ -155,6 +157,7 @@ struct LlmWorker::Impl {
     // Qwen2.5 mówi ChatML-em; szablon składamy ręcznie (parse_special przy tokenizacji).
     bool generate(const std::string& system_prompt, const std::string& user_prompt,
                   std::uint32_t seed, std::string& out_text) {
+        const auto t_start = std::chrono::steady_clock::now();
         const std::string prompt = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
                                    "<|im_start|>user\n" + user_prompt + "<|im_end|>\n" +
                                    "<|im_start|>assistant\n";
@@ -181,7 +184,9 @@ struct LlmWorker::Impl {
         if (llama_decode(ctx, llama_batch_get_one(tokens.data(), static_cast<int32_t>(tokens.size()))) != 0) {
             ok = false;
         }
+        const auto t_prefill = std::chrono::steady_clock::now();
 
+        int generated_tokens = 0;
         for (int i = 0; ok && i < 160; ++i) {
             llama_token tok = llama_sampler_sample(chain, ctx, -1);
             if (llama_vocab_is_eog(vocab, tok)) {
@@ -192,11 +197,23 @@ struct LlmWorker::Impl {
             if (len > 0) {
                 raw.append(piece, static_cast<std::size_t>(len));
             }
+            ++generated_tokens;
             if (llama_decode(ctx, llama_batch_get_one(&tok, 1)) != 0) {
                 ok = false;
             }
         }
         llama_sampler_free(chain);
+
+        // Diagnostyka wydajności (tymczasowa, na potrzeby zbadania wolnych odpowiedzi
+        // przy SE działającym równolegle) — usunąć albo wyciszyć po zebraniu liczb.
+        const auto t_end = std::chrono::steady_clock::now();
+        const double prefill_ms = std::chrono::duration<double, std::milli>(t_prefill - t_start).count();
+        const double decode_ms = std::chrono::duration<double, std::milli>(t_end - t_prefill).count();
+        const double tok_per_s = generated_tokens > 0 ? generated_tokens / (decode_ms / 1000.0) : 0.0;
+        std::cerr << "[brain] LLM czas: prompt=" << n_tokens << " tok (prefill " << prefill_ms
+                  << " ms), generacja=" << generated_tokens << " tok w " << decode_ms << " ms ("
+                  << tok_per_s << " tok/s), razem=" << (prefill_ms + decode_ms) << " ms\n";
+
         if (!ok) {
             return false;
         }

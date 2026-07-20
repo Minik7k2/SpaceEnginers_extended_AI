@@ -16,6 +16,7 @@ struct Config {
     std::string llm_model_path;
     bool llm_use_gpu = true;
     int llm_max_chars = 200;
+    int llm_threads = 0; // 0 = auto (połowa wątków sprzętowych)
 
     // [relacje]
     double prog_sojusznik = 40;

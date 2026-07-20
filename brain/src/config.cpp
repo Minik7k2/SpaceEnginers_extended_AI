@@ -27,6 +27,7 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.llm_model_path = (*llm)["model_path"].value_or(cfg.llm_model_path);
         cfg.llm_use_gpu = (*llm)["use_gpu"].value_or(cfg.llm_use_gpu);
         cfg.llm_max_chars = (*llm)["max_chars"].value_or(cfg.llm_max_chars);
+        cfg.llm_threads = (*llm)["threads"].value_or(cfg.llm_threads);
     }
 
     if (const auto* rel = tbl["relacje"].as_table()) {
