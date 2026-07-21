@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<!-- Frakcje NPC moda ZyweFrakcje (Etap 5). Tagi 3-znakowe zgodne z brainem/personami/
+     protokołem (HEL/KRW/WGR). IsDefault=true => frakcja powstaje przy tworzeniu świata,
+     dzięki czemu jej FounderId istnieje i statki da się spawnować na jej własność.
+     UWAGA: IsDefault działa przy GENEROWANIU świata — na już istniejącym zapisie frakcje
+     mogą się nie pojawić; do weryfikacji odpal NOWY świat testowy.
+     Vanilla reputacja jest ignorowana (mamy własny silnik relacji), ale DefaultRelation
+     steruje wrogością statków na starcie: KRW (piraci) = Enemies, HEL/WGR = Neutral. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Factions>
+
+    <Faction Tag="HEL" Founder="Zarzad Helion">
+      <Id>
+        <TypeId>MyObjectBuilder_FactionDefinition</TypeId>
+        <SubtypeId>ZF_Helion</SubtypeId>
+      </Id>
+      <DisplayName>Korporacja Helion</DisplayName>
+      <Description>Korporacja wydobywczo-handlowa. Formalna, wyrachowana, groźby przez eufemizmy.</Description>
+      <IsDefault>true</IsDefault>
+      <DefaultRelation>Neutral</DefaultRelation>
+      <DiscoveredByDefault>true</DiscoveredByDefault>
+      <AcceptHumans>false</AcceptHumans>
+      <AutoAcceptMember>false</AutoAcceptMember>
+    </Faction>
+
+    <Faction Tag="KRW" Founder="Kapitan Krwawej Reki">
+      <Id>
+        <TypeId>MyObjectBuilder_FactionDefinition</TypeId>
+        <SubtypeId>ZF_KrwawaReka</SubtypeId>
+      </Id>
+      <DisplayName>Krwawa Ręka</DisplayName>
+      <Description>Piraci. Klną, biorą okup, szanują siłę, gardzą słabością.</Description>
+      <IsDefault>true</IsDefault>
+      <DefaultRelation>Enemies</DefaultRelation>
+      <DiscoveredByDefault>true</DiscoveredByDefault>
+      <AcceptHumans>false</AcceptHumans>
+      <AutoAcceptMember>false</AutoAcceptMember>
+    </Faction>
+
+    <Faction Tag="WGR" Founder="Starszy Gildii Gorniczej">
+      <Id>
+        <TypeId>MyObjectBuilder_FactionDefinition</TypeId>
+        <SubtypeId>ZF_WolniGornicy</SubtypeId>
+      </Id>
+      <DisplayName>Wolni Górnicy</DisplayName>
+      <Description>Niezależna gildia górnicza. Swojska, lojalna wobec pomocnych, urażona zdradą.</Description>
+      <IsDefault>true</IsDefault>
+      <DefaultRelation>Neutral</DefaultRelation>
+      <DiscoveredByDefault>true</DiscoveredByDefault>
+      <AcceptHumans>false</AcceptHumans>
+      <AutoAcceptMember>false</AutoAcceptMember>
+    </Faction>
+
+  </Factions>
+</Definitions>
