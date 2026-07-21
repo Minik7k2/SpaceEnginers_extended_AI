@@ -39,5 +39,8 @@ szansa_zdarzenia_losowego = 0.35
 budzet_akcji_na_tick = 1
 
 [radio]
-limit_na_frakcje_na_min = 1
+# 1/min = odstęp 60 s (za długo dla rozmowy — follow-up ginął). 6/min = 10 s:
+# komfortowa rozmowa @frakcja i zjada dublowane wysyłki. Zmiana hot-reload.
+# Dla snappier: 12 = 5 s. Zdarzenia bojowe mają osobny, stały cooldown 15 s.
+limit_na_frakcje_na_min = 6
 ttl_sekund = 120

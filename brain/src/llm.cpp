@@ -84,6 +84,27 @@ struct LlmWorker::Impl {
         }
         max_chars = cfg.llm_max_chars;
 
+        // Wycisz wewnętrzne logi llama.cpp/ggml (zrzut tensorów przy ładowaniu,
+        // "CUDA Graph id ... reused" co token) — zostaw tylko WARN/ERROR, żeby
+        // konsola braina pokazywała nasze [brain] linie, a nie szum. GGML_LOG_CONT
+        // to kontynuacja poprzedniej linii — pokazujemy ją tylko, jeśli pokazaliśmy
+        // tamtą. llama_log_set ustawia też callback ggml (backendy CUDA).
+        llama_log_set(
+            [](ggml_log_level level, const char* text, void*) {
+                static bool last_shown = false;
+                if (level == GGML_LOG_LEVEL_CONT) {
+                    if (last_shown) {
+                        std::cerr << text;
+                    }
+                    return;
+                }
+                last_shown = level >= GGML_LOG_LEVEL_WARN;
+                if (last_shown) {
+                    std::cerr << text;
+                }
+            },
+            nullptr);
+
         llama_backend_init();
 
         llama_model_params mparams = llama_model_default_params();
@@ -121,6 +142,7 @@ struct LlmWorker::Impl {
     void run() {
         while (true) {
             LlmJob job;
+            std::size_t queued = 0;
             {
                 std::unique_lock<std::mutex> lock(mutex);
                 cv.wait(lock, [this] { return stop.load() || !jobs.empty(); });
@@ -129,13 +151,23 @@ struct LlmWorker::Impl {
                 }
                 job = std::move(jobs.front());
                 jobs.pop_front();
+                queued = jobs.size();
             }
 
+            std::cout << "[brain] LLM: generuję odpowiedź dla " << job.faction;
+            if (queued > 0) {
+                std::cout << " (w kolejce jeszcze " << queued << ")";
+            }
+            std::cout << "...\n" << std::flush;
+
             LlmResult result{job.faction, job.fallback_text, job.color, job.priority, false};
-            // 1 retry (CLAUDE.md), potem fallback.
+            // 1 retry (CLAUDE.md), potem fallback. Ziarno LOSOWE
+            // (LLAMA_DEFAULT_SEED) — inaczej ten sam prompt daje w kółko tę samą
+            // odpowiedź (bug D2: „model pisze tą samą wiadomość"). Nowy chain w
+            // generate() losuje ziarno przy każdym wywołaniu, więc i retry różni się.
             for (int attempt = 0; attempt < 2; ++attempt) {
                 std::string text;
-                if (generate(job.system_prompt, job.user_prompt, 0xC0FFEE + attempt, text)) {
+                if (generate(job.system_prompt, job.user_prompt, LLAMA_DEFAULT_SEED, text)) {
                     result.text = text;
                     result.from_llm = true;
                     break;
@@ -158,9 +190,17 @@ struct LlmWorker::Impl {
     bool generate(const std::string& system_prompt, const std::string& user_prompt,
                   std::uint32_t seed, std::string& out_text) {
         const auto t_start = std::chrono::steady_clock::now();
-        const std::string prompt = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n" +
-                                   "<|im_start|>user\n" + user_prompt + "<|im_end|>\n" +
-                                   "<|im_start|>assistant\n";
+        // Anty-echo: małe modele (3B) lubią przepisywać zacytowaną wiadomość
+        // gracza do odpowiedzi (bug: "@krw co o mnie myslisz? ..."). Dokładamy
+        // twardą regułę do promptu systemowego. Gramatyka pilnuje JSON-a, ta
+        // reguła — treści pola "tresc".
+        const std::string prompt =
+            "<|im_start|>system\n" + system_prompt +
+            "\n\nZasady radia: odpowiadasz JEDNYM krótkim zdaniem. Nie powtarzaj ani "
+            "nie cytuj słów gracza. Nie zaczynaj od znaku @ ani od nazwy nadawcy." +
+            "<|im_end|>\n" +
+            "<|im_start|>user\n" + user_prompt + "<|im_end|>\n" +
+            "<|im_start|>assistant\n";
 
         std::vector<llama_token> tokens(prompt.size() + 16);
         const int n_tokens = llama_tokenize(vocab, prompt.c_str(), static_cast<int32_t>(prompt.size()),

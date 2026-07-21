@@ -193,6 +193,10 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
+    // Logi bez buforowania: widoczne natychmiast, także gdy stdout jest
+    // przekierowany do pliku (pełne buforowanie gubi ostatnie linie przy ubiciu
+    // procesu). Wolumen logów jest mały, więc narzut flush-a jest pomijalny.
+    std::cout << std::unitbuf;
 
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);

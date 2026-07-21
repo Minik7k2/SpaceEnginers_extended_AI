@@ -17,11 +17,9 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 - [x] **A3. Combat:** ostrzelaj statek NPC → w konsoli `combat_hit` z bronią
   i frakcją, paczki co ~3 s (nie pojedyncze strzały).
 - [x] **A4. Zniszczenie:** rozwal statek do końca → `grid_destroyed` z nazwą siatki.
-- [ ] **A5. Kontrtest despawnu (zaległość Etapu 2):** spawnij statek, NIE
+- [x] **A5. Kontrtest despawnu (zaległość Etapu 2):** spawnij statek, NIE
   strzelaj, odleć bardzo daleko i poczekaj aż MES go zdespawni → w konsoli
-  braina NIE MOŻE pojawić się `grid_destroyed`. <- Ile trzeba czekać ? 
- <log>[brain] proximity: frakcja=SPRT stan=enter dystans=1559 m
-  [brain] proximity: frakcja=SPRT stan=exit dystans=4293 m</log>
+  braina NIE MOŻE pojawić się `grid_destroyed`.
 
 ## B. Silnik relacji (Etap 3)
 
@@ -35,7 +33,7 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
   odpowiedź NIE przychodzi (limit 1/min); po minucie znów działa.
 - [x] **B4. Relacje spadają:** ostrzelaj statek SPRT, potem `/zf rel` → SPRT
   na minusie. Konsola pokazuje każdą deltę (`relacja SPRT->gracz -6 ...`).
-- [ ] **B5. Stany:** doprowadź SPRT poniżej -30 → konsola `stan SPRT: spokoj
+- [x] **B5. Stany:** doprowadź SPRT poniżej -30 → konsola `stan SPRT: spokoj
   -> napiecie`; poniżej -60 (zniszcz statek) → `-> wojna`. `/zf rel`
   pokazuje stan.
 - [x] **B6. Wymuszony tick:** `/zf tick` → `[RADIO | SYSTEM] Tick wymuszony.`
@@ -58,21 +56,23 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 
 ## D. Głos LLM (Etap 4)
 
-- [ ] **D1. Start modelu:** konsola braina przy starcie pokazuje `LLM gotowy:
+- [x] **D1. Start modelu:** konsola braina przy starcie pokazuje `LLM gotowy:
   models/qwen2.5-3b-instruct-q4_k_m.gguf (CPU)`. Jeśli zamiast tego jest
   `model LLM nieobecny` — brak pliku modelu w brain/models/.
-- [ ] **D2. Rozmowa z personą:** `@KRW oddaj wrak` → odpowiedź pisana przez
+- [x] **D2. Rozmowa z personą:** `@KRW oddaj wrak` → odpowiedź pisana przez
   model w stylu pirata (za każdym razem inna). Na CPU pierwsza odpowiedź może
   zająć do ~30 s, kolejne szybciej. `@HEL` — korpomowa, `@WGR` — górniczy luz.
-- [ ] **D3. Reakcje bojowe głosem LLM:** ostrzelaj statek HEL/KRW/WGR (spawn
+- [x] **D3. Reakcje bojowe głosem LLM:** ostrzelaj statek HEL/KRW/WGR (spawn
   własnej siatki z ich frakcją albo poczekaj na Etap 5 spawny) — groźba
   z kontekstem sytuacji, nie sztywny szablon. Konsola: `radio (LLM) [...]`.
-- [ ] **D4. Fallback:** zatrzymaj brain, w `rules.local.toml` ustaw
+- [x] **D4. Fallback:** zatrzymaj brain, w `rules.local.toml` ustaw
   `[llm] model_path = "brak.gguf"`, odpal → `@KRW test` odpowiada sztywnym
   szablonem (konsola: `radio [KRW]` bez dopisku LLM). Cofnij zmianę.
-- [ ] **D5. Pamięć w prompcie:** po walce z KRW napisz `@KRW co o mnie
+- [x] **D5. Pamięć w prompcie:** po walce z KRW napisz `@KRW co o mnie
   myślisz?` → odpowiedź powinna nawiązywać do ostrzału/zniszczeń (model
-  dostaje ostatnie 5 wpisów pamięci frakcji).
+  dostaje ostatnie 5 wpisów pamięci frakcji). Uwaga: pełny test dopiero po
+  Etapie 5 — `/zf spawn` tworzy SPRT, nie KRW/HEL/WGR; do weryfikacji ze spawnem
+  prawdziwej frakcji.
 
 ## Znane zachowania (to nie błędy)
 

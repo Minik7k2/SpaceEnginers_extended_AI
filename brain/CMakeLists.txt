@@ -6,10 +6,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Warningi-jako-błędy tylko dla NASZYCH targetów (llama.cpp i sqlite by ich nie przeszły).
+# ZF_WERROR domyślnie ON (konwencja projektu); wyłączamy tylko przy rozruchu nowego
+# toolchainu (np. pierwszy build MSVC/CUDA), gdzie MSVC ostrzega o innych rzeczach niż GCC.
+option(ZF_WERROR "Traktuj ostrzeżenia jako błędy" ON)
 if(MSVC)
-  set(ZF_WARNINGS /W4 /WX)
+  set(ZF_WARNINGS /W4)
+  if(ZF_WERROR)
+    list(APPEND ZF_WARNINGS /WX)
+  endif()
 else()
-  set(ZF_WARNINGS -Wall -Wextra -Wpedantic -Werror)
+  set(ZF_WARNINGS -Wall -Wextra -Wpedantic)
+  if(ZF_WERROR)
+    list(APPEND ZF_WARNINGS -Werror)
+  endif()
+endif()
+
+# llama.cpp deklaruje cxx_std_17 ("don't bump"), ale nasz CMAKE_CXX_STANDARD=20
+# przecieka do jego targetów. W C++20 literały u8"" (makro LU8 w llama-chat.cpp)
+# mają typ char8_t[], którego MSVC nie konwertuje na char* (GCC/MinGW to przełyka).
+# /Zc:char8_t- przywraca zachowanie z C++17 (u8"" => char[]). Tylko dla CXX —
+# nvcc nie rozumie tej flagi, więc plików CUDA nie dotykamy.
+if(MSVC)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/Zc:char8_t->)
 endif()
 
 # Systemowy SQLite3 jeśli jest; inaczej amalgamacja z third_party/sqlite3
@@ -93,6 +111,41 @@ if(MINGW)
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${ZF_MINGW_BIN}/libwinpthread-1.dll" "$<TARGET_FILE_DIR:zf_brain>"
     )
+  endif()
+endif()
+
+# Build GPU (MSVC/CUDA): llama.cpp jest budowany jako DLL-e, a CUDA linkuje
+# cublas/cudart dynamicznie. Kopiujemy zależne DLL-e obok zf_brain.exe, żeby
+# brain ruszał bez ustawiania PATH (z CLion, konsoli, gdziekolwiek). Uwaga:
+# cublasLt64_*.dll potrafi ważyć setki MB (CUDA 13).
+if(GGML_CUDA)
+  # ggml*.dll, llama.dll i pozostałe zależności runtime targetu
+  add_custom_command(TARGET zf_brain POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_RUNTIME_DLLS:zf_brain> $<TARGET_FILE_DIR:zf_brain>
+    COMMAND_EXPAND_LISTS
+  )
+  # runtime CUDA (cudart/cublas/cublasLt) — importowane targety CUDA::* są w
+  # zasięgu podkatalogu llama.cpp i niewidoczne tutaj, a TARGET_RUNTIME_DLLS ich
+  # nie łapie. Namierzamy katalog toolkitu z nvcc (CMAKE_CUDA_COMPILER) i kopiujemy
+  # DLL-e globem — obsługuje bin/ i bin/x64 (CUDA 13) oraz dowolny sufiks wersji.
+  get_filename_component(_zf_cuda_bin "${CMAKE_CUDA_COMPILER}" DIRECTORY)
+  set(_zf_cuda_dlls "")
+  foreach(_dir "${_zf_cuda_bin}" "${_zf_cuda_bin}/x64")
+    foreach(_lib cudart64 cublas64 cublasLt64)
+      file(GLOB _zf_found "${_dir}/${_lib}_*.dll")
+      list(APPEND _zf_cuda_dlls ${_zf_found})
+    endforeach()
+  endforeach()
+  if(_zf_cuda_dlls)
+    add_custom_command(TARGET zf_brain POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${_zf_cuda_dlls} $<TARGET_FILE_DIR:zf_brain>
+      COMMAND_EXPAND_LISTS
+    )
+    message(STATUS "ZF: runtime CUDA obok exe: ${_zf_cuda_dlls}")
+  else()
+    message(WARNING "ZF: nie znaleziono runtime CUDA (cudart/cublas) w ${_zf_cuda_bin} — brain nie ruszy bez CUDA w PATH")
   endif()
 endif()
 

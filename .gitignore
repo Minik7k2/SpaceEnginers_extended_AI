@@ -1,6 +1,7 @@
 # brain (C++)
 brain/configs/*.local.toml
 brain/build/
+brain/cmake-build-*/
 brain/models/
 brain/state/
 *.sqlite3
