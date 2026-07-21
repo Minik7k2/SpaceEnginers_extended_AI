@@ -80,7 +80,7 @@ WYMAGANE: nowy świat testowy (frakcje z `Factions.sbc` powstają przy generowan
 świata — na starym zapisie mogą nie istnieć). Sprawdź w grze menu frakcji: mają
 być HEL/KRW/WGR.
 
-- [ ] **E1. Frakcje istnieją:** po wczytaniu NOWEGO świata otwórz listę frakcji
+- [x] **E1. Frakcje istnieją:** po wczytaniu NOWEGO świata otwórz listę frakcji
   (G / terminal) → są „Korporacja Helion", „Krwawa Ręka", „Wolni Górnicy".
 - [ ] **E2. Bezpośredni spawn:** `/zf spawn KRW` → statek pojawia się ~200 m
   przed tobą, na czacie `[ZF] spawn reczny: ... dla KRW`. (Dawniej padało na SPRT.)
