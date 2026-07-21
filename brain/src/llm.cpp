@@ -1,5 +1,6 @@
 #include "llm.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -118,6 +119,11 @@ struct LlmWorker::Impl {
 
         llama_context_params cparams = llama_context_default_params();
         cparams.n_ctx = 2048;
+        // n_batch=512 (domyślne, małe zużycie VRAM — ważne przy 8 GB dzielonym z SE).
+        // Prompt dłuższy niż n_batch NIE może iść jednym llama_decode — wywala
+        // GGML_ASSERT(n_tokens_all <= n_batch) i abortuje proces. Dłuższy prompt
+        // (persony z przykładami few-shot, po polsku = dużo tokenów) dekodujemy więc
+        // w porcjach po n_batch, patrz generate().
         cparams.n_batch = 512;
         // AUTO probuje Flash Attention realnym obliczeniem przy starcie (świeży,
         // niepewny kod w tej wersji llama.cpp) — wyłączamy jawnie zamiast zgadywać.
@@ -211,6 +217,16 @@ struct LlmWorker::Impl {
         }
         tokens.resize(static_cast<std::size_t>(n_tokens));
 
+        // Bezpiecznik: prompt + miejsce na generację (do 160 tok) musi zmieścić się
+        // w kontekście. Gdy nie — degradacja do fallbacku zamiast przepełnienia KV
+        // (główna pętla nie może się wywrócić na zbyt długim prompcie).
+        const int n_ctx = static_cast<int>(llama_n_ctx(ctx));
+        if (n_tokens > n_ctx - 200) {
+            std::cerr << "[brain] prompt LLM za długi (" << n_tokens << " tok, kontekst " << n_ctx
+                      << ") — fallback\n";
+            return false;
+        }
+
         llama_memory_clear(llama_get_memory(ctx), true);
 
         llama_sampler* chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
@@ -221,8 +237,15 @@ struct LlmWorker::Impl {
 
         bool ok = true;
         std::string raw;
-        if (llama_decode(ctx, llama_batch_get_one(tokens.data(), static_cast<int32_t>(tokens.size()))) != 0) {
-            ok = false;
+        // Prefill w porcjach po n_batch: pojedynczy llama_decode nie może dostać
+        // więcej tokenów niż n_batch (inaczej GGML_ASSERT i abort). Pozycje w KV
+        // liczą się dalej same (jak w pętli generacji), więc porcje kontynuują prompt.
+        const int n_batch = static_cast<int>(llama_n_batch(ctx));
+        for (int start = 0; ok && start < n_tokens; start += n_batch) {
+            const int count = std::min(n_batch, n_tokens - start);
+            if (llama_decode(ctx, llama_batch_get_one(tokens.data() + start, count)) != 0) {
+                ok = false;
+            }
         }
         const auto t_prefill = std::chrono::steady_clock::now();
 
