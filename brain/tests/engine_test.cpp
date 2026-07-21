@@ -176,6 +176,44 @@ int main() {
         make_event("chat_message", {{"text", "@HEL czesc"}, {"target", "HEL"}}), cfg, now);
     assert(out.size() == 1 && out[0].faction == "HEL" && out[0].text == "Helion potwierdza.");
 
+    // --- Spawny (Etap 5) --- świeży silnik, żeby nie zależeć od stanu relacji powyżej.
+    {
+        zf::Db sdb(":memory:");
+        zf::Fallback sfb(fallback_path.string());
+        zf::Engine se(sdb, sfb, /*rng_seed=*/7);
+        zf::Config scfg; // spawn_wlaczone=true, cooldown 5 min
+        std::int64_t t = 5000000;
+
+        // Wojna KRW (dwa zniszczenia) => raid w buforze; take_spawns czyści bufor.
+        se.on_event(make_event("grid_destroyed", {{"faction", "KRW"}, {"grid", "A"}, {"by_player", true}}), scfg, t);
+        t += 1000;
+        se.on_event(make_event("grid_destroyed", {{"faction", "KRW"}, {"grid", "B"}, {"by_player", true}}), scfg, t);
+        bool raid = false;
+        for (const zf::SpawnOut& s : se.take_spawns()) {
+            if (s.faction == "KRW" && s.kind == "raid") {
+                raid = true;
+            }
+        }
+        assert(raid && "wypowiedzenie wojny ma zlecać raid");
+        assert(se.take_spawns().empty() && "take_spawns ma czyścić bufor");
+
+        // /zf raid (force): spawnuje mimo wyłączonych auto-spawnów, plus komunikat SYSTEM.
+        scfg.spawn_wlaczone = false;
+        auto rout = se.on_event(make_event("debug_command", {{"cmd", "spawn"}, {"faction", "HEL"}}), scfg, t + 2000);
+        auto rsp = se.take_spawns();
+        assert(rsp.size() == 1 && rsp[0].faction == "HEL" && "force ma spawnować mimo spawn_wlaczone=false");
+        assert(rout.size() == 1 && rout[0].faction == "SYSTEM");
+
+        // Nieznana frakcja: brak spawnu, komunikat SYSTEM.
+        auto uout = se.on_event(make_event("debug_command", {{"cmd", "spawn"}, {"faction", "XXX"}}), scfg, t + 3000);
+        assert(se.take_spawns().empty() && "nieznana frakcja nie spawnuje");
+        assert(uout.size() == 1 && uout[0].faction == "SYSTEM");
+
+        // spawn_wlaczone=false tłumi auto-spawn maszyny stanów (WGR do napięcia = -30).
+        se.on_event(make_event("grid_destroyed", {{"faction", "WGR"}, {"grid", "C"}, {"by_player", true}}), scfg, t + 4000);
+        assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
+    }
+
     std::cout << "zf_engine_test: OK\n";
     return 0;
 }

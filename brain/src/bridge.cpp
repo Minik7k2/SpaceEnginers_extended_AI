@@ -182,4 +182,21 @@ void CommandWriter::write_radio_message(const std::string& faction, const std::s
     write_line(line);
 }
 
+void CommandWriter::write_spawn_request(const std::string& faction, const std::string& kind,
+                                        bool near_player, const std::string& context) {
+    const nlohmann::json line = {
+        {"v", 1},
+        {"seq", db_.next_commands_seq()},
+        {"ts", now_unix_ms()},
+        {"type", "spawn_request"},
+        {"data", {
+            {"faction", faction},
+            {"kind", kind},
+            {"near_player", near_player},
+            {"context", context},
+        }},
+    };
+    write_line(line);
+}
+
 } // namespace zf

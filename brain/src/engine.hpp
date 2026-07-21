@@ -27,6 +27,16 @@ struct RadioOut {
     std::string context;   // opis sytuacji po polsku do promptu LLM
 };
 
+// Zlecenie spawnu statku frakcji do CommandWriter (Etap 5). Decyzje podejmuje
+// maszyna stanów (napięcie->patrol, wojna->raid, zdarzenie->convoy) albo komenda
+// /zf raid. Silnik zbiera je w buforze, który main opróżnia przez take_spawns().
+struct SpawnOut {
+    std::string faction;
+    std::string kind;      // patrol/raid/convoy
+    std::string context;   // opis sytuacji po polsku (log/atrybucja)
+    bool near_player = true;
+};
+
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
 // (spokoj/napiecie/wojna z histerezą), tick świata z dryfem i zdarzeniem losowym,
 // głos przez szablony fallback (do Etapu 4 zawsze "mock LLM").
@@ -44,11 +54,18 @@ public:
     // Raport do /zf rel: relacja frakcja->gracz i stan każdej frakcji.
     std::string relations_report() const;
 
+    // Zlecenia spawnu nazbierane przez on_event/tick — zwraca i czyści bufor.
+    // Radio wraca wartością z on_event/tick; spawny osobnym kanałem, żeby nie
+    // zmieniać typu zwrotu tamtych (i nie ruszać testów silnika).
+    std::vector<SpawnOut> take_spawns();
+
 private:
     Db& db_;
     Fallback& fallback_;
     std::mt19937 rng_;
     std::map<std::string, std::int64_t> last_radio_ms_;
+    std::map<std::string, std::int64_t> last_spawn_ms_;
+    std::vector<SpawnOut> pending_spawns_;
 
     void ensure_known_faction(const std::string& tag);
     // Pierwszy istniejący szablon z listy kandydatów; pusty string gdy żadnego nie ma.
@@ -62,6 +79,10 @@ private:
     // Przejścia spokoj/napiecie/wojna wg relacji do gracza (histereza wyjścia z wojny).
     void update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
+    // Dokłada SpawnOut do bufora z limitem częstotliwości per frakcja. force=true
+    // (komenda /zf raid) omija cooldown i globalny włącznik spawn_wlaczone.
+    void request_spawn(const std::string& faction, const std::string& kind, const Config& cfg,
+                       std::int64_t now_ms, std::string context, bool force = false);
 
     void handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t now_ms,
                            std::vector<RadioOut>& out);

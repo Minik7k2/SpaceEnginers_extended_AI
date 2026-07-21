@@ -41,6 +41,11 @@ public:
     void write_radio_message(const std::string& faction, const std::string& text,
                               const std::string& color, int priority);
 
+    // spawn_request (Etap 5): mod woła spawner statku frakcji. kind = patrol/raid/convoy;
+    // context to opis dla logu/atrybucji. Patrz docs/protocol.md.
+    void write_spawn_request(const std::string& faction, const std::string& kind,
+                             bool near_player, const std::string& context);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();

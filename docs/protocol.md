@@ -16,7 +16,7 @@ combat_hit     {"attacker":123|null,"faction":"KRW","damage":450.5,"hits":37,"we
 grid_destroyed {"faction":"KRW","grid":"nazwa","by_player":true}
 trade          {"faction":"HEL","kind":"buy"|"sell","value":1500}           Etap 6
 contract_done  {"contract_id":"...","faction":"WGR","success":true}        Etap 6
-debug_command  {"cmd":"rel"|"tick"}                                        komendy testowe /zf rel, /zf tick
+debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn","faction":"KRW"}       /zf rel, /zf tick, /zf raid <frakcja>
 
 ## commands.jsonl (brain → mod)
 

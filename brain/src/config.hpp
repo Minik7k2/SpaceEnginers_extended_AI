@@ -46,6 +46,10 @@ struct Config {
     // [radio]
     int radio_limit_na_frakcje_na_min = 1;
     int radio_ttl_sekund = 120;
+
+    // [spawn] — spawny statków frakcji sterowane maszyną stanów (Etap 5).
+    bool spawn_wlaczone = true;    // false wyłącza auto-spawny; /zf raid działa niezależnie
+    int spawn_cooldown_min = 5;    // min. odstęp między auto-spawnami TEJ SAMEJ frakcji
 };
 
 // Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola

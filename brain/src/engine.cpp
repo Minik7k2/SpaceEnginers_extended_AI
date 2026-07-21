@@ -33,6 +33,18 @@ std::string state_display(const std::string& state) {
     return state; // spokoj/wojna czytelne bez zmian ("spokój" ma ogonek, ale klucz DB bez)
 }
 
+// Rodzaj floty adekwatny do nastroju frakcji: wojna = raid, napięcie = patrol,
+// spokój = convoy (cywilny przelot). Domyślnie patrol.
+const char* kind_for_state(const std::string& state) {
+    if (state == "wojna") {
+        return "raid";
+    }
+    if (state == "spokoj") {
+        return "convoy";
+    }
+    return "patrol";
+}
+
 std::string format_value(double v) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%+.0f", v);
@@ -109,6 +121,33 @@ void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const 
     out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context)});
 }
 
+std::vector<SpawnOut> Engine::take_spawns() {
+    std::vector<SpawnOut> taken;
+    taken.swap(pending_spawns_);
+    return taken;
+}
+
+void Engine::request_spawn(const std::string& faction, const std::string& kind, const Config& cfg,
+                           std::int64_t now_ms, std::string context, bool force) {
+    if (faction.empty()) {
+        return;
+    }
+    if (!force) {
+        if (!cfg.spawn_wlaczone) {
+            return;
+        }
+        const std::int64_t cooldown_ms = static_cast<std::int64_t>(cfg.spawn_cooldown_min) * 60000;
+        const auto it = last_spawn_ms_.find(faction);
+        if (it != last_spawn_ms_.end() && now_ms - it->second < cooldown_ms) {
+            return;
+        }
+    }
+    last_spawn_ms_[faction] = now_ms;
+    std::cout << "[brain] spawn_request " << faction << " kind=" << kind
+              << (force ? " (wymuszony)" : "") << "\n";
+    pending_spawns_.push_back({faction, kind, std::move(context), /*near_player=*/true});
+}
+
 void Engine::update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                           std::vector<RadioOut>& out) {
     const auto rows = db_.list_factions();
@@ -147,10 +186,20 @@ void Engine::update_state(const std::string& faction, const Config& cfg, std::in
         db_.add_memory(now_ms, faction, "wojna", 2, "Frakcja " + faction + " wypowiedziała wojnę graczowi.");
         emit(out, faction, render_first(faction, {"grozba", "kpina", "neutral"}, {{"sekundy", "30"}}),
              1, cfg, now_ms, "grozba", "Miarka się przebrała — wasza frakcja właśnie wypowiedziała graczowi wojnę.");
+        // Wojna to rzadkie, ciężkie zdarzenie (chroni je histereza) — raid leci nawet
+        // tuż po patrolu z eskalacji, więc omija cooldown. Globalny włącznik nadal działa.
+        if (cfg.spawn_wlaczone) {
+            request_spawn(faction, "raid", cfg, now_ms,
+                          "Frakcja " + faction + " wypowiedziała wojnę i wysyła oddział bojowy na gracza.",
+                          /*force=*/true);
+        }
     } else if (row->state == "wojna") {
         db_.add_memory(now_ms, faction, "koniec_wojny", 2, "Frakcja " + faction + " zakończyła wojnę z graczem.");
         emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms,
              "neutral", "Wojna z graczem właśnie się zakończyła — ogłoś zawieszenie broni po swojemu.");
+    } else if (next == "napiecie" && row->state == "spokoj") {
+        request_spawn(faction, "patrol", cfg, now_ms,
+                      "Rosnące napięcie z graczem — frakcja " + faction + " wysyła patrol w jego rejon.");
     }
 }
 
@@ -277,6 +326,27 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
         std::vector<RadioOut> tick_out = tick(cfg, now_ms, /*force=*/true);
         out.push_back({"SYSTEM", "Tick wymuszony.", "white", 0, {}, {}});
         out.insert(out.end(), tick_out.begin(), tick_out.end());
+    } else if (cmd == "spawn") {
+        // /zf raid <frakcja> [kind]: wymuszony spawn do testu potoku (omija cooldown).
+        const std::string faction = data_str(ev, "faction");
+        std::string state = "spokoj";
+        bool known = false;
+        for (const FactionRow& row : db_.list_factions()) {
+            if (row.tag == faction) {
+                state = row.state;
+                known = true;
+            }
+        }
+        if (!known) {
+            out.push_back({"SYSTEM", "Nie znam frakcji \"" + faction + "\" — spawn pominięty.", "white", 0, {}, {}});
+            return;
+        }
+        std::string kind = data_str(ev, "kind");
+        if (kind.empty()) {
+            kind = kind_for_state(state);
+        }
+        request_spawn(faction, kind, cfg, now_ms, "Ręcznie wywołany spawn (/zf raid).", /*force=*/true);
+        out.push_back({"SYSTEM", "Spawn zlecony: " + faction + " (" + kind + ").", "white", 0, {}, {}});
     }
 }
 
@@ -336,6 +406,8 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
                      render_first(chosen.tag, {kind, "neutral"}, {{"sekundy", "45"}}),
                      chosen.state == "wojna" ? 1 : 0, cfg, now_ms, kind,
                      "Nic szczególnego się nie dzieje — nadaj krótką rutynową transmisję w waszym stylu.");
+                request_spawn(chosen.tag, kind_for_state(chosen.state), cfg, now_ms,
+                              "Rutynowy ruch floty frakcji " + chosen.tag + " w rejonie gracza.");
             }
         }
     }

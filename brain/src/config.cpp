@@ -66,6 +66,11 @@ void apply_table(const toml::table& tbl, Config& cfg) {
             (*radio)["limit_na_frakcje_na_min"].value_or(cfg.radio_limit_na_frakcje_na_min);
         cfg.radio_ttl_sekund = (*radio)["ttl_sekund"].value_or(cfg.radio_ttl_sekund);
     }
+
+    if (const auto* spawn = tbl["spawn"].as_table()) {
+        cfg.spawn_wlaczone = (*spawn)["wlaczone"].value_or(cfg.spawn_wlaczone);
+        cfg.spawn_cooldown_min = (*spawn)["cooldown_min"].value_or(cfg.spawn_cooldown_min);
+    }
 }
 
 toml::table parse_or_throw(const std::string& path) {

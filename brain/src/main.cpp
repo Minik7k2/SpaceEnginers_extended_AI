@@ -137,6 +137,11 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
             std::cout << "  [RADIO | " << msg.faction << "] " << msg.text << "\n";
         }
     };
+    const auto print_spawns = [&engine]() {
+        for (const zf::SpawnOut& sp : engine.take_spawns()) {
+            std::cout << "  [SPAWN | " << sp.faction << "] kind=" << sp.kind << " — " << sp.context << "\n";
+        }
+    };
 
     std::string line;
     std::int64_t last_ts = 0;
@@ -159,6 +164,7 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
         log_event(ev);
         print_radio(engine.on_event(ev, cfg, last_ts));
         print_radio(engine.tick(cfg, last_ts));
+        print_spawns();
     }
 
     std::cout << "[brain] replay zakończony. Relacje: " << engine.relations_report() << "\n";
@@ -225,6 +231,15 @@ int main(int argc, char** argv) {
 
         // Intencje z personą idą do LLM (fallback w zadaniu na wypadek porażki);
         // reszta (SYSTEM, frakcje bez persony, brak modelu) — od razu szablonem.
+        // Zlecenia spawnu z silnika (osobny kanał od radia) -> spawn_request w commands.jsonl.
+        const auto flush_spawns = [&commands, &engine]() {
+            for (const zf::SpawnOut& sp : engine.take_spawns()) {
+                commands.write_spawn_request(sp.faction, sp.kind, sp.near_player, sp.context);
+                std::cout << "[brain] spawn_request [" << sp.faction << "] kind=" << sp.kind << " — "
+                          << sp.context << "\n";
+            }
+        };
+
         const auto send_all = [&commands, &llm, &db](const std::vector<zf::RadioOut>& msgs) {
             for (const zf::RadioOut& msg : msgs) {
                 if (llm.enabled() && !msg.kind.empty() && !zf::persona_path(msg.faction).empty()) {
@@ -259,6 +274,7 @@ int main(int argc, char** argv) {
                 }
             }
             send_all(engine.tick(cfg, now));
+            flush_spawns();   // spawny z on_event (w tym /zf raid) i z ticka
 
             // Gotowe wypowiedzi z wątku LLM (albo fallbacki po nieudanej generacji).
             for (const zf::LlmResult& res : llm.poll_results()) {

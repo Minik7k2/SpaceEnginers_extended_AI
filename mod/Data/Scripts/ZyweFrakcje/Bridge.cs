@@ -151,6 +151,16 @@ namespace ZyweFrakcje
             WriteLine("debug_command", data);
         }
 
+        /// <summary>"/zf raid &lt;frakcja&gt;" — wymusza w brainie spawn_request danej frakcji (Etap 5).</summary>
+        public void WriteDebugSpawn(string faction)
+        {
+            string data = new Json.Builder()
+                .Add("cmd", "spawn")
+                .Add("faction", faction)
+                .Build();
+            WriteLine("debug_command", data);
+        }
+
         /// <summary>Komenda czatu "/zf event {"type":"...","data":{...}}" — testy mostka bez SE.</summary>
         public void WriteRawEvent(string json)
         {

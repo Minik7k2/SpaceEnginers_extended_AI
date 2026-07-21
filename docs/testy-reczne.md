@@ -74,6 +74,28 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
   Etapie 5 — `/zf spawn` tworzy SPRT, nie KRW/HEL/WGR; do weryfikacji ze spawnem
   prawdziwej frakcji.
 
+## E. Spawny frakcji (Etap 5b)
+
+WYMAGANE: nowy świat testowy (frakcje z `Factions.sbc` powstają przy generowaniu
+świata — na starym zapisie mogą nie istnieć). Sprawdź w grze menu frakcji: mają
+być HEL/KRW/WGR.
+
+- [ ] **E1. Frakcje istnieją:** po wczytaniu NOWEGO świata otwórz listę frakcji
+  (G / terminal) → są „Korporacja Helion", „Krwawa Ręka", „Wolni Górnicy".
+- [ ] **E2. Bezpośredni spawn:** `/zf spawn KRW` → statek pojawia się ~200 m
+  przed tobą, na czacie `[ZF] spawn reczny: ... dla KRW`. (Dawniej padało na SPRT.)
+- [ ] **E3. Głos po walce (odblokowany D3):** ostrzelaj statek z E2 → konsola
+  `combat_hit faction=KRW`, a KRW odpowiada groźbą **głosem persony** (LLM), nie
+  szablonem. Zniszcz go → `grid_destroyed faction=KRW` i reakcja.
+- [ ] **E4. Pamięć (odblokowany D5):** po walce z KRW napisz `@KRW co o mnie
+  myślisz?` → odpowiedź nawiązuje do ostrzału/zniszczenia.
+- [ ] **E5. Potok spawn_request:** `/zf raid KRW` → na czacie `[ZF] spawn raid/…`
+  (mod → brain → spawn_request → mod). Konsola braina: `spawn_request KRW ...`.
+- [ ] **E6. Auto-spawn z maszyny stanów:** doprowadź KRW do wojny (zniszcz 2
+  statki) → konsola `spawn_request KRW kind=raid`, w grze pojawia się statek.
+- [ ] **E7. Cooldown/wyłącznik:** w `rules.toml` ustaw `[spawn] wlaczone = false`
+  (hot-reload) → auto-spawny milkną, ale `/zf raid KRW` dalej działa (force).
+
 ## Znane zachowania (to nie błędy)
 
 - Po pierwszym starcie braina mogą przyjść zaległe echa wiadomości z
@@ -83,5 +105,8 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 - Losowe radio z ticku pojawia się średnio co ~3 tick (35% × tick 4 min),
   częściej gdy frakcja jest w napięciu/wojnie.
 - Dryf relacji to 1 pkt / 2 h gry — niemierzalny w krótkim teście.
+- Spawn (Etap 5b) to STUB: vanilla prefab `DS_Pirate_ShakedownDrone` dla każdej
+  frakcji, bez AI/patroli/despawnu MES i bez rozróżnienia patrol/raid/convoy
+  (kind widać tylko w komunikacie). Prawdziwe floty z MES podmienimy później.
 
 Wynik zgłoś jako: numer testu + PASS/FAIL + (przy FAIL) log z konsoli braina.

@@ -7,27 +7,24 @@ using VRageMath;
 namespace ZyweFrakcje
 {
     /// <summary>
-    /// Testowy spawn wroga: /zf spawn [TAG] [NazwaPrefabu]. Lekki pomocnik do testów
-    /// Etapu 2 — vanillowy prefab z własnością ustawioną na założyciela frakcji NPC.
-    /// Pełny spawn przez MES API wchodzi w Etapie 5.
+    /// Spawner statków frakcji. Dwa wejścia:
+    ///  - "/zf spawn [TAG] [Prefab]" — ręczny test (Etap 2), z opcjonalnym prefabem;
+    ///  - spawn_request z brainu (Etap 5) — <see cref="SpawnForFaction"/>.
+    /// Backend to na razie vanilla PrefabManager z własnością ustawioną na założyciela
+    /// frakcji NPC (stub). Docelowo, gdy będą spawn groups z paczkami statków, podmienimy
+    /// go na MES CustomSpawnRequest (patrol/raid/convoy → grupy spawnu MES).
     /// </summary>
     internal static class TestSpawner
     {
-        private const string DefaultPrefab = "DS_Pirate_ShakedownDrone"; // kosmiczny, jonowy
+        private const string DefaultPrefab = "DS_Pirate_ShakedownDrone"; // kosmiczny, jonowy, uzbrojony
         private const string DefaultFactionTag = "SPRT";
         private const double SpawnDistance = 200;
 
         private static readonly List<IMyCubeGrid> Spawned = new List<IMyCubeGrid>();
 
+        /// <summary>"/zf spawn [TAG] [Prefab]" — ręczny test z opcjonalnym prefabem.</summary>
         public static void HandleCommand(string args)
         {
-            IMyPlayer player = MyAPIGateway.Session.Player;
-            if (player == null || player.Character == null)
-            {
-                Show("brak postaci gracza — spróbuj po respawnie");
-                return;
-            }
-
             string tag = DefaultFactionTag;
             string prefab = DefaultPrefab;
             if (!string.IsNullOrEmpty(args))
@@ -47,11 +44,31 @@ namespace ZyweFrakcje
                     }
                 }
             }
+            Spawn(tag, prefab, "reczny");
+        }
+
+        /// <summary>
+        /// spawn_request z brainu: statek frakcji przy graczu. kind (patrol/raid/convoy)
+        /// na razie tylko w komunikacie — docelowo mapowany na spawn groups MES.
+        /// </summary>
+        public static void SpawnForFaction(string tag, string kind)
+        {
+            Spawn(tag, DefaultPrefab, string.IsNullOrEmpty(kind) ? "patrol" : kind);
+        }
+
+        private static void Spawn(string tag, string prefab, string kind)
+        {
+            IMyPlayer player = MyAPIGateway.Session.Player;
+            if (player == null || player.Character == null)
+            {
+                Show("brak postaci gracza — spawn pominięty");
+                return;
+            }
 
             IMyFaction faction = MyAPIGateway.Session.Factions.TryGetFactionByTag(tag);
             if (faction == null)
             {
-                Show("nie ma frakcji o tagu \"" + tag + "\"");
+                Show("nie ma frakcji o tagu \"" + tag + "\" — czy Factions.sbc się załadował? (spróbuj na nowym świecie)");
                 return;
             }
 
@@ -60,6 +77,7 @@ namespace ZyweFrakcje
 
             string spawnedPrefab = prefab;
             string spawnedTag = tag;
+            string spawnedKind = kind;
             Spawned.Clear();
             MyAPIGateway.PrefabManager.SpawnPrefab(
                 Spawned,
@@ -74,7 +92,7 @@ namespace ZyweFrakcje
                 faction.FounderId,
                 true,
                 () => Show(Spawned.Count > 0
-                    ? "zespawnowano " + spawnedPrefab + " dla " + spawnedTag + " (~200 m przed tobą)"
+                    ? "spawn " + spawnedKind + ": " + spawnedPrefab + " dla " + spawnedTag + " (~200 m przed tobą)"
                     : "prefab \"" + spawnedPrefab + "\" nie powstał — sprawdź nazwę"));
         }
 

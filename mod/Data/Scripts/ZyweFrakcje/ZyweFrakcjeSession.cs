@@ -144,10 +144,28 @@ namespace ZyweFrakcje
                 return;
             }
 
+            const string raidPrefix = "/zf raid";
+            if (messageText.StartsWith(raidPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                string tag = messageText.Substring(raidPrefix.Length).Trim().ToUpperInvariant();
+                if (tag.Length == 0)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf raid <frakcja> (np. /zf raid KRW)");
+                }
+                else
+                {
+                    // Wymuszony spawn przez brain: mod pisze debug_command spawn, brain
+                    // odpisuje spawn_request, który wraca do PollCommands. Testuje cały potok.
+                    _events.WriteDebugSpawn(tag);
+                }
+                return;
+            }
+
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf spawn <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf spawn <frakcja>, /zf raid <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -177,12 +195,42 @@ namespace ZyweFrakcje
                 Dictionary<string, object> msg = messages[i];
                 object typeObj;
                 msg.TryGetValue("type", out typeObj);
-                if ((typeObj as string) == "radio_message")
+                string type = typeObj as string;
+                if (type == "radio_message")
                 {
                     HandleRadioMessage(msg);
                 }
-                // spawn_request / price_update / contract_create: obsługa w Etapach 5/6.
+                else if (type == "spawn_request")
+                {
+                    HandleSpawnRequest(msg);
+                }
+                // price_update / contract_create: obsługa w Etapie 6.
             }
+        }
+
+        private void HandleSpawnRequest(Dictionary<string, object> msg)
+        {
+            object dataObj;
+            msg.TryGetValue("data", out dataObj);
+            var data = dataObj as Dictionary<string, object>;
+            if (data == null)
+            {
+                return;
+            }
+
+            object factionObj;
+            data.TryGetValue("faction", out factionObj);
+            string faction = factionObj as string;
+            if (string.IsNullOrEmpty(faction))
+            {
+                return;
+            }
+
+            object kindObj;
+            data.TryGetValue("kind", out kindObj);
+            string kind = kindObj as string ?? "patrol";
+
+            TestSpawner.SpawnForFaction(faction, kind);
         }
 
         private void HandleRadioMessage(Dictionary<string, object> msg)
