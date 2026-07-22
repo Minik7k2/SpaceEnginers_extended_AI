@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!-- Profile zachowań RivalAI dla ZyweFrakcje (Etap 5, rajdy). Zgodnie z wiki MES
+     "Behaviors: Getting Started": profil to definicja EntityComponent (TypeId=Inventory
+     jest "pusty" i nie rusza gry), a konfiguracja siedzi w <Description> jako tagi.
+     SpawnGroup wskazuje ten SubtypeId w <Behaviour> prefaba, a MES podpina zachowanie
+     (wymaga [UseRivalAi:true] + [RivalAiReplaceRemoteControl:true], bo vanilla dron nie
+     ma bloku AI Module). Fighter = namierza cel w zasięgu i leci na niego z atakiem. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <EntityComponents>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Fighter</SubtypeId>
+      </Id>
+      <Description>
+
+      [RivalAI Behavior]
+      [BehaviorName:Fighter]
+
+      </Description>
+    </EntityComponent>
+
+  </EntityComponents>
+</Definitions>

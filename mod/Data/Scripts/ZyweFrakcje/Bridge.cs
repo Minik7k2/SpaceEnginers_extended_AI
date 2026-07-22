@@ -161,6 +161,16 @@ namespace ZyweFrakcje
             WriteLine("debug_command", data);
         }
 
+        /// <summary>"/zf okup &lt;frakcja&gt;" — deterministyczny test de-eskalacji: brain odwołuje rajd (stand_down).</summary>
+        public void WriteDebugOkup(string faction)
+        {
+            string data = new Json.Builder()
+                .Add("cmd", "okup")
+                .Add("faction", faction)
+                .Build();
+            WriteLine("debug_command", data);
+        }
+
         /// <summary>Komenda czatu "/zf event {"type":"...","data":{...}}" — testy mostka bez SE.</summary>
         public void WriteRawEvent(string json)
         {

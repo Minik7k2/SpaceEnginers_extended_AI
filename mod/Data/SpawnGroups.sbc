@@ -1,0 +1,144 @@
+<?xml version="1.0"?>
+<!-- SpawnGroupy MES dla ZyweFrakcje (Etap 5b → MES + RivalAI). Spawnowane WYŁĄCZNIE
+     przez MESApi.CustomSpawnRequest z braina (patrol/raid/convoy). Frakcja (HEL/KRW/WGR)
+     nadawana przy spawnie przez factionOverride — jedna grupa obsługuje wszystkie
+     frakcje, [FactionOwner] to tylko wartość domyślna.
+     Wymagany tag [RivalAiSpawn:true] — bez niego CustomSpawnRequest odrzuca grupę.
+     Flagi typów spawnu (SpaceCargoShip itd.) = false: te grupy NIE spawnują się losowo.
+
+     RAJD/PATROL: [UseRivalAi:true] + [RivalAiReplaceRemoteControl:true] (vanilla dron
+     nie ma bloku AI Module, więc RivalAI podmienia jego Remote Control), a <Behaviour>
+     wskazuje profil ZF_Fighter (RivalAiBehaviors.sbc) → statek leci na gracza i atakuje.
+     CONVOY: bez RivalAI — cywilny przelot, nie napastnik.
+
+     UWAGA (środowisko): prefab DS_Pirate_ShakedownDrone jest KOSMICZNY (jony). Te grupy
+     są do spawnu w KOSMOSIE — mod (TestSpawner) spawnuje je tylko przy zerowej grawitacji.
+     Warianty atmosferyczne/naziemne (osobne grupy + statki) dojdą później. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <SpawnGroups>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Patrol</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="DS_Pirate_ShakedownDrone">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>25</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Raid</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="DS_Pirate_ShakedownDrone">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>40</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+        <Prefab SubtypeId="DS_Pirate_ShakedownDrone">
+          <Position>
+            <X>150.0</X>
+            <Y>0.0</Y>
+            <Z>50.0</Z>
+          </Position>
+          <Speed>40</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Convoy</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:false]
+        [RivalAiReplaceRemoteControl:false]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="DS_Pirate_ShakedownDrone">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>30</Speed>
+          <Behaviour></Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+  </SpawnGroups>
+</Definitions>

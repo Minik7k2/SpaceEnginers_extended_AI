@@ -24,12 +24,15 @@ namespace ZyweFrakcje
         private CommandReader _commands;
         private CombatTracker _combat;
         private ProximityWatcher _proximity;
+        private MESApi _mes;
         private int _tick;
 
         public override void LoadData()
         {
             _events = new EventWriter(typeof(ZyweFrakcjeSession), RotateBytes);
             _commands = new CommandReader(typeof(ZyweFrakcjeSession));
+            _mes = new MESApi(); // rejestruje handler; MESApiReady dopiero gdy MES odeśle API
+            TestSpawner.SetMes(_mes);
             MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
         }
 
@@ -45,6 +48,12 @@ namespace ZyweFrakcje
             if (MyAPIGateway.Utilities != null)
             {
                 MyAPIGateway.Utilities.MessageEntered -= OnMessageEntered;
+            }
+            if (_mes != null)
+            {
+                TestSpawner.UnregisterSpawnAction();
+                _mes.UnregisterListener();
+                TestSpawner.SetMes(null);
             }
             if (_combat != null)
             {
@@ -80,6 +89,9 @@ namespace ZyweFrakcje
             {
                 _proximity.Update();
             }
+            // MES bywa gotowy dopiero po kilku tikach — rejestrujemy akcję spawnu, gdy wstanie.
+            TestSpawner.EnsureSpawnActionRegistered();
+            TestSpawner.Update(_tick); // wycofanie: despawn statków po stand_down
         }
 
         private void WriteSessionStart()
@@ -162,10 +174,27 @@ namespace ZyweFrakcje
                 return;
             }
 
+            const string okupPrefix = "/zf okup";
+            if (messageText.StartsWith(okupPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                string tag = messageText.Substring(okupPrefix.Length).Trim().ToUpperInvariant();
+                if (tag.Length == 0)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf okup <frakcja> (deterministyczny test de-eskalacji)");
+                }
+                else
+                {
+                    // Wymuszona de-eskalacja bez LLM: brain odwołuje rajd -> stand_down -> statki odlatują.
+                    _events.WriteDebugOkup(tag);
+                }
+                return;
+            }
+
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf spawn <frakcja>, /zf raid <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -204,6 +233,10 @@ namespace ZyweFrakcje
                 {
                     HandleSpawnRequest(msg);
                 }
+                else if (type == "stand_down")
+                {
+                    HandleStandDown(msg);
+                }
                 // price_update / contract_create: obsługa w Etapie 6.
             }
         }
@@ -231,6 +264,27 @@ namespace ZyweFrakcje
             string kind = kindObj as string ?? "patrol";
 
             TestSpawner.SpawnForFaction(faction, kind);
+        }
+
+        private void HandleStandDown(Dictionary<string, object> msg)
+        {
+            object dataObj;
+            msg.TryGetValue("data", out dataObj);
+            var data = dataObj as Dictionary<string, object>;
+            if (data == null)
+            {
+                return;
+            }
+
+            object factionObj;
+            data.TryGetValue("faction", out factionObj);
+            string faction = factionObj as string;
+            if (string.IsNullOrEmpty(faction))
+            {
+                return;
+            }
+
+            TestSpawner.HandleStandDown(faction);
         }
 
         private void HandleRadioMessage(Dictionary<string, object> msg)
