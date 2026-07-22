@@ -93,9 +93,11 @@ być HEL/KRW/WGR.
 - [x] **E5. Potok spawn_request:** `/zf raid KRW` → na czacie `[ZF] spawn …`
   (mod → brain → spawn_request → mod). Konsola braina: `spawn_request KRW ...`.
   (Od integracji MES statek stawia MES — pełny test w sekcji F.)
-- [x] **E6. Auto-spawn z maszyny stanów:** doprowadź KRW do wojny (zniszcz 2
-  statki) → konsola `spawn_request KRW kind=raid`, w grze pojawia się statek.
-  Brak spawnu automatycznego KRW. Jest -100 reputacji (wojna) Brak autospawnu. 
+- [ ] **E6. Auto-spawn wojny (naprawione):** doprowadź KRW do wojny (zniszcz 2
+  statki) → rajd na KRAWĘDZI wejścia (`spawn_request KRW kind=raid`), a potem
+  PONAWIANY co tick, dopóki trwa wojna — bramkowany `spawn_cooldown_min` (więc
+  ~co 5 min, nie co tick) i `spawn_wlaczone`. Wcześniej: przy trwającej już
+  wojnie nie było nowych rajdów (raid tylko na krawędzi).
 - [x] **E7. Cooldown/wyłącznik:** w `rules.toml` ustaw `[spawn] wlaczone = false`
   (hot-reload) → auto-spawny milkną, ale `/zf raid KRW` dalej działa (force).
 

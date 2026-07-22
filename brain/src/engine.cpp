@@ -464,6 +464,18 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
         db_.set_faction_budget(row.tag, cfg.budzet_akcji_na_tick);
     }
 
+    // E6: wojna to stan ciągły, nie tylko krawędź wejścia. Dopóki frakcja jest
+    // w wojnie, ponawiamy rajd co tick — request_spawn bramkuje to spawn_cooldown_min
+    // i spawn_wlaczone, a cooldown z rajdu wejściowego chroni przed podwójnym spawnem.
+    // Bez tego wojna oznaczała jeden oddział przy wejściu i potem ciszę. Świeży odczyt
+    // stanu (po update_state), bo powyższa pętla mogła go właśnie zmienić.
+    for (const FactionRow& row : db_.list_factions()) {
+        if (row.state == "wojna") {
+            request_spawn(row.tag, "raid", cfg, now_ms,
+                          "Trwa wojna — frakcja " + row.tag + " ponawia nalot na gracza.");
+        }
+    }
+
     // 3) Zdarzenie losowe ważone stanem (wojna 3 : napięcie 2 : spokój 1).
     std::uniform_real_distribution<double> roll(0.0, 1.0);
     if (roll(rng_) < cfg.szansa_zdarzenia_losowego) {
