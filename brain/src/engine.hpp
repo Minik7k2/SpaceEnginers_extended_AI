@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <map>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,7 @@ struct RadioOut {
     int priority = 0;   // 1 = bojowe/wojna (krótszy cooldown radia)
     std::string kind;      // grozba/kpina/neutral/... — rodzaj wypowiedzi
     std::string context;   // opis sytuacji po polsku do promptu LLM
+    bool expect_decision = false; // rozmowa w trakcie wrogości: LLM decyduje o odpuszczeniu
 };
 
 // Zlecenie spawnu statku frakcji do CommandWriter (Etap 5). Decyzje podejmuje
@@ -59,6 +61,13 @@ public:
     // zmieniać typu zwrotu tamtych (i nie ruszać testów silnika).
     std::vector<SpawnOut> take_spawns();
 
+    // Reakcja na decyzję LLM o odpuszczeniu (okup/kapitulacja/rozejm), wołana z main
+    // po odebraniu wyniku z wątku LLM. Samobramkuje się: jeśli frakcja nie ma
+    // aktywnego rajdu, nic nie robi. W przeciwnym razie: delta relacji (deeskalacja_bonus),
+    // pamięć, gaśnie flaga rajdu i leci stand_down do moda (take_standdowns()).
+    void apply_deescalation(const std::string& faction, const Config& cfg, std::int64_t now_ms);
+    std::vector<std::string> take_standdowns();
+
 private:
     Db& db_;
     Fallback& fallback_;
@@ -66,8 +75,13 @@ private:
     std::map<std::string, std::int64_t> last_radio_ms_;
     std::map<std::string, std::int64_t> last_spawn_ms_;
     std::vector<SpawnOut> pending_spawns_;
+    std::set<std::string> active_raids_;          // frakcje z aktywnym rajdem (można je odwołać)
+    std::vector<std::string> pending_standdowns_; // frakcje do odwołania — bufor dla moda
 
     void ensure_known_faction(const std::string& tag);
+    // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
+    // aktywny rajd albo frakcja jest w napięciu/wojnie z graczem.
+    bool chat_expects_decision(const std::string& faction) const;
     // Pierwszy istniejący szablon z listy kandydatów; pusty string gdy żadnego nie ma.
     std::string render_first(const std::string& faction, std::initializer_list<const char*> kinds,
                              const std::map<std::string, std::string>& vars = {}) const;
@@ -75,7 +89,7 @@ private:
     // kind/context opisują intencję dla LLM; do context doklejany jest stan relacji.
     void emit(std::vector<RadioOut>& out, const std::string& faction, const std::string& text,
               int priority, const Config& cfg, std::int64_t now_ms,
-              const std::string& kind = {}, std::string context = {});
+              const std::string& kind = {}, std::string context = {}, bool expect_decision = false);
     // Przejścia spokoj/napiecie/wojna wg relacji do gracza (histereza wyjścia z wojny).
     void update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);

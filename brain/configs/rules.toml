@@ -32,6 +32,7 @@ handel_max = 3
 kontrakt_min = 10
 kontrakt_max = 20
 atak_na_wroga_bonus = 5
+deeskalacja_bonus = 15   # przyjęty okup/kapitulacja/rozejm; trwałe modyfikatory (sufit) zostają
 
 [tick]
 co_minut = 4
@@ -51,4 +52,4 @@ ttl_sekund = 120
 # wlaczone=false wyłącza auto-spawny (komenda /zf raid <frakcja> działa mimo to).
 # cooldown_min: minimalny odstęp między auto-spawnami TEJ SAMEJ frakcji (anty-spam).
 wlaczone = true
-cooldown_min = 5
+cooldown_min = 1

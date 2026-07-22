@@ -51,6 +51,14 @@ std::string format_value(double v) {
     return buf;
 }
 
+// Tylko nasze frakcje mają persony i SpawnGroupy MES (HEL/KRW/WGR). Obce tagi
+// (SPRT, frakcje ekonomii vanilla — RTSL, CLEN, UNIV itd.) trafiają do bazy relacji
+// przy zdarzeniach, ale NIE dostają spawnów: nie ma dla nich grup MES ani zachowań,
+// a factionOverride na obcą frakcję i tak kończy się odrzuceniem po stronie moda/MES.
+bool is_own_faction(const std::string& tag) {
+    return tag == "HEL" || tag == "KRW" || tag == "WGR";
+}
+
 } // namespace
 
 std::string faction_color(const std::string& tag) {
@@ -93,7 +101,7 @@ std::string Engine::render_first(const std::string& faction, std::initializer_li
 
 void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const std::string& text,
                   int priority, const Config& cfg, std::int64_t now_ms,
-                  const std::string& kind, std::string context) {
+                  const std::string& kind, std::string context, bool expect_decision) {
     if (text.empty() && kind.empty()) {
         return;
     }
@@ -118,7 +126,7 @@ void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const 
         context += " Wasza relacja z graczem: " + format_value(rel.value) + " (" +
                    state_display(state) + ").";
     }
-    out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context)});
+    out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context), expect_decision});
 }
 
 std::vector<SpawnOut> Engine::take_spawns() {
@@ -132,6 +140,14 @@ void Engine::request_spawn(const std::string& faction, const std::string& kind, 
     if (faction.empty()) {
         return;
     }
+    // Obce frakcje (vanilla/MES) nie mają SpawnGroupów — nie spawnujemy ich nawet
+    // przez /zf raid. Bez tego pula ticka słała spawn_request np. dla RTSL/CLEN,
+    // a MES i tak je odrzucał.
+    if (!is_own_faction(faction)) {
+        std::cout << "[brain] spawn pominięty: frakcja " << faction
+                  << " spoza moda (brak SpawnGroupa)\n";
+        return;
+    }
     if (!force) {
         if (!cfg.spawn_wlaczone) {
             return;
@@ -143,6 +159,9 @@ void Engine::request_spawn(const std::string& faction, const std::string& kind, 
         }
     }
     last_spawn_ms_[faction] = now_ms;
+    if (kind == "raid") {
+        active_raids_.insert(faction); // można go potem odwołać (okup/kapitulacja/rozejm)
+    }
     std::cout << "[brain] spawn_request " << faction << " kind=" << kind
               << (force ? " (wymuszony)" : "") << "\n";
     pending_spawns_.push_back({faction, kind, std::move(context), /*near_player=*/true});
@@ -181,6 +200,9 @@ void Engine::update_state(const std::string& faction, const Config& cfg, std::in
     db_.set_faction_state(faction, next);
     std::cout << "[brain] stan " << faction << ": " << row->state << " -> " << next
               << " (relacja " << format_value(value) << ")\n";
+    if (next == "spokoj") {
+        active_raids_.erase(faction); // pokój = żaden rajd już nie wisi
+    }
 
     if (next == "wojna") {
         db_.add_memory(now_ms, faction, "wojna", 2, "Frakcja " + faction + " wypowiedziała wojnę graczowi.");
@@ -310,11 +332,51 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
         if (row.tag == target) {
             const double value = db_.get_relation(target, kPlayer).value;
             const char* kind = value <= cfg.prog_wrogi ? "kpina" : "neutral";
+            const bool decyzja = chat_expects_decision(target);
+            std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
+                              "\". Odpowiedz mu.";
+            if (decyzja) {
+                ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. Jeśli uznasz, że "
+                       "przyjmujesz jego prośbę (okup, kapitulacja albo rozejm) i odwołujesz atak, "
+                       "ustaw odpuszcza=true; jeśli odmawiasz — false. Decyduj wedle swojej natury "
+                       "i tego, co gracz wam zrobił.";
+            }
             emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
-                 kind, "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") + "\". Odpowiedz mu.");
+                 kind, ctx, decyzja);
             return;
         }
     }
+}
+
+bool Engine::chat_expects_decision(const std::string& faction) const {
+    if (active_raids_.count(faction) > 0) {
+        return true;
+    }
+    const auto rows = db_.list_factions();
+    const auto row = std::find_if(rows.begin(), rows.end(),
+                                  [&](const FactionRow& r) { return r.tag == faction; });
+    return row != rows.end() && (row->state == "napiecie" || row->state == "wojna");
+}
+
+void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
+                                std::int64_t now_ms) {
+    if (active_raids_.count(faction) == 0) {
+        return; // nie ma aktywnego rajdu — nie ma czego odwoływać
+    }
+    active_raids_.erase(faction);
+    const double value = db_.adjust_relation(faction, kPlayer, cfg.deeskalacja_bonus);
+    db_.add_memory(now_ms, faction, "deeskalacja", 1,
+                   "Frakcja " + faction + " przyjęła propozycję gracza i odwołała atak.");
+    std::cout << "[brain] deeskalacja " << faction << ": przyjęto (relacja "
+              << format_value(cfg.deeskalacja_bonus) << " => " << format_value(value)
+              << "), stand_down\n";
+    pending_standdowns_.push_back(faction);
+}
+
+std::vector<std::string> Engine::take_standdowns() {
+    std::vector<std::string> taken;
+    taken.swap(pending_standdowns_);
+    return taken;
 }
 
 void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -347,6 +409,22 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
         }
         request_spawn(faction, kind, cfg, now_ms, "Ręcznie wywołany spawn (/zf raid).", /*force=*/true);
         out.push_back({"SYSTEM", "Spawn zlecony: " + faction + " (" + kind + ").", "white", 0, {}, {}});
+    } else if (cmd == "okup") {
+        // /zf okup <frakcja>: deterministyczny wyzwalacz de-eskalacji — niezależny od
+        // LLM (qwen-3B bywa za słaby, by sam trafnie odpuścić). Odwołuje aktywny rajd.
+        const std::string faction = data_str(ev, "faction");
+        if (active_raids_.count(faction) == 0) {
+            out.push_back({"SYSTEM", "Frakcja " + faction + " nie prowadzi rajdu — nie ma czego odwołać.",
+                           "white", 0, {}, {}});
+            return;
+        }
+        // Głos frakcji szablonem (pusty kind = z pominięciem LLM), potem naliczenie + stand_down.
+        const std::string voice = render_first(faction, {"neutral"});
+        if (!voice.empty()) {
+            out.push_back({faction, voice, faction_color(faction), 0, {}, {}});
+        }
+        apply_deescalation(faction, cfg, now_ms);
+        out.push_back({"SYSTEM", "Okup przyjęty: " + faction + " odwołuje rajd.", "white", 0, {}, {}});
     }
 }
 

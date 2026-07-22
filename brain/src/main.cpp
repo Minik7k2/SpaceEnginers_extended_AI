@@ -245,7 +245,7 @@ int main(int argc, char** argv) {
                 if (llm.enabled() && !msg.kind.empty() && !zf::persona_path(msg.faction).empty()) {
                     llm.submit({msg.faction, build_system_prompt(msg.faction, db),
                                 msg.context + " Rodzaj wypowiedzi: " + msg.kind + ".",
-                                msg.text, msg.color, msg.priority});
+                                msg.text, msg.color, msg.priority, msg.expect_decision});
                     continue;
                 }
                 if (msg.text.empty()) {
@@ -281,6 +281,15 @@ int main(int argc, char** argv) {
                 commands.write_radio_message(res.faction, res.text, res.color, res.priority);
                 std::cout << "[brain] radio" << (res.from_llm ? " (LLM)" : " (fallback)") << " ["
                           << res.faction << "]: " << res.text << "\n";
+                if (res.deescalate) {
+                    // Frakcja zdecydowała odpuścić: silnik nalicza okup i (jeśli był rajd)
+                    // buforuje stand_down, który zaraz zejdzie do moda.
+                    engine.apply_deescalation(res.faction, cfg, now);
+                }
+            }
+            for (const std::string& faction : engine.take_standdowns()) {
+                commands.write_stand_down(faction);
+                std::cout << "[brain] stand_down [" << faction << "] — statki rajdu odwołane\n";
             }
 
             if (!once) {

@@ -45,6 +45,17 @@ ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
 znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
 )GBNF";
 
+// Wariant dla rozmowy w trakcie wrogości: dokłada pole "odpuszcza" (bool) — decyzję
+// frakcji o przyjęciu okupu/kapitulacji/rozejmu. Reszta jak wyżej, żeby głos Etapu 4
+// się nie zmienił poza tym jednym polem.
+constexpr const char* kDeescalationGrammar = R"GBNF(
+root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\",\"odpuszcza\":" bool "}"
+tresc ::= znak{1,220}
+ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
+bool ::= "true" | "false"
+znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
+)GBNF";
+
 } // namespace
 
 #ifdef ZF_WITH_LLM
@@ -166,16 +177,19 @@ struct LlmWorker::Impl {
             }
             std::cout << "...\n" << std::flush;
 
-            LlmResult result{job.faction, job.fallback_text, job.color, job.priority, false};
+            LlmResult result{job.faction, job.fallback_text, job.color, job.priority, false, false};
             // 1 retry (CLAUDE.md), potem fallback. Ziarno LOSOWE
             // (LLAMA_DEFAULT_SEED) — inaczej ten sam prompt daje w kółko tę samą
             // odpowiedź (bug D2: „model pisze tą samą wiadomość"). Nowy chain w
             // generate() losuje ziarno przy każdym wywołaniu, więc i retry różni się.
             for (int attempt = 0; attempt < 2; ++attempt) {
                 std::string text;
-                if (generate(job.system_prompt, job.user_prompt, LLAMA_DEFAULT_SEED, text)) {
+                bool deescalate = false;
+                if (generate(job.system_prompt, job.user_prompt, LLAMA_DEFAULT_SEED, text,
+                             job.expect_decision, deescalate)) {
                     result.text = text;
                     result.from_llm = true;
+                    result.deescalate = deescalate;
                     break;
                 }
             }
@@ -194,7 +208,8 @@ struct LlmWorker::Impl {
 
     // Qwen2.5 mówi ChatML-em; szablon składamy ręcznie (parse_special przy tokenizacji).
     bool generate(const std::string& system_prompt, const std::string& user_prompt,
-                  std::uint32_t seed, std::string& out_text) {
+                  std::uint32_t seed, std::string& out_text,
+                  bool expect_decision, bool& out_deescalate) {
         const auto t_start = std::chrono::steady_clock::now();
         // Anty-echo: małe modele (3B) lubią przepisywać zacytowaną wiadomość
         // gracza do odpowiedzi (bug: "@krw co o mnie myslisz? ..."). Dokładamy
@@ -229,8 +244,9 @@ struct LlmWorker::Impl {
 
         llama_memory_clear(llama_get_memory(ctx), true);
 
+        const char* grammar = expect_decision ? kDeescalationGrammar : kRadioGrammar;
         llama_sampler* chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
-        llama_sampler_chain_add(chain, llama_sampler_init_grammar(vocab, kRadioGrammar, "root"));
+        llama_sampler_chain_add(chain, llama_sampler_init_grammar(vocab, grammar, "root"));
         llama_sampler_chain_add(chain, llama_sampler_init_top_p(0.9f, 1));
         llama_sampler_chain_add(chain, llama_sampler_init_temp(0.7f));
         llama_sampler_chain_add(chain, llama_sampler_init_dist(seed));
@@ -289,6 +305,7 @@ struct LlmWorker::Impl {
                 return false; // *2: max_chars liczy znaki, size() bajty (polskie znaki = 2 bajty)
             }
             out_text = tresc;
+            out_deescalate = expect_decision && parsed.value("odpuszcza", false);
             return true;
         } catch (const nlohmann::json::exception&) {
             return false;

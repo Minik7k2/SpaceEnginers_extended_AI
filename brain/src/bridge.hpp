@@ -46,6 +46,10 @@ public:
     void write_spawn_request(const std::string& faction, const std::string& kind,
                              bool near_player, const std::string& context);
 
+    // stand_down (Etap 5): frakcja odpuściła (okup/kapitulacja/rozejm) — mod każe jej
+    // statkom rajdu odlecieć i despawnować. Patrz docs/protocol.md.
+    void write_stand_down(const std::string& faction);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();

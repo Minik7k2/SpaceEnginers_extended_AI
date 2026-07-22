@@ -37,6 +37,8 @@ struct Config {
     double kontrakt_min = 10;
     double kontrakt_max = 20;
     double atak_na_wroga_bonus = 5;
+    double deeskalacja_bonus = 15;   // przyjęty okup/kapitulacja/rozejm: relacja rośnie,
+                                     // ale trwałe modyfikatory (sufit) zostają — spokój, nie amnestia
 
     // [tick]
     int tick_co_minut = 4;

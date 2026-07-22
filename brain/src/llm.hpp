@@ -17,6 +17,9 @@ struct LlmJob {
     std::string fallback_text;
     std::string color;
     int priority = 0;
+    // Rozmowa w trakcie wrogości: model dodatkowo decyduje o odpuszczeniu (okup/
+    // kapitulacja/rozejm) — używa rozszerzonej gramatyki z polem "odpuszcza".
+    bool expect_decision = false;
 };
 
 struct LlmResult {
@@ -25,6 +28,7 @@ struct LlmResult {
     std::string color;
     int priority = 0;
     bool from_llm = false;   // false = poszedł fallback
+    bool deescalate = false; // model zdecydował odpuścić (tylko gdy expect_decision)
 };
 
 // Głos frakcji (Etap 4): llama.cpp w osobnym wątku, żeby generacja (sekundy na CPU)

@@ -199,4 +199,17 @@ void CommandWriter::write_spawn_request(const std::string& faction, const std::s
     write_line(line);
 }
 
+void CommandWriter::write_stand_down(const std::string& faction) {
+    const nlohmann::json line = {
+        {"v", 1},
+        {"seq", db_.next_commands_seq()},
+        {"ts", now_unix_ms()},
+        {"type", "stand_down"},
+        {"data", {
+            {"faction", faction},
+        }},
+    };
+    write_line(line);
+}
+
 } // namespace zf
