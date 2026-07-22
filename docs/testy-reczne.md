@@ -82,19 +82,76 @@ być HEL/KRW/WGR.
 
 - [x] **E1. Frakcje istnieją:** po wczytaniu NOWEGO świata otwórz listę frakcji
   (G / terminal) → są „Korporacja Helion", „Krwawa Ręka", „Wolni Górnicy".
-- [ ] **E2. Bezpośredni spawn:** `/zf spawn KRW` → statek pojawia się ~200 m
-  przed tobą, na czacie `[ZF] spawn reczny: ... dla KRW`. (Dawniej padało na SPRT.)
-- [ ] **E3. Głos po walce (odblokowany D3):** ostrzelaj statek z E2 → konsola
+- [x] **E2. Bezpośredni spawn:** `/zf spawn KRW` → statek pojawia się ~200 m
+  przed tobą, na czacie `[ZF] spawn (vanilla) reczny: ... dla KRW`. To
+  niskopoziomowy test vanilla PrefabManagera — celowo omija MES (patrz sekcja F).
+- [x] **E3. Głos po walce (odblokowany D3):** ostrzelaj statek z E2 → konsola
   `combat_hit faction=KRW`, a KRW odpowiada groźbą **głosem persony** (LLM), nie
   szablonem. Zniszcz go → `grid_destroyed faction=KRW` i reakcja.
-- [ ] **E4. Pamięć (odblokowany D5):** po walce z KRW napisz `@KRW co o mnie
+- [x] **E4. Pamięć (odblokowany D5):** po walce z KRW napisz `@KRW co o mnie
   myślisz?` → odpowiedź nawiązuje do ostrzału/zniszczenia.
-- [ ] **E5. Potok spawn_request:** `/zf raid KRW` → na czacie `[ZF] spawn raid/…`
+- [x] **E5. Potok spawn_request:** `/zf raid KRW` → na czacie `[ZF] spawn …`
   (mod → brain → spawn_request → mod). Konsola braina: `spawn_request KRW ...`.
-- [ ] **E6. Auto-spawn z maszyny stanów:** doprowadź KRW do wojny (zniszcz 2
+  (Od integracji MES statek stawia MES — pełny test w sekcji F.)
+- [x] **E6. Auto-spawn z maszyny stanów:** doprowadź KRW do wojny (zniszcz 2
   statki) → konsola `spawn_request KRW kind=raid`, w grze pojawia się statek.
-- [ ] **E7. Cooldown/wyłącznik:** w `rules.toml` ustaw `[spawn] wlaczone = false`
+  Brak spawnu automatycznego KRW. Jest -100 reputacji (wojna) Brak autospawnu. 
+- [x] **E7. Cooldown/wyłącznik:** w `rules.toml` ustaw `[spawn] wlaczone = false`
   (hot-reload) → auto-spawny milkną, ale `/zf raid KRW` dalej działa (force).
+
+## F. Spawny przez MES (Etap 5b → MES)
+
+WYMAGANE: MES (Modular Encounters Systems, 1521905890) zasubskrybowany i aktywny
+w świecie. Brain z NOWEGO builda (bramka obcych frakcji) — po przebudowie
+zrestartuj `zf_brain.exe`. Rajdy testuj w OTWARTEJ PRZESTRZENI / kosmosie: przy
+terenie MES odrzuca miejsce (safety check, patrz F8).
+
+- [x] **F1. MES aktywny vs fallback:** `/zf raid KRW` → komunikat zaczyna się od
+  `[ZF] spawn (MES) ...`. Jeśli `spawn (vanilla) ...` — MES nieaktywny (sprawdź
+  subskrypcję/kolejność modów).
+- [x] **F2. Spawn MES:** `/zf raid KRW` w otwartej przestrzeni → `[ZF] spawn (MES)
+  raid: ZF_Raid dla KRW`, statek(i) faktycznie się pojawia. `/zf raid HEL` i
+  `/zf raid WGR` analogicznie.
+- [x] **F3. Właściciel = frakcja (factionOverride):** zespawnowany statek nazywa
+  się `KRW.Shakedown Drone` i należy do KRW (wrogi/czerwony), nie SPRT. HEL/WGR
+  neutralni.
+- [ ] **F4. Bramka obcych frakcji (nowy fix):** `/zf raid UNIV` (albo inny tag
+  vanilla) → konsola braina `spawn pominięty: frakcja UNIV spoza moda`, ŻADEN
+  statek się nie pojawia. Przebywanie przy stacji vanilla (UNIV/RTSL/CLEN) nie
+  generuje auto-spawnów tych frakcji.
+- [x] **F5. Głos LLM na statku MES (jak E3):** ostrzelaj statek z F2 → konsola
+  `combat_hit faction=KRW`, KRW odpowiada groźbą głosem persony (`RADIO | KRW: …`);
+  zniszcz → `grid_destroyed faction=KRW` i reakcja.
+- [ ] **F6. kind → grupa MES:** raid używa `ZF_Raid` (widać w komunikacie). patrol
+  (`ZF_Patrol`) i convoy (`ZF_Convoy`) wywołasz tylko maszyną stanów
+  (napięcie→patrol), nie `/zf raid`.
+- [ ] **F7. Regresja despawnu MES (odziedziczone z A5):** zespawnuj statek MES,
+  odleć bardzo daleko aż MES go zdespawni → w konsoli braina NIE MOŻE pojawić się
+  `grid_destroyed`.
+- [ ] **F8. Safety check (to nie błąd):** przy zboczu/terenie planety część spawnów
+  daje `[ZF] MES odrzucił spawn ... (safety check?)` — MES nie ma bezpiecznego
+  miejsca na statek. Ten sam spawn w otwartej przestrzeni schodzi.
+- [ ] **F9. Agresja RivalAI (kosmos):** w KOSMOSIE `/zf raid KRW` → statki od razu
+  lecą na gracza i atakują, BEZ prowokacji (nie wiszą jak przedtem). Jeśli nadal
+  wiszą do ostrzelania — RivalAI nie podpięło się do drona (prefab bez Remote
+  Control do podmiany → trzeba innego statku). Uwaga: HEL/WGR są neutralni, więc
+  Fighter może NIE atakować neutralnego gracza — pełny wrogi rajd HEL/WGR to
+  osobny krok; testuj agresję na KRW (wrogie).
+- [ ] **F10. Bramka środowiska:** na PLANECIE (jest grawitacja) `/zf raid KRW` →
+  `[ZF] frakcja KRW: rajd na razie tylko w kosmosie … (spawn pominięty)`, żaden
+  statek nie spada. W kosmosie ten sam rajd spawnuje.
+- [ ] **F11. De-eskalacja deterministyczna (`/zf okup`):** w kosmosie `/zf raid KRW`,
+  potem `/zf okup KRW` → konsola braina `deeskalacja KRW: przyjęto (relacja +15…)`
+  i `stand_down [KRW]`; na czacie `[ZF] stand_down KRW: N statk(i) wstrzymuje ogień
+  i despawnuje` → statki KRW **przestają strzelać** i po ~10 s **znikają**. `/zf rel`
+  pokazuje relację wyższą o 15. `/zf okup KRW` bez aktywnego rajdu → „nie prowadzi rajdu".
+- [ ] **F12. Anteny wyciszone:** po `/zf raid KRW` **nie ma** angielskiego gadania
+  z anten („Engineer, fill up the collector…"). Nasze polskie radio (`[RADIO | KRW]`)
+  działa normalnie.
+- [ ] **F13. De-eskalacja przez LLM (`@KRW`):** UWAGA — wymaga dobrego modelu PL
+  (qwen-3B odmawia i pisze bełkot; po podmianie na Bielika). W trakcie rajdu
+  `@KRW biorę okup, oto 1000 sztabek` → jeśli model odpuści: `deeskalacja` + `stand_down`
+  jak w F11. Rozszerzona gramatyka dokłada pole `odpuszcza`.
 
 ## Znane zachowania (to nie błędy)
 
@@ -105,8 +162,14 @@ być HEL/KRW/WGR.
 - Losowe radio z ticku pojawia się średnio co ~3 tick (35% × tick 4 min),
   częściej gdy frakcja jest w napięciu/wojnie.
 - Dryf relacji to 1 pkt / 2 h gry — niemierzalny w krótkim teście.
-- Spawn (Etap 5b) to STUB: vanilla prefab `DS_Pirate_ShakedownDrone` dla każdej
-  frakcji, bez AI/patroli/despawnu MES i bez rozróżnienia patrol/raid/convoy
-  (kind widać tylko w komunikacie). Prawdziwe floty z MES podmienimy później.
+- Statki to na razie PLACEHOLDER `DS_Pirate_ShakedownDrone` (kosmiczny, jonowy):
+  - na PLANECIE spada — brak silników atmosferycznych/wodorowych; rajdy testuj w kosmosie;
+  - angielskie groźby („Engineer, fill up the collector…", „You have 5 minutes!") to
+    wbudowana antena prefaba, NIE nasz mod — nasze radio jest po polsku (`RADIO | KRW: …`);
+  - jest PASYWNY do sprowokowania: wisi i namierza wieżyczkami, ale po ostrzelaniu
+    normalnie leci i atakuje. Aktywne rajdy od spawnu oraz statki atmo/naziemne
+    dojdą z RivalAI (w toku: RivalAI na vanilla, najpierw kosmos).
+- Bramka obcych frakcji: relacje z frakcjami vanilla (SPRT/UNIV/…) nadal są śledzone
+  i widać je w `/zf rel` — blokujemy im tylko spawny, nie samo śledzenie relacji.
 
 Wynik zgłoś jako: numer testu + PASS/FAIL + (przy FAIL) log z konsoli braina.
