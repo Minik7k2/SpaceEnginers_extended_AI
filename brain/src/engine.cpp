@@ -101,7 +101,8 @@ std::string Engine::render_first(const std::string& faction, std::initializer_li
 
 void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const std::string& text,
                   int priority, const Config& cfg, std::int64_t now_ms,
-                  const std::string& kind, std::string context, bool expect_decision) {
+                  const std::string& kind, std::string context, bool expect_decision,
+                  std::string player_msg) {
     if (text.empty() && kind.empty()) {
         return;
     }
@@ -126,7 +127,8 @@ void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const 
         context += " Wasza relacja z graczem: " + format_value(rel.value) + " (" +
                    state_display(state) + ").";
     }
-    out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context), expect_decision});
+    out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context),
+                   expect_decision, std::move(player_msg)});
 }
 
 std::vector<SpawnOut> Engine::take_spawns() {
@@ -373,7 +375,7 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
                        "swojej natury i tego, co gracz wam zrobił.";
             }
             emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
-                 kind, ctx, decyzja);
+                 kind, ctx, decyzja, /*player_msg=*/data_str(ev, "text"));
             return;
         }
     }

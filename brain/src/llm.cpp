@@ -92,6 +92,34 @@ std::string strip_decision_leak(std::string s) {
     return s;
 }
 
+// Sanityzacja KAŻDEJ wypowiedzi z modelu (feedback z gry, Bielik). Model bywa:
+// (1) podpisuje się tagiem na końcu ("... - KRW."), (2) prefiksuje własną nazwą
+// na początku ("KRW: ..."), (3) wtrąca uchwyt gracza "@Gracz". To artefakty, nie
+// treść — obcinamy. Podpis/prefiks tylko gdy jawny separator przy tagu (mała szansa
+// fałszywego trafienia, gdy tag pada w środku zdania).
+std::string sanitize_reply(std::string s, const std::string& faction) {
+    static const std::regex at_player(R"(@([Gg]racz))");
+    s = std::regex_replace(s, at_player, "$1"); // "@Gracz" -> "Gracz"
+
+    if (!faction.empty()) {
+        const std::string dash = "\xE2\x80\x94", ndash = "\xE2\x80\x93"; // — –
+        // Końcowy podpis: sep (ASCII -~(: lub myślnik UTF-8) + TAG na końcu.
+        const std::regex sig_tail("\\s*(?:[-~(:]|" + dash + "|" + ndash + ")\\s*" + faction +
+                                  "[)\\.\\s]*$", std::regex::icase);
+        s = std::regex_replace(s, sig_tail, "");
+        // Początkowy prefiks nazwą nadawcy: "TAG: " / "TAG - ".
+        const std::regex sig_head("^\\s*" + faction + "\\s*[-:~]\\s*", std::regex::icase);
+        s = std::regex_replace(s, sig_head, "");
+    }
+
+    const char* ws = " \t\r\n";
+    const std::size_t b = s.find_first_not_of(ws);
+    if (b == std::string::npos) {
+        return {};
+    }
+    return s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
+
 } // namespace
 
 #ifdef ZF_WITH_LLM
@@ -214,6 +242,7 @@ struct LlmWorker::Impl {
             std::cout << "...\n" << std::flush;
 
             LlmResult result{job.faction, job.fallback_text, job.color, job.priority, false, false};
+            result.player_msg = job.player_msg; // main dopisze turę do pamięci dialogu
             // 1 retry (CLAUDE.md), potem fallback. Ziarno LOSOWE
             // (LLAMA_DEFAULT_SEED) — inaczej ten sam prompt daje w kółko tę samą
             // odpowiedź (bug D2: „model pisze tą samą wiadomość"). Nowy chain w
@@ -223,7 +252,7 @@ struct LlmWorker::Impl {
                 bool deescalate = false;
                 if (generate(job.system_prompt, job.user_prompt, LLAMA_DEFAULT_SEED, text,
                              job.expect_decision, deescalate)) {
-                    result.text = text;
+                    result.text = sanitize_reply(std::move(text), job.faction);
                     result.from_llm = true;
                     result.deescalate = deescalate;
                     break;

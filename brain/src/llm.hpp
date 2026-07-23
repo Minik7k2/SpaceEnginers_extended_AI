@@ -20,6 +20,7 @@ struct LlmJob {
     // Rozmowa w trakcie wrogości: model dodatkowo decyduje o odpuszczeniu (okup/
     // kapitulacja/rozejm) — używa rozszerzonej gramatyki z polem "odpuszcza".
     bool expect_decision = false;
+    std::string player_msg = {}; // surowa wiadomość gracza (do pamięci dialogu); pusta poza czatem
 };
 
 struct LlmResult {
@@ -29,6 +30,7 @@ struct LlmResult {
     int priority = 0;
     bool from_llm = false;   // false = poszedł fallback
     bool deescalate = false; // model zdecydował odpuścić (tylko gdy expect_decision)
+    std::string player_msg = {}; // przeniesione z zadania — main dopisuje turę do pamięci dialogu
 };
 
 // Głos frakcji (Etap 4): llama.cpp w osobnym wątku, żeby generacja (sekundy na CPU)

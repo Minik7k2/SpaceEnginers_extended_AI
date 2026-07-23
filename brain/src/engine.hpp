@@ -27,6 +27,7 @@ struct RadioOut {
     std::string kind;      // grozba/kpina/neutral/... — rodzaj wypowiedzi
     std::string context;   // opis sytuacji po polsku do promptu LLM
     bool expect_decision = false; // rozmowa w trakcie wrogości: LLM decyduje o odpuszczeniu
+    std::string player_msg = {};  // surowa wiadomość gracza — do pamięci dialogu (pusta poza czatem)
 };
 
 // Zlecenie spawnu statku frakcji do CommandWriter (Etap 5). Decyzje podejmuje
@@ -89,7 +90,8 @@ private:
     // kind/context opisują intencję dla LLM; do context doklejany jest stan relacji.
     void emit(std::vector<RadioOut>& out, const std::string& faction, const std::string& text,
               int priority, const Config& cfg, std::int64_t now_ms,
-              const std::string& kind = {}, std::string context = {}, bool expect_decision = false);
+              const std::string& kind = {}, std::string context = {}, bool expect_decision = false,
+              std::string player_msg = {});
     // Przejścia spokoj/napiecie/wojna wg relacji do gracza (histereza wyjścia z wojny).
     void update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);

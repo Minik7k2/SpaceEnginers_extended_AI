@@ -2,12 +2,15 @@
 #include <chrono>
 #include <csignal>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -240,12 +243,34 @@ int main(int argc, char** argv) {
             }
         };
 
-        const auto send_all = [&commands, &llm, &db](const std::vector<zf::RadioOut>& msgs) {
+        // Pamięć dialogu (5c): ostatnie tury Gracz<->frakcja per frakcja, wstrzykiwane
+        // do promptu, żeby frakcja trzymała wątek rozmowy, a nie odpowiadała z jednej
+        // wiadomości (feedback z gry: „nie trzyma wątku"). Ephemeralna — na sesję braina.
+        std::map<std::string, std::deque<std::pair<std::string, std::string>>> dialog;
+        constexpr std::size_t kDialogTurns = 4;
+
+        const auto send_all = [&commands, &llm, &db, &dialog](const std::vector<zf::RadioOut>& msgs) {
             for (const zf::RadioOut& msg : msgs) {
                 if (llm.enabled() && !msg.kind.empty() && !zf::persona_path(msg.faction).empty()) {
-                    llm.submit({msg.faction, build_system_prompt(msg.faction, db),
-                                msg.context + " Rodzaj wypowiedzi: " + msg.kind + ".",
-                                msg.text, msg.color, msg.priority, msg.expect_decision});
+                    std::string user_prompt = msg.context;
+                    const auto it = dialog.find(msg.faction);
+                    if (it != dialog.end() && !it->second.empty()) {
+                        std::string hist = "Wcześniejsza rozmowa z graczem (najstarsze u góry):\n";
+                        for (const auto& turn : it->second) {
+                            hist += "- Gracz: " + turn.first + "\n- Ty: " + turn.second + "\n";
+                        }
+                        user_prompt = hist + "\n" + msg.context;
+                    }
+                    zf::LlmJob job;
+                    job.faction = msg.faction;
+                    job.system_prompt = build_system_prompt(msg.faction, db);
+                    job.user_prompt = user_prompt + " Rodzaj wypowiedzi: " + msg.kind + ".";
+                    job.fallback_text = msg.text;
+                    job.color = msg.color;
+                    job.priority = msg.priority;
+                    job.expect_decision = msg.expect_decision;
+                    job.player_msg = msg.player_msg;
+                    llm.submit(std::move(job));
                     continue;
                 }
                 if (msg.text.empty()) {
@@ -281,6 +306,16 @@ int main(int argc, char** argv) {
                 commands.write_radio_message(res.faction, res.text, res.color, res.priority);
                 std::cout << "[brain] radio" << (res.from_llm ? " (LLM)" : " (fallback)") << " ["
                           << res.faction << "]: " << res.text << "\n";
+                // Dopisz turę do pamięci dialogu — tylko realne wypowiedzi LLM (nie fallback/
+                // placeholder), żeby nie zaśmiecać historii. player_msg pusty poza czatem.
+                if (res.from_llm && !res.player_msg.empty()) {
+                    auto& dq = dialog[res.faction];
+                    auto clip = [](std::string t) { if (t.size() > 200) t.resize(200); return t; };
+                    dq.emplace_back(clip(res.player_msg), clip(res.text));
+                    while (dq.size() > kDialogTurns) {
+                        dq.pop_front();
+                    }
+                }
                 if (res.deescalate) {
                     // Frakcja zdecydowała odpuścić: silnik nalicza okup i (jeśli był rajd)
                     // buforuje stand_down, który zaraz zejdzie do moda.
