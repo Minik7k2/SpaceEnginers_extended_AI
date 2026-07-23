@@ -17,6 +17,9 @@ constexpr const char* kLastDriftKey = "__last_drift_ms__";
 // (zniszczenia i tak łapie grid_destroyed).
 constexpr double kFullDamage = 2000.0;
 
+// Wartość handlu (kredyty) dla handel_max — powyżej delta się już nie pogłębia (Etap 6).
+constexpr double kFullTrade = 5000.0;
+
 std::string data_str(const Event& ev, const char* key) {
     return ev.data.contains(key) && ev.data[key].is_string() ? ev.data[key].get<std::string>()
                                                              : std::string{};
@@ -239,6 +242,10 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
         handle_chat(ev, cfg, now_ms, out);
     } else if (ev.type == "debug_command") {
         handle_debug(ev, cfg, now_ms, out);
+    } else if (ev.type == "trade") {
+        handle_trade(ev, cfg, now_ms, out);
+    } else if (ev.type == "contract_done") {
+        handle_contract_done(ev, cfg, now_ms, out);
     }
     return out;
 }
@@ -378,6 +385,62 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
                  kind, ctx, decyzja, /*player_msg=*/data_str(ev, "text"));
             return;
         }
+    }
+}
+
+void Engine::handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                          std::vector<RadioOut>& out) {
+    const std::string faction = data_str(ev, "faction");
+    if (faction.empty()) {
+        return;
+    }
+    ensure_known_faction(faction);
+
+    const std::string kind = data_str(ev, "kind"); // buy/sell — informacyjnie
+    const double value = data_num(ev, "value");
+    const double t = std::clamp(value / kFullTrade, 0.0, 1.0);
+    const double delta = cfg.handel_min + (cfg.handel_max - cfg.handel_min) * t;
+    const double rel = db_.adjust_relation(faction, kPlayer, delta);
+    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta) << " za handel ("
+              << (kind.empty() ? "wymiana" : kind) << " " << format_value(value) << ") => "
+              << format_value(rel) << "\n";
+    db_.add_memory(now_ms, faction, "handel", 0,
+                   "Gracz handlował z " + faction + " (" + (kind.empty() ? "wymiana" : kind) + ").");
+    update_state(faction, cfg, now_ms, out); // handel bez radia — zbyt częsty, żeby nadawać
+}
+
+void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                  std::vector<RadioOut>& out) {
+    const std::string faction = data_str(ev, "faction");
+    if (faction.empty()) {
+        return;
+    }
+    ensure_known_faction(faction);
+
+    const std::string contract_id = data_str(ev, "contract_id");
+    const bool success = !ev.data.contains("success") || !ev.data["success"].is_boolean()
+                             ? true
+                             : ev.data["success"].get<bool>();
+    if (!contract_id.empty()) {
+        db_.set_contract_status(contract_id, success ? "done" : "failed");
+    }
+
+    const double delta = success ? cfg.kontrakt_max : -cfg.kontrakt_min;
+    const double rel = db_.adjust_relation(faction, kPlayer, delta);
+    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta)
+              << (success ? " za wykonany kontrakt" : " za zawalony kontrakt") << " => "
+              << format_value(rel) << "\n";
+    db_.add_memory(now_ms, faction, success ? "kontrakt_ok" : "kontrakt_fail", 0,
+                   success ? "Gracz wykonał kontrakt dla " + faction + "."
+                           : "Gracz zawalił kontrakt dla " + faction + ".");
+    update_state(faction, cfg, now_ms, out);
+
+    if (success) {
+        emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms, "neutral",
+             "Gracz właśnie wykonał dla was kontrakt. Podziękuj mu po swojemu.");
+    } else {
+        emit(out, faction, render_first(faction, {"zal", "kpina", "neutral"}), 0, cfg, now_ms, "zal",
+             "Gracz zawalił wasz kontrakt. Wyraź niezadowolenie po swojemu.");
     }
 }
 

@@ -61,6 +61,13 @@ public:
     // Ostatnie n wpisów pamięci frakcji, od najstarszego do najnowszego.
     std::vector<std::string> recent_memories(const std::string& faction, int n) const;
 
+    // Kontrakty (Etap 6): utrwalone — ID muszą przeżyć restart świata (odtworzenie).
+    void upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,
+                         const std::string& status, const std::string& payload);
+    void set_contract_status(const std::string& id, const std::string& status);
+    // Frakcja kontraktu ("" = nieznany id).
+    std::string get_contract_faction(const std::string& id) const;
+
     // Małe wartości int64 (np. znacznik ostatniego ticku) — współdzieli tabelę bridge_state,
     // klucze zaczynają się od "__" żeby nie kolidowały ze ścieżkami plików.
     std::int64_t get_kv(const std::string& key) const { return get_line_offset(key); }

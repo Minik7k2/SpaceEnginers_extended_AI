@@ -217,4 +217,25 @@ std::vector<std::string> Db::recent_memories(const std::string& faction, int n) 
     return rows;
 }
 
+void Db::upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,
+                         const std::string& status, const std::string& payload) {
+    Stmt s(handle_,
+           "INSERT INTO contracts (contract_id, faction, kind, status, payload) "
+           "VALUES (?, ?, ?, ?, ?) "
+           "ON CONFLICT(contract_id) DO UPDATE SET faction=excluded.faction, kind=excluded.kind, "
+           "status=excluded.status, payload=excluded.payload;");
+    s.text(1, id).text(2, faction).text(3, kind).text(4, status).text(5, payload).done();
+}
+
+void Db::set_contract_status(const std::string& id, const std::string& status) {
+    Stmt s(handle_, "UPDATE contracts SET status = ? WHERE contract_id = ?;");
+    s.text(1, status).text(2, id).done();
+}
+
+std::string Db::get_contract_faction(const std::string& id) const {
+    Stmt s(handle_, "SELECT faction FROM contracts WHERE contract_id = ?;");
+    s.text(1, id);
+    return s.row() ? s.col_text(0) : std::string{};
+}
+
 } // namespace zf

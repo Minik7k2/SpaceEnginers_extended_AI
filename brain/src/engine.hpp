@@ -110,6 +110,12 @@ private:
                      std::vector<RadioOut>& out);
     void handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
+    // Etap 6 — ekonomia: handel podnosi relację (+1..+3), wykonany kontrakt (+kontrakt_max),
+    // zawalony (-kontrakt_min); status kontraktu utrwalany w SQLite.
+    void handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                      std::vector<RadioOut>& out);
+    void handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                              std::vector<RadioOut>& out);
 };
 
 // Kolor czatu frakcji (CLAUDE.md): HEL niebieski, KRW czerwony, WGR żółty.
