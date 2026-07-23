@@ -1,20 +1,24 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI;
-using VRageMath;
 
 namespace ZyweFrakcje
 {
     /// <summary>
     /// Kolejka radiowa (Etap 5a). Brain dostarcza radio_message paczkami przez commands.jsonl;
-    /// tu ustawiamy je w kolejkę PRIORYTETOWĄ, kolorujemy wg frakcji i wyświetlamy z odstępem,
-    /// żeby seria wiadomości nie mignęła jednym kłębem. Bojowe (priority>=1) wyprzedzają gadkę.
+    /// tu ustawiamy je w kolejkę PRIORYTETOWĄ i wyświetlamy z odstępem, żeby seria wiadomości
+    /// nie mignęła jednym kłębem. Bojowe (priority>=1) wyprzedzają gadkę.
     ///
     /// TTL: wiadomości starsze niż 2 min porzucamy (liczone z brainowego "ts"). Chroni przed
     /// zaległymi echami z poprzedniej sesji — kolejka commands.jsonl przeżywa restart świata,
     /// a nie chcemy witać gracza minutami starego radia.
     ///
     /// Limit 1/min/frakcję poza walką narzuca już brain (engine.emit) — tu tylko prezentacja.
+    ///
+    /// Kolor frakcji: brain niesie pole "color" (blue/red/yellow), ale kolorowanego CZATU nie da
+    /// się zrobić na whiteliście ModAPI (MyVisualScriptLogicProvider poza whitelistą). Wyświetlamy
+    /// więc klienckim MyAPIGateway.Utilities.ShowMessage (biało, jak Etap 1); color trzymamy w
+    /// kolejce pod ewentualny kolorowy HUD (ShowNotification) w przyszłości. Patrz docs/testy-reczne G.
     /// </summary>
     internal sealed class RadioDisplay
     {
@@ -123,26 +127,9 @@ namespace ZyweFrakcje
 
         private static void Show(Item item)
         {
-            string author = "RADIO | " + item.Faction;
-            // SendChatMessageColored koloruje treść wiadomości arbitralnym Color (font "White"
-            // to tylko krój). Nazwa nadawcy niesie [RADIO | TAG] jak dotąd, więc format z testów
-            // (A1/B1/B2) zostaje. playerId=0 => trafia do lokalnego czatu (single player).
-            MyVisualScriptLogicProvider.SendChatMessageColored(item.Text, ColorFor(item.Color), author, 0L, "White");
-        }
-
-        // Brain wysyła nazwy kolorów (faction_color w engine.cpp): blue/red/yellow/white.
-        // Używamy nazwanych kolorów VRageMath — bez ryzyka przeciążeń konstruktora Color(int,...).
-        private static Color ColorFor(string name)
-        {
-            switch ((name ?? string.Empty).ToLowerInvariant())
-            {
-                case "red":    return Color.Red;         // KRW — Krwawa Ręka
-                case "blue":   return Color.DodgerBlue;  // HEL — Korporacja Helion
-                case "yellow": return Color.Yellow;      // WGR — Wolni Górnicy
-                case "green":  return Color.LimeGreen;
-                case "orange": return Color.Orange;
-                default:       return Color.White;       // SYSTEM / TEST / nieznane
-            }
+            // Kliencki, whitelistowany czat (jak Etap 1). Nazwa nadawcy niesie [RADIO | TAG],
+            // więc format z testów (A1/B1/B2) zostaje; czat SE rysuje białym.
+            MyAPIGateway.Utilities.ShowMessage("RADIO | " + item.Faction, item.Text);
         }
 
         private static long NowMs()

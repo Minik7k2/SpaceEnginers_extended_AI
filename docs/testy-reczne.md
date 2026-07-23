@@ -157,13 +157,14 @@ terenie MES odrzuca miejsce (safety check, patrz F8).
 
 ## G. Radio: kolor / kolejka / TTL (Etap 5a)
 
-Radio przechodzi teraz przez `RadioDisplay`: kolor wg frakcji, kolejka priorytetowa,
-odstęp między wyświetleniami i TTL 2 min. Limit 1/min/frakcję poza walką dalej
-narzuca brain (to nie ta sekcja).
+Radio przechodzi teraz przez `RadioDisplay`: kolejka priorytetowa, odstęp między
+wyświetleniami i TTL 2 min. Limit 1/min/frakcję poza walką dalej narzuca brain
+(to nie ta sekcja). UWAGA kolor: kolorowanego CZATU nie da się zrobić na whiteliście
+ModAPI (`MyVisualScriptLogicProvider` poza whitelistą — potwierdzone logiem), więc
+radio wyświetla się białym jak dotąd. Kolor frakcji ewentualnie później jako HUD.
 
-- [ ] **G1. Kolor frakcji:** `@KRW witam` → odpowiedź **czerwona**; `@HEL witam`
-  → **niebieska**; `@WGR witam` → **żółta**. `/zf rel` oraz echo zwykłej wiadomości
-  (`[RADIO | TEST]`) → **białe**. Nazwa nadawcy dalej `RADIO | TAG`.
+- [ ] **G1. Format radia:** `@KRW witam` → `RADIO | KRW: ...` (biało). `@HEL`/`@WGR`
+  analogicznie, `/zf rel` → `RADIO | SYSTEM: ...`. Nazwa nadawcy niesie `RADIO | TAG`.
 - [ ] **G2. Bez zalania czatu:** wymuś kilka wiadomości na raz (np. `/zf tick`
   kilka razy pod rząd albo rajd, który generuje serię) → linie radia pojawiają się
   **jedna po drugiej** (~co 0.3 s), nie wszystkie w jednej klatce.
