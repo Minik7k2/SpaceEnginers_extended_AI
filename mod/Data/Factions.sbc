@@ -21,6 +21,11 @@
       <DiscoveredByDefault>true</DiscoveredByDefault>
       <AcceptHumans>false</AcceptHumans>
       <AutoAcceptMember>false</AutoAcceptMember>
+      <!-- Etap 6.2 (eksperyment): typ ekonomiczny + saldo, by Economy wygenerowało stacje
+           (potrzebny factionStationId do AddContract). Typy reuse z vanilla FactionTypes.sbc.
+           Do weryfikacji /zf stations na NOWYM świecie — czy stała frakcja dostaje stacje. -->
+      <StartingBalance>100000000</StartingBalance>
+      <Type>Trader</Type>
     </Faction>
 
     <Faction Tag="KRW" Founder="Kapitan Krwawej Reki">
@@ -35,6 +40,8 @@
       <DiscoveredByDefault>true</DiscoveredByDefault>
       <AcceptHumans>false</AcceptHumans>
       <AutoAcceptMember>false</AutoAcceptMember>
+      <StartingBalance>100000000</StartingBalance>
+      <Type>Pirate</Type>
     </Faction>
 
     <Faction Tag="WGR" Founder="Starszy Gildii Gorniczej">
@@ -49,6 +56,8 @@
       <DiscoveredByDefault>true</DiscoveredByDefault>
       <AcceptHumans>false</AcceptHumans>
       <AutoAcceptMember>false</AutoAcceptMember>
+      <StartingBalance>100000000</StartingBalance>
+      <Type>Miner</Type>
     </Faction>
 
   </Factions>

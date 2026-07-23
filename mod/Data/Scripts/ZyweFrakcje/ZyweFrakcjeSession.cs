@@ -163,6 +163,13 @@ namespace ZyweFrakcje
                 return;
             }
 
+            if (messageText.Trim().Equals("/zf stations", StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                ReportStations(); // Etap 6.2 diag: czy nasze frakcje dostały stacje ekonomiczne
+                return;
+            }
+
             const string raidPrefix = "/zf raid";
             if (messageText.StartsWith(raidPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -201,7 +208,7 @@ namespace ZyweFrakcje
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -314,6 +321,35 @@ namespace ZyweFrakcje
             }
 
             TestSpawner.HandleStandDown(faction);
+        }
+
+        /// <summary>
+        /// Etap 6.2 diagnostyka: wypisuje liczbę i ID stacji ekonomicznych każdej naszej frakcji.
+        /// Sprawdza kluczowe założenie — czy stałe frakcje (IsDefault) z typem ekonomicznym w SBC
+        /// dostają stacje generowane przez Economy (potrzebne jako factionStationId do AddContract).
+        /// Wynik >0 => ścieżka ContractSystem otwarta; 0 wszędzie => trzeba innego podejścia.
+        /// </summary>
+        private void ReportStations()
+        {
+            string[] tags = { "HEL", "KRW", "WGR" };
+            for (int i = 0; i < tags.Length; i++)
+            {
+                IMyFaction faction = MyAPIGateway.Session.Factions.TryGetFactionByTag(tags[i]);
+                if (faction == null)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", tags[i] + ": brak frakcji (nowy świat?)");
+                    continue;
+                }
+                int count = 0;
+                string ids = "";
+                foreach (IMyFactionStation station in faction.Stations)
+                {
+                    count++;
+                    ids += (ids.Length > 0 ? ", " : "") + station.Id;
+                }
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    tags[i] + ": stacji=" + count + (count > 0 ? " [" + ids + "]" : ""));
+            }
         }
 
         private void HandleRadioMessage(Dictionary<string, object> msg)
