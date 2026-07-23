@@ -455,22 +455,23 @@ bool Engine::chat_expects_decision(const std::string& faction) const {
 }
 
 void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
-                                std::int64_t now_ms) {
+                                std::int64_t now_ms, std::int64_t amount) {
     if (active_raids_.count(faction) == 0) {
         return; // nie ma aktywnego rajdu — nie ma czego odwoływać
     }
     active_raids_.erase(faction);
     const double value = db_.adjust_relation(faction, kPlayer, cfg.deeskalacja_bonus);
+    const std::string kwota = amount > 0 ? " (okup " + std::to_string(amount) + " kr)" : "";
     db_.add_memory(now_ms, faction, "deeskalacja", 1,
-                   "Frakcja " + faction + " przyjęła propozycję gracza i odwołała atak.");
+                   "Frakcja " + faction + " przyjęła propozycję gracza i odwołała atak" + kwota + ".");
     std::cout << "[brain] deeskalacja " << faction << ": przyjęto (relacja "
               << format_value(cfg.deeskalacja_bonus) << " => " << format_value(value)
-              << "), stand_down\n";
-    pending_standdowns_.push_back(faction);
+              << ")" << kwota << ", stand_down\n";
+    pending_standdowns_.push_back({faction, amount});
 }
 
-std::vector<std::string> Engine::take_standdowns() {
-    std::vector<std::string> taken;
+std::vector<std::pair<std::string, std::int64_t>> Engine::take_standdowns() {
+    std::vector<std::pair<std::string, std::int64_t>> taken;
     taken.swap(pending_standdowns_);
     return taken;
 }

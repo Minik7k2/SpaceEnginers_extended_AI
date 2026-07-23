@@ -35,6 +35,31 @@ constexpr const char* kFallbackPath = "personas/fallback.toml";
 
 std::atomic<bool> g_should_stop{false};
 
+// Wyłuskuje kwotę okupu z wiadomości gracza (Etap 6): pierwszy ciąg 2–12 cyfr,
+// np. "biorę okup, oto 4000 sztabek" -> 4000. 0 = brak kwoty (okup symboliczny).
+// Bez wyjątków (reguła pętli mostka): akumulacja ręczna, długie ciągi pomijane.
+std::int64_t parse_ransom_amount(const std::string& text) {
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] >= '0' && text[i] <= '9') {
+            std::size_t j = i;
+            while (j < text.size() && text[j] >= '0' && text[j] <= '9') {
+                ++j;
+            }
+            if (j - i >= 2 && j - i <= 12) { // ignoruj pojedyncze cyfry i absurdy (overflow)
+                std::int64_t val = 0;
+                for (std::size_t k = i; k < j; ++k) {
+                    val = val * 10 + (text[k] - '0');
+                }
+                return val;
+            }
+            i = j;
+        } else {
+            ++i;
+        }
+    }
+    return 0;
+}
+
 // CLion i konsola startują z różnych katalogów roboczych, a config (i ścieżki
 // względne w nim, np. db_path) zakładają katalog brain/. Gdy configu nie ma
 // w bieżącym katalogu, szukamy go w górę od położenia binarki i tam się
@@ -317,14 +342,17 @@ int main(int argc, char** argv) {
                     }
                 }
                 if (res.deescalate) {
-                    // Frakcja zdecydowała odpuścić: silnik nalicza okup i (jeśli był rajd)
-                    // buforuje stand_down, który zaraz zejdzie do moda.
-                    engine.apply_deescalation(res.faction, cfg, now);
+                    // Frakcja odpuszcza: wyłuskaj kwotę okupu z wiadomości gracza (Etap 6).
+                    // >0 = realny okup w kredytach — mod pobierze go z konta gracza przy stand_down.
+                    engine.apply_deescalation(res.faction, cfg, now,
+                                              parse_ransom_amount(res.player_msg));
                 }
             }
-            for (const std::string& faction : engine.take_standdowns()) {
-                commands.write_stand_down(faction);
-                std::cout << "[brain] stand_down [" << faction << "] — statki rajdu odwołane\n";
+            for (const auto& sd : engine.take_standdowns()) {
+                commands.write_stand_down(sd.first, sd.second);
+                std::cout << "[brain] stand_down [" << sd.first << "]"
+                          << (sd.second > 0 ? " okup " + std::to_string(sd.second) + " kr" : "")
+                          << " — statki rajdu odwołane\n";
             }
 
             if (!once) {

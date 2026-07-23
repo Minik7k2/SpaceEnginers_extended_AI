@@ -48,7 +48,7 @@ public:
 
     // stand_down (Etap 5): frakcja odpuściła (okup/kapitulacja/rozejm) — mod każe jej
     // statkom rajdu odlecieć i despawnować. Patrz docs/protocol.md.
-    void write_stand_down(const std::string& faction);
+    void write_stand_down(const std::string& faction, std::int64_t ransom_amount);
 
 private:
     void write_line(const nlohmann::json& line);

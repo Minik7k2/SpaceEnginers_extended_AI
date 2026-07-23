@@ -66,8 +66,12 @@ public:
     // po odebraniu wyniku z wątku LLM. Samobramkuje się: jeśli frakcja nie ma
     // aktywnego rajdu, nic nie robi. W przeciwnym razie: delta relacji (deeskalacja_bonus),
     // pamięć, gaśnie flaga rajdu i leci stand_down do moda (take_standdowns()).
-    void apply_deescalation(const std::string& faction, const Config& cfg, std::int64_t now_ms);
-    std::vector<std::string> take_standdowns();
+    // amount>0 = realny okup w kredytach (Etap 6): mod pobiera tyle z konta gracza na
+    // konto frakcji przy stand_down. 0 = de-eskalacja symboliczna (/zf okup, brak kwoty).
+    void apply_deescalation(const std::string& faction, const Config& cfg, std::int64_t now_ms,
+                            std::int64_t amount = 0);
+    // Pary (frakcja, kwota_okupu) do wysłania jako stand_down.
+    std::vector<std::pair<std::string, std::int64_t>> take_standdowns();
 
 private:
     Db& db_;
@@ -77,7 +81,7 @@ private:
     std::map<std::string, std::int64_t> last_spawn_ms_;
     std::vector<SpawnOut> pending_spawns_;
     std::set<std::string> active_raids_;          // frakcje z aktywnym rajdem (można je odwołać)
-    std::vector<std::string> pending_standdowns_; // frakcje do odwołania — bufor dla moda
+    std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
 
     void ensure_known_faction(const std::string& tag);
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa

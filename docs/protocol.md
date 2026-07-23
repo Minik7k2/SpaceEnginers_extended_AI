@@ -22,6 +22,6 @@ debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn","faction":"KRW"}       /zf 
 
 radio_message   {"faction":"KRW","text":"...","color":"red","priority":1}   [RADIO | NAZWA], TTL 2 min
 spawn_request   {"faction":"KRW","kind":"patrol"|"raid"|"convoy","near_player":true,"context":"incydent#123"}
-stand_down      {"faction":"KRW"}   frakcja odpuściła (okup/kapitulacja/rozejm) — statki rajdu odlatują i despawnują
+stand_down      {"faction":"KRW","ransom":4000}   frakcja odpuściła — statki rajdu odlatują; ransom>0 = mod pobiera tyle kredytów gracz→frakcja (Etap 6)
 price_update    {"faction":"HEL","modifier":1.5}                            Etap 6
 contract_create {"faction":"WGR","kind":"escort","reward":50000,"payload":{}}  Etap 6

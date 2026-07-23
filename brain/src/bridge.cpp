@@ -199,7 +199,7 @@ void CommandWriter::write_spawn_request(const std::string& faction, const std::s
     write_line(line);
 }
 
-void CommandWriter::write_stand_down(const std::string& faction) {
+void CommandWriter::write_stand_down(const std::string& faction, std::int64_t ransom_amount) {
     const nlohmann::json line = {
         {"v", 1},
         {"seq", db_.next_commands_seq()},
@@ -207,6 +207,7 @@ void CommandWriter::write_stand_down(const std::string& faction) {
         {"type", "stand_down"},
         {"data", {
             {"faction", faction},
+            {"ransom", ransom_amount}, // >0 = realny okup w kredytach do pobrania (Etap 6)
         }},
     };
     write_line(line);

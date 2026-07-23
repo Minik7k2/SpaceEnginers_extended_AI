@@ -320,7 +320,51 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Etap 6: realny okup — >0 znaczy pobierz tyle kredytów z konta gracza na konto
+            // frakcji (JSON liczby to double, patrz Json.ParseNumber).
+            object ransomObj;
+            if (data.TryGetValue("ransom", out ransomObj) && ransomObj is double)
+            {
+                long ransom = (long)(double)ransomObj;
+                if (ransom > 0)
+                {
+                    CollectRansom(faction, ransom);
+                }
+            }
+
             TestSpawner.HandleStandDown(faction);
+        }
+
+        /// <summary>
+        /// Realny okup (Etap 6): przelewa kredyty z konta gracza na konto frakcji. Pobiera
+        /// min(żądane, saldo) — pirat bierze, ile masz. Konta obsługuje Economy (RequestChangeBalance).
+        /// </summary>
+        private void CollectRansom(string faction, long amount)
+        {
+            IMyPlayer player = MyAPIGateway.Session.Player;
+            if (player == null || amount <= 0)
+            {
+                return;
+            }
+            long balance;
+            if (!player.TryGetBalanceInfo(out balance))
+            {
+                return;
+            }
+            long taken = balance < amount ? balance : amount;
+            if (taken <= 0)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Okup dla " + faction + ": brak kredytów na koncie");
+                return;
+            }
+            player.RequestChangeBalance(-taken);
+            IMyFaction fac = MyAPIGateway.Session.Factions.TryGetFactionByTag(faction);
+            if (fac != null)
+            {
+                fac.RequestChangeBalance(taken);
+            }
+            string note = taken < amount ? " (tyle miałeś z żądanych " + amount + ")" : "";
+            MyAPIGateway.Utilities.ShowMessage("ZF", "Okup zapłacony: " + taken + " kr dla " + faction + note);
         }
 
         /// <summary>
