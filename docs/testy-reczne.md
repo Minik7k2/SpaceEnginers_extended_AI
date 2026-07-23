@@ -93,7 +93,7 @@ być HEL/KRW/WGR.
 - [x] **E5. Potok spawn_request:** `/zf raid KRW` → na czacie `[ZF] spawn …`
   (mod → brain → spawn_request → mod). Konsola braina: `spawn_request KRW ...`.
   (Od integracji MES statek stawia MES — pełny test w sekcji F.)
-- [ ] **E6. Auto-spawn wojny (naprawione):** doprowadź KRW do wojny (zniszcz 2
+- [x] **E6. Auto-spawn wojny (naprawione):** doprowadź KRW do wojny (zniszcz 2
   statki) → rajd na KRAWĘDZI wejścia (`spawn_request KRW kind=raid`), a potem
   PONAWIANY co tick, dopóki trwa wojna — bramkowany `spawn_cooldown_min` (więc
   ~co 5 min, nie co tick) i `spawn_wlaczone`. Wcześniej: przy trwającej już
@@ -117,29 +117,29 @@ terenie MES odrzuca miejsce (safety check, patrz F8).
 - [x] **F3. Właściciel = frakcja (factionOverride):** zespawnowany statek nazywa
   się `KRW.Shakedown Drone` i należy do KRW (wrogi/czerwony), nie SPRT. HEL/WGR
   neutralni.
-- [ ] **F4. Bramka obcych frakcji (nowy fix):** `/zf raid UNIV` (albo inny tag
+- [x] **F4. Bramka obcych frakcji (nowy fix):** `/zf raid UNIV` (albo inny tag
   vanilla) → konsola braina `spawn pominięty: frakcja UNIV spoza moda`, ŻADEN
   statek się nie pojawia. Przebywanie przy stacji vanilla (UNIV/RTSL/CLEN) nie
   generuje auto-spawnów tych frakcji.
 - [x] **F5. Głos LLM na statku MES (jak E3):** ostrzelaj statek z F2 → konsola
   `combat_hit faction=KRW`, KRW odpowiada groźbą głosem persony (`RADIO | KRW: …`);
   zniszcz → `grid_destroyed faction=KRW` i reakcja.
-- [ ] **F6. kind → grupa MES:** raid używa `ZF_Raid` (widać w komunikacie). patrol
+- [x] **F6. kind → grupa MES:** raid używa `ZF_Raid` (widać w komunikacie). patrol
   (`ZF_Patrol`) i convoy (`ZF_Convoy`) wywołasz tylko maszyną stanów
   (napięcie→patrol), nie `/zf raid`.
-- [ ] **F7. Regresja despawnu MES (odziedziczone z A5):** zespawnuj statek MES,
+- [x] **F7. Regresja despawnu MES (odziedziczone z A5):** zespawnuj statek MES,
   odleć bardzo daleko aż MES go zdespawni → w konsoli braina NIE MOŻE pojawić się
   `grid_destroyed`.
-- [ ] **F8. Safety check (to nie błąd):** przy zboczu/terenie planety część spawnów
+- [x] **F8. Safety check (to nie błąd):** przy zboczu/terenie planety część spawnów
   daje `[ZF] MES odrzucił spawn ... (safety check?)` — MES nie ma bezpiecznego
   miejsca na statek. Ten sam spawn w otwartej przestrzeni schodzi.
-- [ ] **F9. Agresja RivalAI (kosmos):** w KOSMOSIE `/zf raid KRW` → statki od razu
+- [x] **F9. Agresja RivalAI (kosmos):** w KOSMOSIE `/zf raid KRW` → statki od razu
   lecą na gracza i atakują, BEZ prowokacji (nie wiszą jak przedtem). Jeśli nadal
   wiszą do ostrzelania — RivalAI nie podpięło się do drona (prefab bez Remote
   Control do podmiany → trzeba innego statku). Uwaga: HEL/WGR są neutralni, więc
   Fighter może NIE atakować neutralnego gracza — pełny wrogi rajd HEL/WGR to
   osobny krok; testuj agresję na KRW (wrogie).
-- [ ] **F10. Bramka środowiska:** na PLANECIE (jest grawitacja) `/zf raid KRW` →
+- [x] **F10. Bramka środowiska:** na PLANECIE (jest grawitacja) `/zf raid KRW` →
   `[ZF] frakcja KRW: rajd na razie tylko w kosmosie … (spawn pominięty)`, żaden
   statek nie spada. W kosmosie ten sam rajd spawnuje.
 - [ ] **F11. De-eskalacja deterministyczna (`/zf okup`):** w kosmosie `/zf raid KRW`,
@@ -147,7 +147,7 @@ terenie MES odrzuca miejsce (safety check, patrz F8).
   i `stand_down [KRW]`; na czacie `[ZF] stand_down KRW: N statk(i) wstrzymuje ogień
   i despawnuje` → statki KRW **przestają strzelać** i po ~10 s **znikają**. `/zf rel`
   pokazuje relację wyższą o 15. `/zf okup KRW` bez aktywnego rajdu → „nie prowadzi rajdu".
-- [ ] **F12. Anteny wyciszone:** po `/zf raid KRW` **nie ma** angielskiego gadania
+- [x] **F12. Anteny wyciszone:** po `/zf raid KRW` **nie ma** angielskiego gadania
   z anten („Engineer, fill up the collector…"). Nasze polskie radio (`[RADIO | KRW]`)
   działa normalnie.
 - [ ] **F13. De-eskalacja przez LLM (`@KRW`):** UWAGA — wymaga dobrego modelu PL
@@ -155,10 +155,30 @@ terenie MES odrzuca miejsce (safety check, patrz F8).
   `@KRW biorę okup, oto 1000 sztabek` → jeśli model odpuści: `deeskalacja` + `stand_down`
   jak w F11. Rozszerzona gramatyka dokłada pole `odpuszcza`.
 
+## G. Radio: kolor / kolejka / TTL (Etap 5a)
+
+Radio przechodzi teraz przez `RadioDisplay`: kolor wg frakcji, kolejka priorytetowa,
+odstęp między wyświetleniami i TTL 2 min. Limit 1/min/frakcję poza walką dalej
+narzuca brain (to nie ta sekcja).
+
+- [ ] **G1. Kolor frakcji:** `@KRW witam` → odpowiedź **czerwona**; `@HEL witam`
+  → **niebieska**; `@WGR witam` → **żółta**. `/zf rel` oraz echo zwykłej wiadomości
+  (`[RADIO | TEST]`) → **białe**. Nazwa nadawcy dalej `RADIO | TAG`.
+- [ ] **G2. Bez zalania czatu:** wymuś kilka wiadomości na raz (np. `/zf tick`
+  kilka razy pod rząd albo rajd, który generuje serię) → linie radia pojawiają się
+  **jedna po drugiej** (~co 0.3 s), nie wszystkie w jednej klatce.
+- [ ] **G3. Priorytet bojowy:** w trakcie rajdu KRW, gdy równocześnie czeka zwykła
+  gadka i groźba bojowa (priority=1) → **bojowa wychodzi pierwsza**. Obserwacyjne;
+  trudne do wymuszenia deterministycznie.
+- [ ] **G4. TTL 2 min:** doprowadź do zaległego radia (brain pisze `radio_message`,
+  gdy świat nie jest wczytany), wróć do świata po **>2 min** → stare radio **NIE**
+  wyskakuje (bez TTL wyskakiwało jako „zaległe echo"). Świeże radio dalej działa.
+
 ## Znane zachowania (to nie błędy)
 
 - Po pierwszym starcie braina mogą przyjść zaległe echa wiadomości z
-  poprzedniej sesji (kolejka commands.jsonl).
+  poprzedniej sesji (kolejka commands.jsonl) — ale tylko młodsze niż 2 min;
+  starsze ucina TTL RadioDisplay (Etap 5a).
 - SPRT (vanilla piraci) nie nadaje radia — nie ma szablonów; jego reakcje
   widać tylko w relacjach i konsoli. Gadają HEL/KRW/WGR.
 - Losowe radio z ticku pojawia się średnio co ~3 tick (35% × tick 4 min),

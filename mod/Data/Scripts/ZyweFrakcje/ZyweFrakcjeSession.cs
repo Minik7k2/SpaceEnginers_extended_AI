@@ -10,6 +10,7 @@ namespace ZyweFrakcje
     /// <summary>
     /// Etap 1 — most: sesja pisze session_start/heartbeat/chat_message do events.jsonl,
     /// odczytuje commands.jsonl co ~60 tików i wyświetla radio_message jako [RADIO | NAZWA].
+    /// Etap 5a: radio idzie przez RadioDisplay (kolor frakcji, kolejka priorytetowa, TTL 2 min).
     /// Zero System.Net, zero plików poza MyAPIGateway.Utilities.*FileInStorage (whitelist ModAPI).
     /// </summary>
     [MySessionComponentDescriptor(MyUpdateOrder.AfterSimulation)]
@@ -24,6 +25,7 @@ namespace ZyweFrakcje
         private CommandReader _commands;
         private CombatTracker _combat;
         private ProximityWatcher _proximity;
+        private RadioDisplay _radio;
         private MESApi _mes;
         private int _tick;
 
@@ -31,6 +33,7 @@ namespace ZyweFrakcje
         {
             _events = new EventWriter(typeof(ZyweFrakcjeSession), RotateBytes);
             _commands = new CommandReader(typeof(ZyweFrakcjeSession));
+            _radio = new RadioDisplay();
             _mes = new MESApi(); // rejestruje handler; MESApiReady dopiero gdy MES odeśle API
             TestSpawner.SetMes(_mes);
             MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
@@ -88,6 +91,10 @@ namespace ZyweFrakcje
             if (_proximity != null)
             {
                 _proximity.Update();
+            }
+            if (_radio != null)
+            {
+                _radio.Update(_tick); // kolejka priorytetowa radia: kolor + TTL + odstęp
             }
             // MES bywa gotowy dopiero po kilku tikach — rejestrujemy akcję spawnu, gdy wstanie.
             TestSpawner.EnsureSpawnActionRegistered();
@@ -305,7 +312,26 @@ namespace ZyweFrakcje
             data.TryGetValue("text", out textObj);
             string text = textObj as string ?? "";
 
-            MyAPIGateway.Utilities.ShowMessage("RADIO | " + faction, text);
+            object colorObj;
+            data.TryGetValue("color", out colorObj);
+            string color = colorObj as string ?? "white";
+
+            // JSON liczby parsujemy jako double (Json.ParseNumber) — stąd rzut przez double.
+            int priority = 0;
+            object priorityObj;
+            if (data.TryGetValue("priority", out priorityObj) && priorityObj is double)
+            {
+                priority = (int)(double)priorityObj;
+            }
+
+            long ts = 0;
+            object tsObj;
+            if (msg.TryGetValue("ts", out tsObj) && tsObj is double)
+            {
+                ts = (long)(double)tsObj;
+            }
+
+            _radio.Enqueue(faction, text, color, priority, ts);
         }
     }
 }
