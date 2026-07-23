@@ -346,13 +346,24 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
             }
             const double value = db_.get_relation(target, kPlayer).value;
             const char* kind = value <= cfg.prog_wrogi ? "kpina" : "neutral";
+
+            if (signal == "weak") {
+                // Szum: frakcja słyszy tylko strzępy — ma REAGOWAĆ na zakłócenia (kazać
+                // powtórzyć/podejść), nie zgadywać treści. Bez decyzji o okupie/rozejmie:
+                // nie da się przyjąć oferty, której się nie dosłyszało (Etap 5c).
+                std::string ctx = "Odbierasz od gracza zaszumioną, rwącą się transmisję radiową — "
+                                  "docierają tylko strzępy: \"" + data_str(ev, "text") +
+                                  "\". NIE znasz pełnej treści i nie zgaduj, o co chodziło. Zareaguj "
+                                  "na słaby sygnał po swojemu: zaznacz, że trzeszczy/rwie się, i każ "
+                                  "powtórzyć albo podejść bliżej.";
+                emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
+                     kind, ctx, /*expect_decision=*/false);
+                return;
+            }
+
             const bool decyzja = chat_expects_decision(target);
             std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
                               "\". Odpowiedz mu.";
-            if (signal == "weak") {
-                ctx += " Sygnał jest słaby i trzeszczy — masz prawo nie dosłyszeć wszystkiego, "
-                       "odpowiedz krótko, jakby przez zakłócenia.";
-            }
             if (decyzja) {
                 ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. W osobnym polu JSON "
                        "\"odpuszcza\" wpisz true, jeśli przyjmujesz jego prośbę (okup, kapitulacja "
