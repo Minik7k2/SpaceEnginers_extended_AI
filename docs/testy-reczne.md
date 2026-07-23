@@ -142,7 +142,7 @@ terenie MES odrzuca miejsce (safety check, patrz F8).
 - [x] **F10. Bramka środowiska:** na PLANECIE (jest grawitacja) `/zf raid KRW` →
   `[ZF] frakcja KRW: rajd na razie tylko w kosmosie … (spawn pominięty)`, żaden
   statek nie spada. W kosmosie ten sam rajd spawnuje.
-- [ ] **F11. De-eskalacja deterministyczna (`/zf okup`):** w kosmosie `/zf raid KRW`,
+- [x] **F11. De-eskalacja deterministyczna (`/zf okup`):** w kosmosie `/zf raid KRW`,
   potem `/zf okup KRW` → konsola braina `deeskalacja KRW: przyjęto (relacja +15…)`
   i `stand_down [KRW]`; na czacie `[ZF] stand_down KRW: N statk(i) wstrzymuje ogień
   i despawnuje` → statki KRW **przestają strzelać** i po ~10 s **znikają**. `/zf rel`
@@ -150,10 +150,13 @@ terenie MES odrzuca miejsce (safety check, patrz F8).
 - [x] **F12. Anteny wyciszone:** po `/zf raid KRW` **nie ma** angielskiego gadania
   z anten („Engineer, fill up the collector…"). Nasze polskie radio (`[RADIO | KRW]`)
   działa normalnie.
-- [ ] **F13. De-eskalacja przez LLM (`@KRW`):** UWAGA — wymaga dobrego modelu PL
-  (qwen-3B odmawia i pisze bełkot; po podmianie na Bielika). W trakcie rajdu
-  `@KRW biorę okup, oto 1000 sztabek` → jeśli model odpuści: `deeskalacja` + `stand_down`
-  jak w F11. Rozszerzona gramatyka dokłada pole `odpuszcza`.
+- [x] **F13. De-eskalacja przez LLM (`@KRW`):** w trakcie rajdu `@KRW biorę okup…`
+  → jeśli model odpuści: `deeskalacja` + `stand_down` jak w F11. Rozszerzona gramatyka
+  dokłada pole `odpuszcza`. Zweryfikowane W GRZE 2026-07-23 na **qwen-3B** (odmówił
+  przy 1000 sztabkach, odpuścił przy 4000 — wbrew wcześniejszej obawie, że potrzebny
+  Bielik). Przy okazji naprawiony wyciek markera „odpuszcza=true" do treści radia
+  widocznej dla gracza (sanityzacja w `llm.cpp` + rozdzielenie pola/wypowiedzi
+  w prompcie) — do ponownego sprawdzenia, że gracz nie widzi już markera.
 
 ## G. Radio: kolor / kolejka / TTL (Etap 5a)
 
@@ -163,15 +166,15 @@ wyświetleniami i TTL 2 min. Limit 1/min/frakcję poza walką dalej narzuca brai
 ModAPI (`MyVisualScriptLogicProvider` poza whitelistą — potwierdzone logiem), więc
 radio wyświetla się białym jak dotąd. Kolor frakcji ewentualnie później jako HUD.
 
-- [ ] **G1. Format radia:** `@KRW witam` → `RADIO | KRW: ...` (biało). `@HEL`/`@WGR`
+- [x] **G1. Format radia:** `@KRW witam` → `RADIO | KRW: ...` (biało). `@HEL`/`@WGR`
   analogicznie, `/zf rel` → `RADIO | SYSTEM: ...`. Nazwa nadawcy niesie `RADIO | TAG`.
-- [ ] **G2. Bez zalania czatu:** wymuś kilka wiadomości na raz (np. `/zf tick`
+- [x] **G2. Bez zalania czatu:** wymuś kilka wiadomości na raz (np. `/zf tick`
   kilka razy pod rząd albo rajd, który generuje serię) → linie radia pojawiają się
   **jedna po drugiej** (~co 0.3 s), nie wszystkie w jednej klatce.
-- [ ] **G3. Priorytet bojowy:** w trakcie rajdu KRW, gdy równocześnie czeka zwykła
+- [x] **G3. Priorytet bojowy:** w trakcie rajdu KRW, gdy równocześnie czeka zwykła
   gadka i groźba bojowa (priority=1) → **bojowa wychodzi pierwsza**. Obserwacyjne;
   trudne do wymuszenia deterministycznie.
-- [ ] **G4. TTL 2 min:** doprowadź do zaległego radia (brain pisze `radio_message`,
+- [x] **G4. TTL 2 min:** doprowadź do zaległego radia (brain pisze `radio_message`,
   gdy świat nie jest wczytany), wróć do świata po **>2 min** → stare radio **NIE**
   wyskakuje (bez TTL wyskakiwało jako „zaległe echo"). Świeże radio dalej działa.
 

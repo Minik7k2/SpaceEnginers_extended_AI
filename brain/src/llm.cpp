@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <regex>
 #include <sstream>
 #include <thread>
 
@@ -55,6 +56,41 @@ ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
 bool ::= "true" | "false"
 znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
 )GBNF";
+
+// Sanityzacja treści radia w trybie decyzji. Mimo gramatyki mały model (3B) bywa
+// echem promptu i wkleja marker decyzji ("odpuszcza=true"/"false") do pola "tresc",
+// czyli do tekstu widocznego dla gracza. Prawdziwą flagę czytamy z osobnego pola
+// JSON, więc marker w treści to śmieć — wycinamy go i sprzątamy zawisłe separatory.
+std::string strip_decision_leak(std::string s) {
+    static const std::regex marker(R"(\s*odpuszcza\s*[:=]?\s*(?:true|false)\.?)",
+                                   std::regex::icase);
+    s = std::regex_replace(s, marker, "");
+
+    // Prawy trim: spacje/przecinki/myślniki ASCII oraz myślniki UTF-8 (— U+2014, – U+2013),
+    // które mogły zostać po wyciętym markerze (np. "…niech będzie — ").
+    const auto ends_with = [&s](const char* suf) {
+        const std::size_t n = std::char_traits<char>::length(suf);
+        return s.size() >= n && s.compare(s.size() - n, n, suf) == 0;
+    };
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        while (!s.empty()) {
+            const char c = s.back();
+            if (c == ' ' || c == '\t' || c == ',' || c == ';' || c == ':' || c == '-') {
+                s.pop_back();
+                changed = true;
+            } else {
+                break;
+            }
+        }
+        if (ends_with("\xE2\x80\x94") || ends_with("\xE2\x80\x93")) { // — –
+            s.erase(s.size() - 3);
+            changed = true;
+        }
+    }
+    return s;
+}
 
 } // namespace
 
@@ -300,7 +336,11 @@ struct LlmWorker::Impl {
         // Walidacja: musi być JSON {"tresc","ton"}, treść niepusta i w limicie.
         try {
             const nlohmann::json parsed = nlohmann::json::parse(raw);
-            const std::string tresc = parsed.value("tresc", std::string{});
+            std::string tresc = parsed.value("tresc", std::string{});
+            // Tryb decyzji: wytnij z widocznej treści ewentualny wyciek markera "odpuszcza".
+            if (expect_decision) {
+                tresc = strip_decision_leak(std::move(tresc));
+            }
             if (tresc.empty() || tresc.size() > static_cast<std::size_t>(max_chars) * 2) {
                 return false; // *2: max_chars liczy znaki, size() bajty (polskie znaki = 2 bajty)
             }

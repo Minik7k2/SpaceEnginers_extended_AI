@@ -336,10 +336,12 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
             std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
                               "\". Odpowiedz mu.";
             if (decyzja) {
-                ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. Jeśli uznasz, że "
-                       "przyjmujesz jego prośbę (okup, kapitulacja albo rozejm) i odwołujesz atak, "
-                       "ustaw odpuszcza=true; jeśli odmawiasz — false. Decyduj wedle swojej natury "
-                       "i tego, co gracz wam zrobił.";
+                ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. W osobnym polu JSON "
+                       "\"odpuszcza\" wpisz true, jeśli przyjmujesz jego prośbę (okup, kapitulacja "
+                       "albo rozejm) i odwołujesz atak, albo false, jeśli odmawiasz. W samej "
+                       "wypowiedzi (pole \"tresc\") NIE pisz słowa \"odpuszcza\" ani true/false — "
+                       "to ma być wyłącznie kwestia radiowa w twoim charakterze. Decyduj wedle "
+                       "swojej natury i tego, co gracz wam zrobił.";
             }
             emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
                  kind, ctx, decyzja);
