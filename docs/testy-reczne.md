@@ -178,6 +178,27 @@ radio wyświetla się białym jak dotąd. Kolor frakcji ewentualnie później ja
   gdy świat nie jest wczytany), wróć do świata po **>2 min** → stare radio **NIE**
   wyskakuje (bez TTL wyskakiwało jako „zaległe echo"). Świeże radio dalej działa.
 
+## H. Adresowanie zasięgiem i szum (Etap 5c)
+
+Mod liczy dystans do najbliższego statku frakcji i nadaje adresatowi jakość łączności:
+`clear` ≤6 km, `weak` (szum) ≤15 km, dalej `none`. Brain bramkuje `@FRAKCJA` sygnałem.
+`@frakcja` bez statku frakcji w pobliżu **nie** dostanie odpowiedzi — to nie błąd, to zasięg.
+Wyłącznik na testy: `[radio] wymagaj_zasiegu = false` (hot-reload). Weryfikowane bez SE
+na `--replay` (bramka none/clear/weak); w grze do odhaczenia:
+
+- [ ] **H1. Poza zasięgiem:** `@KRW witam`, gdy żaden statek KRW nie jest w pobliżu
+  (lub >15 km) → `[RADIO | SYSTEM] Brak zasięgu — KRW nie odpowiada.`, konsola
+  `chat: KRW poza zasięgiem`. KRW **nie** odpowiada.
+- [ ] **H2. Czysty odbiór:** statek KRW blisko (≤6 km, np. tuż po `/zf raid KRW`) →
+  `@KRW witam` → normalna odpowiedź głosem persony (LLM), bez szumu.
+- [ ] **H3. Szum (słaby sygnał):** statek KRW daleko (~6–15 km) → `@KRW oddaj wrak` →
+  KRW **odpowiada**, ale w konsoli braina zdarzenie `chat_message` ma treść w trzaskach
+  (`o..aj w.ak`), a odpowiedź jest krótsza/„przez zakłócenia". W swoim czacie widzisz
+  swój oryginał (to frakcja cię niedosłyszała).
+- [ ] **H4. Wyłącznik zasięgu:** `rules.toml` → `[radio] wymagaj_zasiegu = false`
+  (hot-reload) → `@KRW` z dowolnej odległości znów odpowiada (zachowanie sprzed 5c).
+  Cofnij po teście.
+
 ## Znane zachowania (to nie błędy)
 
 - Po pierwszym starcie braina mogą przyjść zaległe echa wiadomości z

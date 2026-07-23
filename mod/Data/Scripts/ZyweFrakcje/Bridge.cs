@@ -86,7 +86,7 @@ namespace ZyweFrakcje
             WriteLine("heartbeat", data);
         }
 
-        public void WriteChatMessage(string text, string target, IEnumerable<string> inRange)
+        public void WriteChatMessage(string text, string target, IEnumerable<string> inRange, string signal)
         {
             var builder = new Json.Builder().Add("text", text);
             if (target == null)
@@ -98,6 +98,8 @@ namespace ZyweFrakcje
                 builder.Add("target", target);
             }
             builder.AddStringArray("in_range", inRange);
+            // 5c: jakość łączności do adresata (clear/weak/none) — brain bramkuje zasięgiem.
+            builder.Add("signal", signal ?? "clear");
             WriteLine("chat_message", builder.Build());
         }
 

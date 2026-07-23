@@ -1,7 +1,7 @@
 # Reguły świata (hot-reload). Świat MŚCIWY.
 
 [llm]
-model_path = "models/qwen2.5-3b-instruct-q4_k_m.gguf"
+model_path = ""
 use_gpu = true          # false => CPU (gdy SE zjada VRAM)
 max_chars = 200
 
@@ -45,6 +45,9 @@ budzet_akcji_na_tick = 1
 # Dla snappier: 12 = 5 s. Zdarzenia bojowe mają osobny, stały cooldown 15 s.
 limit_na_frakcje_na_min = 6
 ttl_sekund = 120
+# 5c: @FRAKCJA odpowiada tylko gdy jej statek jest w zasięgu radia (mod liczy dystans:
+# clear <=6 km, weak/szum <=15 km, dalej = brak zasięgu). false = rozmowa zewsząd (test).
+wymagaj_zasiegu = true
 
 [spawn]
 # Spawny statków frakcji sterowane maszyną stanów: przejście w napięcie -> patrol,
@@ -52,4 +55,4 @@ ttl_sekund = 120
 # wlaczone=false wyłącza auto-spawny (komenda /zf raid <frakcja> działa mimo to).
 # cooldown_min: minimalny odstęp między auto-spawnami TEJ SAMEJ frakcji (anty-spam).
 wlaczone = true
-cooldown_min = 1
+cooldown_min = 10

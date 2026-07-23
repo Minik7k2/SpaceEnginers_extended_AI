@@ -10,7 +10,7 @@ Rotacja: nadawca po 5 MB zaczyna `events-NNNN.jsonl` / `commands-NNNN.jsonl`; od
 
 session_start  {"world":"nazwa","player_id":123,"player_name":"Minik","mod_version":"0.1"}
 heartbeat      {"pos":[x,y,z],"speed":m_s}                                  co 10 s
-chat_message   {"text":"...","target":"KRW"|null,"in_range":["WGR"]}        target = @frakcja
+chat_message   {"text":"...","target":"KRW"|null,"in_range":["WGR"],"signal":"clear"|"weak"|"none"}   target=@frakcja; signal=łączność do adresata (5c)
 proximity      {"faction":"WGR","state":"enter"|"exit","dist":2900}         enter<3000m, exit>4000m
 combat_hit     {"attacker":123|null,"faction":"KRW","damage":450.5,"hits":37,"weapon":"gatling"}  agregat 3 s
 grid_destroyed {"faction":"KRW","grid":"nazwa","by_player":true}

@@ -66,6 +66,8 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.radio_limit_na_frakcje_na_min =
             (*radio)["limit_na_frakcje_na_min"].value_or(cfg.radio_limit_na_frakcje_na_min);
         cfg.radio_ttl_sekund = (*radio)["ttl_sekund"].value_or(cfg.radio_ttl_sekund);
+        cfg.radio_wymagaj_zasiegu =
+            (*radio)["wymagaj_zasiegu"].value_or(cfg.radio_wymagaj_zasiegu);
     }
 
     if (const auto* spawn = tbl["spawn"].as_table()) {

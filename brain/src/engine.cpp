@@ -323,18 +323,36 @@ void Engine::handle_proximity(const Event& ev, const Config& cfg, std::int64_t n
 void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms,
                          std::vector<RadioOut>& out) {
     // Etap 3: odpowiadamy szablonem tylko na wiadomości adresowane (@TAG) do znanej
-    // frakcji. Prawdziwa rozmowa (LLM + persony) to Etap 4, adresowanie zasięgiem Etap 5.
+    // frakcji. Etap 4: rozmowa (LLM + persony). Etap 5c: adresowanie ZASIĘGIEM —
+    // mod podaje "signal" (clear/weak/none) adresata wg najbliższego grida frakcji.
     const std::string target = data_str(ev, "target");
     if (target.empty()) {
         return;
     }
+    // Bez wymogu zasięgu (config/test) traktujemy wszystko jak w zasięgu.
+    std::string signal = data_str(ev, "signal");
+    if (signal.empty() || !cfg.radio_wymagaj_zasiegu) {
+        signal = "clear";
+    }
     for (const FactionRow& row : db_.list_factions()) {
         if (row.tag == target) {
+            if (signal == "none") {
+                // Poza zasięgiem: frakcja nie słyszy. Krótkie echo SYSTEM, żeby gracz
+                // wiedział, że to nie błąd, tylko brak łączności.
+                out.push_back({"SYSTEM", "Brak zasięgu — " + target + " nie odpowiada.",
+                               "white", 0, {}, {}});
+                std::cerr << "[brain] chat: " << target << " poza zasięgiem — brak odpowiedzi\n";
+                return;
+            }
             const double value = db_.get_relation(target, kPlayer).value;
             const char* kind = value <= cfg.prog_wrogi ? "kpina" : "neutral";
             const bool decyzja = chat_expects_decision(target);
             std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
                               "\". Odpowiedz mu.";
+            if (signal == "weak") {
+                ctx += " Sygnał jest słaby i trzeszczy — masz prawo nie dosłyszeć wszystkiego, "
+                       "odpowiedz krótko, jakby przez zakłócenia.";
+            }
             if (decyzja) {
                 ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. W osobnym polu JSON "
                        "\"odpuszcza\" wpisz true, jeśli przyjmujesz jego prośbę (okup, kapitulacja "

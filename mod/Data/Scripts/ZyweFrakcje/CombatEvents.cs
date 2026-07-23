@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRage.Game.ModAPI;
@@ -8,6 +9,78 @@ using VRageMath;
 
 namespace ZyweFrakcje
 {
+    /// <summary>
+    /// Etap 5c — zasięg radia. Na żądanie (wpisany czat) skanuje pobliskie gridy frakcji
+    /// i ustala jakość łączności do adresata: clear (blisko), weak (daleko, szum), none
+    /// (brak grida frakcji w zasięgu). Przy weak psuje treść (słaby odbiór). Osobne, większe
+    /// progi niż ProximityWatcher — radio sięga dalej niż „blisko".
+    /// </summary>
+    internal static class FactionRadio
+    {
+        public const double ClearMeters = 6000;  // czysty odbiór
+        public const double MaxMeters = 15000;   // dalej = poza zasięgiem radia
+
+        /// <summary>Najbliższy grid każdej frakcji NPC w promieniu MaxMeters od gracza.</summary>
+        public static Dictionary<string, double> NearestByFaction(Vector3D pos, long playerId)
+        {
+            var result = new Dictionary<string, double>();
+            BoundingSphereD sphere = new BoundingSphereD(pos, MaxMeters);
+            List<IMyEntity> entities = MyAPIGateway.Entities.GetTopMostEntitiesInSphere(ref sphere);
+            for (int i = 0; i < entities.Count; i++)
+            {
+                var grid = entities[i] as IMyCubeGrid;
+                if (grid == null)
+                {
+                    continue;
+                }
+                string faction = GridOwnership.NpcFactionTag(grid, playerId);
+                if (faction == null)
+                {
+                    continue;
+                }
+                double dist = Vector3D.Distance(pos, grid.GetPosition());
+                double current;
+                if (!result.TryGetValue(faction, out current) || dist < current)
+                {
+                    result[faction] = dist;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>clear/weak/none dla adresata wg najbliższego grida jego frakcji.</summary>
+        public static string SignalFor(string faction, Dictionary<string, double> nearest)
+        {
+            double dist;
+            if (faction == null || !nearest.TryGetValue(faction, out dist))
+            {
+                return "none";
+            }
+            return dist <= ClearMeters ? "clear" : "weak";
+        }
+
+        /// <summary>
+        /// Szum słabego sygnału: część znaków ginie w trzaskach (spacje zostają).
+        /// Pseudolosowo z pozycji i kodu znaku — bez System.Random (pewność whitelisty ModAPI);
+        /// deterministyczne, ale zróżnicowane w obrębie wiadomości.
+        /// </summary>
+        public static string Garble(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+            var sb = new StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                bool drop = c != ' ' && (((i * 37 + c) & 7) < 3); // ~3/8 znaków w trzaski
+                sb.Append(drop ? '.' : c);
+            }
+            return sb.ToString();
+        }
+    }
+
     /// <summary>Ustalanie frakcji NPC władającej siatką (wspólne dla walki i proximity).</summary>
     internal static class GridOwnership
     {

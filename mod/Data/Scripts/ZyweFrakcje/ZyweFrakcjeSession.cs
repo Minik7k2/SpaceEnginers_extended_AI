@@ -220,7 +220,29 @@ namespace ZyweFrakcje
                     target = messageText.Substring(1, spaceIdx - 1).ToUpperInvariant();
                 }
             }
-            _events.WriteChatMessage(messageText, target, new string[0]);
+
+            // 5c — zasięg/szum: policz pobliskie frakcje, adresatowi nadaj jakość łączności.
+            // Słaby sygnał (weak) psuje treść, którą „słyszy" frakcja (gracz widzi swój oryginał).
+            string[] inRange = new string[0];
+            string signal = "clear";
+            string outgoing = messageText;
+            IMyPlayer chatPlayer = MyAPIGateway.Session.Player;
+            if (chatPlayer != null && chatPlayer.Character != null)
+            {
+                Vector3D pos = chatPlayer.Character.WorldMatrix.Translation;
+                Dictionary<string, double> nearest =
+                    FactionRadio.NearestByFaction(pos, chatPlayer.IdentityId);
+                inRange = new List<string>(nearest.Keys).ToArray();
+                if (target != null)
+                {
+                    signal = FactionRadio.SignalFor(target, nearest);
+                    if (signal == "weak")
+                    {
+                        outgoing = FactionRadio.Garble(messageText);
+                    }
+                }
+            }
+            _events.WriteChatMessage(outgoing, target, inRange, signal);
         }
 
         private void PollCommands()

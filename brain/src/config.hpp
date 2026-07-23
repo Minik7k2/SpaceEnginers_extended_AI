@@ -48,6 +48,7 @@ struct Config {
     // [radio]
     int radio_limit_na_frakcje_na_min = 1;
     int radio_ttl_sekund = 120;
+    bool radio_wymagaj_zasiegu = true; // 5c: @FRAKCJA odpowiada tylko gdy w zasięgu (mod liczy)
 
     // [spawn] — spawny statków frakcji sterowane maszyną stanów (Etap 5).
     bool spawn_wlaczone = true;    // false wyłącza auto-spawny; /zf raid działa niezależnie
