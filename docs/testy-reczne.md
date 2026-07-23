@@ -186,18 +186,26 @@ Mod liczy dystans do najbliższego statku frakcji i nadaje adresatowi jakość �
 Wyłącznik na testy: `[radio] wymagaj_zasiegu = false` (hot-reload). Weryfikowane bez SE
 na `--replay` (bramka none/clear/weak); w grze do odhaczenia:
 
-- [ ] **H1. Poza zasięgiem:** `@KRW witam`, gdy żaden statek KRW nie jest w pobliżu
+- [x] **H1. Poza zasięgiem:** `@KRW witam`, gdy żaden statek KRW nie jest w pobliżu
   (lub >15 km) → `[RADIO | SYSTEM] Brak zasięgu — KRW nie odpowiada.`, konsola
   `chat: KRW poza zasięgiem`. KRW **nie** odpowiada.
-- [ ] **H2. Czysty odbiór:** statek KRW blisko (≤6 km, np. tuż po `/zf raid KRW`) →
+- [x] **H2. Czysty odbiór:** statek KRW blisko (≤6 km, np. tuż po `/zf raid KRW`) →
   `@KRW witam` → normalna odpowiedź głosem persony (LLM), bez szumu.
-- [ ] **H3. Szum (słaby sygnał):** statek KRW daleko (~6–15 km) → `@KRW oddaj wrak` →
+- [x] **H3. Szum (słaby sygnał):** statek KRW daleko (~6–15 km) → `@KRW oddaj wrak` →
   KRW **odpowiada**, ale w konsoli braina zdarzenie `chat_message` ma treść w trzaskach
   (`o..aj w.ak`), a odpowiedź jest krótsza/„przez zakłócenia". W swoim czacie widzisz
   swój oryginał (to frakcja cię niedosłyszała).
-- [ ] **H4. Wyłącznik zasięgu:** `rules.toml` → `[radio] wymagaj_zasiegu = false`
+- [x] **H4. Wyłącznik zasięgu:** `rules.toml` → `[radio] wymagaj_zasiegu = false`
   (hot-reload) → `@KRW` z dowolnej odległości znów odpowiada (zachowanie sprzed 5c).
   Cofnij po teście.
+- [ ] **H5. Reakcja na szum (ulepszone):** przy słabym sygnale (~6–15 km) frakcja
+  ma **zareagować na zakłócenia** — powiedzieć, że rwie się/trzeszczy i kazać powtórzyć
+  albo podejść bliżej, a NIE zgadywać treści ani (w trakcie rajdu) przyjmować okupu.
+- [ ] **H6. Pamięć dialogu:** rozmawiaj z KRW w zasięgu przez kilka wiadomości (np.
+  negocjuj rozejm) → frakcja **trzyma wątek** (pamięta ostatnie ~4 tury), nie odpowiada
+  za każdym razem od zera. Ephemeralne — restart braina czyści pamięć rozmowy.
+- [ ] **H7. Sanitizer wyjścia:** w wypowiedziach frakcji **nie ma** końcowego podpisu
+  (`- KRW`), prefiksu nazwą (`KRW: ...`) ani `@Gracz` (co najwyżej „Gracz").
 
 ## Znane zachowania (to nie błędy)
 
