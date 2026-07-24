@@ -40,6 +40,16 @@ struct SpawnOut {
     bool near_player = true;
 };
 
+// Żądanie trybutu w surowcach do CommandWriter (B+). Brain dobiera surowiec/ilość/
+// deadline z configu ([okup_surowce]); mod stawia skrzynkę zrzutu, wstrzymuje ogień
+// i pilnuje terminu. Zebrane w buforze, który main opróżnia przez take_ransom_demands().
+struct RansomDemandOut {
+    std::string faction;
+    std::string item;         // logiczny klucz surowca (mod tłumaczy na SubtypeId + nazwę PL)
+    std::int64_t amount = 0;
+    int deadline_s = 0;
+};
+
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
 // (spokoj/napiecie/wojna z histerezą), tick świata z dryfem i zdarzeniem losowym,
 // głos przez szablony fallback (do Etapu 4 zawsze "mock LLM").
@@ -73,6 +83,15 @@ public:
     // Pary (frakcja, kwota_okupu) do wysłania jako stand_down.
     std::vector<std::pair<std::string, std::int64_t>> take_standdowns();
 
+    // Reakcja na decyzję LLM (albo /zf okup-surowce) o zażądaniu trybutu w surowcach (B+),
+    // wołana z main. Samobramkuje się: bez aktywnego rajdu nic nie robi; jeśli okup już
+    // wisi dla tej frakcji, nie ponawia. Dobiera surowiec/ilość/deadline z configu, zapisuje
+    // pamięć i wystawia ransom_demand (take_ransom_demands()). Relacji NIE rusza — nagroda
+    // przychodzi dopiero przy dostawie (ransom_paid). Zawieszenie ognia realizuje mod.
+    void request_goods_ransom(const std::string& faction, const Config& cfg, std::int64_t now_ms);
+    // Żądania trybutu nazbierane przez decyzję/komendę — zwraca i czyści bufor.
+    std::vector<RansomDemandOut> take_ransom_demands();
+
 private:
     Db& db_;
     Fallback& fallback_;
@@ -82,6 +101,8 @@ private:
     std::vector<SpawnOut> pending_spawns_;
     std::set<std::string> active_raids_;          // frakcje z aktywnym rajdem (można je odwołać)
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
+    std::set<std::string> pending_ransoms_;       // frakcje z wystawionym okupem surowcowym (anty-dublowanie)
+    std::vector<RansomDemandOut> pending_ransom_demands_; // do wysłania jako ransom_demand
 
     void ensure_known_faction(const std::string& tag);
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
@@ -120,6 +141,13 @@ private:
                       std::vector<RadioOut>& out);
     void handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
                               std::vector<RadioOut>& out);
+    // B+ — okup w surowcach: dostawa trybutu w oknie (relacja rośnie, wiarygodność
+    // odbudowana czynem, rajd odwołany) i przekroczony deadline (trwała nieufność,
+    // drobna kara relacji, ataki trwają dalej).
+    void handle_ransom_paid(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                            std::vector<RadioOut>& out);
+    void handle_ransom_expired(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                               std::vector<RadioOut>& out);
 };
 
 // Kolor czatu frakcji (CLAUDE.md): HEL niebieski, KRW czerwony, WGR żółty.

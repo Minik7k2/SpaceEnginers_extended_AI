@@ -62,6 +62,27 @@ bool is_own_faction(const std::string& tag) {
     return tag == "HEL" || tag == "KRW" || tag == "WGR";
 }
 
+// Rozbija listę surowców "Iron,Nickel,Silicon" z configu na wektor kluczy;
+// białe znaki i puste pozycje pomija.
+std::vector<std::string> split_items(const std::string& csv) {
+    std::vector<std::string> items;
+    std::string cur;
+    for (const char c : csv) {
+        if (c == ',') {
+            if (!cur.empty()) {
+                items.push_back(cur);
+            }
+            cur.clear();
+        } else if (c != ' ' && c != '\t') {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) {
+        items.push_back(cur);
+    }
+    return items;
+}
+
 } // namespace
 
 std::string faction_color(const std::string& tag) {
@@ -246,6 +267,10 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
         handle_trade(ev, cfg, now_ms, out);
     } else if (ev.type == "contract_done") {
         handle_contract_done(ev, cfg, now_ms, out);
+    } else if (ev.type == "ransom_paid") {
+        handle_ransom_paid(ev, cfg, now_ms, out);
+    } else if (ev.type == "ransom_expired") {
+        handle_ransom_expired(ev, cfg, now_ms, out);
     }
     return out;
 }
@@ -374,12 +399,17 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
             std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
                               "\". Odpowiedz mu.";
             if (decyzja) {
-                ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. W osobnym polu JSON "
-                       "\"odpuszcza\" wpisz true, jeśli przyjmujesz jego prośbę (okup, kapitulacja "
-                       "albo rozejm) i odwołujesz atak, albo false, jeśli odmawiasz. W samej "
-                       "wypowiedzi (pole \"tresc\") NIE pisz słowa \"odpuszcza\" ani true/false — "
-                       "to ma być wyłącznie kwestia radiowa w twoim charakterze. Decyduj wedle "
-                       "swojej natury i tego, co gracz wam zrobił.";
+                ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. Masz dwie osobne "
+                       "decyzje w polach JSON (obie domyślnie false). \"odpuszcza\": wpisz true, "
+                       "jeśli TERAZ odwołujesz atak (przyjmujesz kredyty, kapitulację albo rozejm). "
+                       "\"zada_surowce\": wpisz true, jeśli zamiast tego ŻĄDASZ trybutu w surowcach — "
+                       "każesz graczowi dostarczyć ładunek do wyznaczonej skrzynki zrzutu, a ogień "
+                       "wstrzymujesz dopiero na czas dostawy. Ustaw najwyżej jedno z nich na true; "
+                       "jeśli odmawiasz wszystkiego, oba zostaw false. W samej wypowiedzi (pole "
+                       "\"tresc\") NIE pisz nazw tych pól ani true/false — to ma być wyłącznie "
+                       "kwestia radiowa w twoim charakterze. Jeśli żądasz trybutu, zapowiedz to po "
+                       "swojemu; konkretną ilość i miejsce zrzutu poda osobny komunikat. Decyduj "
+                       "wedle swojej natury i tego, co gracz wam zrobił.";
             }
             emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
                  kind, ctx, decyzja, /*player_msg=*/data_str(ev, "text"));
@@ -460,6 +490,7 @@ void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
         return; // nie ma aktywnego rajdu — nie ma czego odwoływać
     }
     active_raids_.erase(faction);
+    pending_ransoms_.erase(faction); // łaska nadrzędna nad wiszącym okupem surowcowym (mod sprząta skrzynkę)
     const double value = db_.adjust_relation(faction, kPlayer, cfg.deeskalacja_bonus);
     const std::string kwota = amount > 0 ? " (okup " + std::to_string(amount) + " kr)" : "";
     db_.add_memory(now_ms, faction, "deeskalacja", 1,
@@ -474,6 +505,104 @@ std::vector<std::pair<std::string, std::int64_t>> Engine::take_standdowns() {
     std::vector<std::pair<std::string, std::int64_t>> taken;
     taken.swap(pending_standdowns_);
     return taken;
+}
+
+void Engine::request_goods_ransom(const std::string& faction, const Config& cfg,
+                                  std::int64_t now_ms) {
+    if (active_raids_.count(faction) == 0) {
+        return; // brak aktywnego rajdu — nie ma pod co żądać trybutu
+    }
+    if (pending_ransoms_.count(faction) > 0) {
+        return; // okup już wisi — nie dubluj skrzynki zrzutu
+    }
+    const std::vector<std::string> items = split_items(cfg.okup_towary);
+    if (items.empty()) {
+        std::cerr << "[brain] okup surowcowy: pusta lista [okup_surowce].towary — pomijam\n";
+        return;
+    }
+    std::uniform_int_distribution<std::size_t> pick_item(0, items.size() - 1);
+    const std::string item = items[pick_item(rng_)];
+
+    const int lo = std::min(cfg.okup_ilosc_min, cfg.okup_ilosc_max);
+    const int hi = std::max(cfg.okup_ilosc_min, cfg.okup_ilosc_max);
+    std::uniform_int_distribution<int> pick_amount(lo, hi);
+    // Zaokrąglij do 50, żeby żądanie brzmiało jak okrągła liczba ("500", nie "473").
+    std::int64_t amount = ((static_cast<std::int64_t>(pick_amount(rng_)) + 25) / 50) * 50;
+    if (amount < 50) {
+        amount = 50;
+    }
+
+    pending_ransoms_.insert(faction);
+    pending_ransom_demands_.push_back({faction, item, amount, cfg.okup_deadline_s});
+    db_.add_memory(now_ms, faction, "okup_surowce_zadanie", 1,
+                   "Frakcja " + faction + " zażądała od gracza trybutu: " + std::to_string(amount) +
+                   " x " + item + " do skrzynki zrzutu.");
+    std::cout << "[brain] okup surowcowy " << faction << ": żądanie " << amount << "x " << item
+              << " (deadline " << cfg.okup_deadline_s << " s), ransom_demand\n";
+}
+
+std::vector<RansomDemandOut> Engine::take_ransom_demands() {
+    std::vector<RansomDemandOut> taken;
+    taken.swap(pending_ransom_demands_);
+    return taken;
+}
+
+void Engine::handle_ransom_paid(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                std::vector<RadioOut>& out) {
+    const std::string faction = data_str(ev, "faction");
+    if (faction.empty()) {
+        return;
+    }
+    ensure_known_faction(faction);
+    pending_ransoms_.erase(faction);
+    active_raids_.erase(faction); // trybut dostarczony — rajd odwołany (mod despawnuje statki)
+
+    const std::string item = data_str(ev, "item");
+    const std::int64_t amount = static_cast<std::int64_t>(data_num(ev, "amount"));
+    const double rel = db_.adjust_relation(faction, kPlayer, cfg.okup_bonus_dostawa);
+
+    // Odkup CZYNEM (nie czasem): udana dostawa zmniejsza trwałą nieufność świata mściwego.
+    const int broken = db_.ransom_broken(faction);
+    if (broken > 0) {
+        db_.set_ransom_broken(faction, broken - 1);
+    }
+
+    const std::string co = amount > 0 && !item.empty()
+                               ? " (" + std::to_string(amount) + " x " + item + ")"
+                               : "";
+    db_.add_memory(now_ms, faction, "okup_surowce_oplacony", 1,
+                   "Gracz dostarczył frakcji " + faction + " żądany trybut" + co + " — atak odwołany.");
+    std::cout << "[brain] okup surowcowy " << faction << ": OPŁACONY" << co << " (relacja "
+              << format_value(cfg.okup_bonus_dostawa) << " => " << format_value(rel) << ")\n";
+    update_state(faction, cfg, now_ms, out);
+    emit(out, faction, render_first(faction, {"neutral"}), 0, cfg, now_ms, "neutral",
+         "Gracz dostarczył wam żądany trybut w surowcach i odkupił się. Potwierdź zawieszenie broni po swojemu.");
+}
+
+void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                   std::vector<RadioOut>& out) {
+    const std::string faction = data_str(ev, "faction");
+    if (faction.empty()) {
+        return;
+    }
+    ensure_known_faction(faction);
+    pending_ransoms_.erase(faction);
+    // active_raids_ zostaje — ataki trwają dalej (mod wznawia ogień statków rajdu).
+
+    const int broken = db_.ransom_broken(faction) + 1;
+    db_.set_ransom_broken(faction, broken); // trwały modyfikator: kolejne okupy trudniejsze/odrzucane
+    const double rel = db_.adjust_relation(faction, kPlayer, -cfg.okup_kara_zlamanie);
+
+    db_.add_memory(now_ms, faction, "okup_surowce_zlamany", 2,
+                   "Gracz obiecał okup frakcji " + faction +
+                   ", ale nie dostarczył trybutu na czas — złamał słowo.");
+    std::cout << "[brain] okup surowcowy " << faction << ": ZŁAMANY (nieufność=" << broken
+              << ", relacja " << format_value(-cfg.okup_kara_zlamanie) << " => " << format_value(rel)
+              << "), ataki trwają\n";
+    update_state(faction, cfg, now_ms, out);
+    emit(out, faction, render_first(faction, {"grozba", "kpina", "neutral"}, {{"sekundy", "30"}}),
+         1, cfg, now_ms, "grozba",
+         "Gracz obiecał wam trybut i nie dostarczył go na czas — oszukał was. Zareaguj gniewem i nie odpuszczaj.");
 }
 
 void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -522,6 +651,26 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
         }
         apply_deescalation(faction, cfg, now_ms);
         out.push_back({"SYSTEM", "Okup przyjęty: " + faction + " odwołuje rajd.", "white", 0, {}, {}});
+    } else if (cmd == "okup-surowce") {
+        // /zf okup-surowce <frakcja>: deterministyczny wyzwalacz żądania trybutu (B+) —
+        // niezależny od LLM. Wymaga aktywnego rajdu (jak /zf okup).
+        const std::string faction = data_str(ev, "faction");
+        if (active_raids_.count(faction) == 0) {
+            out.push_back({"SYSTEM", "Frakcja " + faction + " nie prowadzi rajdu — nie ma pod co żądać trybutu.",
+                           "white", 0, {}, {}});
+            return;
+        }
+        if (pending_ransoms_.count(faction) > 0) {
+            out.push_back({"SYSTEM", "Frakcja " + faction + " już wystawiła żądanie trybutu.", "white", 0, {}, {}});
+            return;
+        }
+        // Głos frakcji szablonem (pusty kind = z pominięciem LLM), potem żądanie + ransom_demand.
+        const std::string voice = render_first(faction, {"neutral"});
+        if (!voice.empty()) {
+            out.push_back({faction, voice, faction_color(faction), 0, {}, {}});
+        }
+        request_goods_ransom(faction, cfg, now_ms);
+        out.push_back({"SYSTEM", "Żądanie trybutu wystawione: " + faction + ".", "white", 0, {}, {}});
     }
 }
 

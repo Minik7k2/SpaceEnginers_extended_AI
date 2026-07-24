@@ -143,6 +143,14 @@ std::string build_system_prompt(const std::string& faction, zf::Db& db) {
             prompt += "- " + m + "\n";
         }
     }
+    // B+: trwała nieufność po złamanych obietnicach okupu (świat mściwy) — karmi decyzję LLM.
+    const int broken = db.ransom_broken(faction);
+    if (broken > 0) {
+        prompt += "\n\nWiarygodność gracza: już " + std::to_string(broken) +
+                  " raz(y) obiecał wam okup i nie dostarczył żądanego trybutu na czas. Bądź wobec "
+                  "niego nieufny — nie wierz łatwo kolejnym obietnicom; jeśli w ogóle godzisz się na "
+                  "okup, żądaj konkretnego trybutu w surowcach, a nie samych słów.\n";
+    }
     return prompt;
 }
 
@@ -170,6 +178,12 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
             std::cout << "  [SPAWN | " << sp.faction << "] kind=" << sp.kind << " — " << sp.context << "\n";
         }
     };
+    const auto print_ransoms = [&engine]() {
+        for (const zf::RansomDemandOut& rd : engine.take_ransom_demands()) {
+            std::cout << "  [OKUP | " << rd.faction << "] żądanie trybutu " << rd.amount << "x "
+                      << rd.item << " (deadline " << rd.deadline_s << " s)\n";
+        }
+    };
 
     std::string line;
     std::int64_t last_ts = 0;
@@ -193,6 +207,7 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
         print_radio(engine.on_event(ev, cfg, last_ts));
         print_radio(engine.tick(cfg, last_ts));
         print_spawns();
+        print_ransoms();
     }
 
     std::cout << "[brain] replay zakończony. Relacje: " << engine.relations_report() << "\n";
@@ -341,7 +356,11 @@ int main(int argc, char** argv) {
                         dq.pop_front();
                     }
                 }
-                if (res.deescalate) {
+                if (res.demand_goods) {
+                    // B+: frakcja żąda trybutu w surowcach zamiast odpuścić — brain dobiera
+                    // towar/ilość/deadline z configu i wystawia ransom_demand (drenaż niżej).
+                    engine.request_goods_ransom(res.faction, cfg, now);
+                } else if (res.deescalate) {
                     // Frakcja odpuszcza: wyłuskaj kwotę okupu z wiadomości gracza (Etap 6).
                     // >0 = realny okup w kredytach — mod pobierze go z konta gracza przy stand_down.
                     engine.apply_deescalation(res.faction, cfg, now,
@@ -353,6 +372,12 @@ int main(int argc, char** argv) {
                 std::cout << "[brain] stand_down [" << sd.first << "]"
                           << (sd.second > 0 ? " okup " + std::to_string(sd.second) + " kr" : "")
                           << " — statki rajdu odwołane\n";
+            }
+            // B+: żądania trybutu (z decyzji LLM albo /zf okup-surowce) -> ransom_demand do moda.
+            for (const zf::RansomDemandOut& rd : engine.take_ransom_demands()) {
+                commands.write_ransom_demand(rd.faction, rd.item, rd.amount, rd.deadline_s);
+                std::cout << "[brain] ransom_demand [" << rd.faction << "] " << rd.amount << "x "
+                          << rd.item << " deadline " << rd.deadline_s << "s\n";
             }
 
             if (!once) {

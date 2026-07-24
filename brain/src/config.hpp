@@ -53,6 +53,15 @@ struct Config {
     // [spawn] — spawny statków frakcji sterowane maszyną stanów (Etap 5).
     bool spawn_wlaczone = true;    // false wyłącza auto-spawny; /zf raid działa niezależnie
     int spawn_cooldown_min = 5;    // min. odstęp między auto-spawnami TEJ SAMEJ frakcji
+
+    // [okup_surowce] — okup w SUROWCACH (B+): w trakcie rajdu frakcja może zażądać
+    // trybutu (konkretny surowiec dostarczony do skrzynki zrzutu w oknie czasu).
+    std::string okup_towary = "Iron,Nickel,Silicon,Cobalt"; // dozwolone surowce (klucze); brain losuje jeden, mod tłumaczy na SubtypeId + nazwę PL
+    int okup_ilosc_min = 300;         // dolna granica losowanej ilości trybutu
+    int okup_ilosc_max = 800;         // górna granica
+    int okup_deadline_s = 900;        // 15 min na dostarczenie
+    double okup_bonus_dostawa = 20;   // relacja += po dostarczeniu (jak wykonany kontrakt)
+    double okup_kara_zlamanie = 5;    // relacja -= za złamaną obietnicę (główna kara: trwała nieufność)
 };
 
 // Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola

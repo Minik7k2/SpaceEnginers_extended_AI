@@ -56,3 +56,15 @@ wymagaj_zasiegu = true
 # cooldown_min: minimalny odstęp między auto-spawnami TEJ SAMEJ frakcji (anty-spam).
 wlaczone = true
 cooldown_min = 10
+
+[okup_surowce]
+# Okup w SUROWCACH (B+): w trakcie rajdu frakcja może zamiast gotówki zażądać
+# TRYBUTU — konkretnego surowca dostarczonego do skrzynki zrzutu (GPS) w oknie
+# czasu. Dostawa => pokój + relacja rośnie; brak dostawy => ataki trwają DALEJ +
+# trwała utrata wiarygodności (świat mściwy: odkupienie czynem, nie czasem).
+towary = "Iron,Nickel,Silicon,Cobalt"   # dozwolone surowce; brain losuje jeden, mod tłumaczy na SubtypeId + nazwę PL
+ilosc_min = 300
+ilosc_max = 800
+deadline_s = 900         # 15 min na dostarczenie trybutu
+bonus_dostawa = 20       # relacja += po dostarczeniu (jak wykonany kontrakt)
+kara_zlamanie = 5        # relacja -= za złamaną obietnicę (główna kara to trwała nieufność)

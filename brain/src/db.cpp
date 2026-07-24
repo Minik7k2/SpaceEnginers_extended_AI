@@ -217,6 +217,19 @@ std::vector<std::string> Db::recent_memories(const std::string& faction, int n) 
     return rows;
 }
 
+int Db::ransom_broken(const std::string& faction) const {
+    Stmt s(handle_, "SELECT broken FROM ransom_credibility WHERE faction = ?;");
+    s.text(1, faction);
+    return s.row() ? s.col_int(0) : 0;
+}
+
+void Db::set_ransom_broken(const std::string& faction, int value) {
+    Stmt s(handle_,
+           "INSERT INTO ransom_credibility (faction, broken) VALUES (?, ?) "
+           "ON CONFLICT(faction) DO UPDATE SET broken = excluded.broken;");
+    s.text(1, faction).i64(2, value).done();
+}
+
 void Db::upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,
                          const std::string& status, const std::string& payload) {
     Stmt s(handle_,

@@ -46,11 +46,12 @@ ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
 znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
 )GBNF";
 
-// Wariant dla rozmowy w trakcie wrogości: dokłada pole "odpuszcza" (bool) — decyzję
-// frakcji o przyjęciu okupu/kapitulacji/rozejmu. Reszta jak wyżej, żeby głos Etapu 4
-// się nie zmienił poza tym jednym polem.
+// Wariant dla rozmowy w trakcie wrogości: dokłada pola "odpuszcza" (bool) — decyzję
+// frakcji o przyjęciu okupu/kapitulacji/rozejmu — oraz "zada_surowce" (bool, B+) —
+// żądanie trybutu w surowcach zamiast odpuszczenia. Reszta jak wyżej, żeby głos
+// Etapu 4 się nie zmienił poza tymi polami.
 constexpr const char* kDeescalationGrammar = R"GBNF(
-root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\",\"odpuszcza\":" bool "}"
+root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\",\"odpuszcza\":" bool ",\"zada_surowce\":" bool "}"
 tresc ::= znak{1,220}
 ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
 bool ::= "true" | "false"
@@ -62,7 +63,7 @@ znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
 // czyli do tekstu widocznego dla gracza. Prawdziwą flagę czytamy z osobnego pola
 // JSON, więc marker w treści to śmieć — wycinamy go i sprzątamy zawisłe separatory.
 std::string strip_decision_leak(std::string s) {
-    static const std::regex marker(R"(\s*odpuszcza\s*[:=]?\s*(?:true|false)\.?)",
+    static const std::regex marker(R"(\s*(?:odpuszcza|zada_surowce)\s*[:=]?\s*(?:true|false)\.?)",
                                    std::regex::icase);
     s = std::regex_replace(s, marker, "");
 
@@ -250,11 +251,15 @@ struct LlmWorker::Impl {
             for (int attempt = 0; attempt < 2; ++attempt) {
                 std::string text;
                 bool deescalate = false;
+                bool demand_goods = false;
                 if (generate(job.system_prompt, job.user_prompt, LLAMA_DEFAULT_SEED, text,
-                             job.expect_decision, deescalate)) {
+                             job.expect_decision, deescalate, demand_goods)) {
                     result.text = sanitize_reply(std::move(text), job.faction);
                     result.from_llm = true;
-                    result.deescalate = deescalate;
+                    // Żądanie trybutu ma pierwszeństwo nad odpuszczeniem: gdy model zaznaczył
+                    // oba, wybieramy konkretną akcję (skrzynka zrzutu), nie natychmiastowy pokój.
+                    result.demand_goods = demand_goods;
+                    result.deescalate = deescalate && !demand_goods;
                     break;
                 }
             }
@@ -274,7 +279,7 @@ struct LlmWorker::Impl {
     // Qwen2.5 mówi ChatML-em; szablon składamy ręcznie (parse_special przy tokenizacji).
     bool generate(const std::string& system_prompt, const std::string& user_prompt,
                   std::uint32_t seed, std::string& out_text,
-                  bool expect_decision, bool& out_deescalate) {
+                  bool expect_decision, bool& out_deescalate, bool& out_demand_goods) {
         const auto t_start = std::chrono::steady_clock::now();
         // Anty-echo: małe modele (3B) lubią przepisywać zacytowaną wiadomość
         // gracza do odpowiedzi (bug: "@krw co o mnie myslisz? ..."). Dokładamy
@@ -375,6 +380,7 @@ struct LlmWorker::Impl {
             }
             out_text = tresc;
             out_deescalate = expect_decision && parsed.value("odpuszcza", false);
+            out_demand_goods = expect_decision && parsed.value("zada_surowce", false);
             return true;
         } catch (const nlohmann::json::exception&) {
             return false;

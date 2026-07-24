@@ -61,6 +61,11 @@ public:
     // Ostatnie n wpisów pamięci frakcji, od najstarszego do najnowszego.
     std::vector<std::string> recent_memories(const std::string& faction, int n) const;
 
+    // Wiarygodność okupu surowcowego (B+): liczba złamanych obietnic okupu danej
+    // frakcji wobec gracza. 0 = czysto. Trwałe (świat mściwy), maleje odkupem czynem.
+    int ransom_broken(const std::string& faction) const;
+    void set_ransom_broken(const std::string& faction, int value);
+
     // Kontrakty (Etap 6): utrwalone — ID muszą przeżyć restart świata (odtworzenie).
     void upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,
                          const std::string& status, const std::string& payload);

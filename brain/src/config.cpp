@@ -74,6 +74,15 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.spawn_wlaczone = (*spawn)["wlaczone"].value_or(cfg.spawn_wlaczone);
         cfg.spawn_cooldown_min = (*spawn)["cooldown_min"].value_or(cfg.spawn_cooldown_min);
     }
+
+    if (const auto* okup = tbl["okup_surowce"].as_table()) {
+        cfg.okup_towary = (*okup)["towary"].value_or(cfg.okup_towary);
+        cfg.okup_ilosc_min = (*okup)["ilosc_min"].value_or(cfg.okup_ilosc_min);
+        cfg.okup_ilosc_max = (*okup)["ilosc_max"].value_or(cfg.okup_ilosc_max);
+        cfg.okup_deadline_s = (*okup)["deadline_s"].value_or(cfg.okup_deadline_s);
+        cfg.okup_bonus_dostawa = (*okup)["bonus_dostawa"].value_or(cfg.okup_bonus_dostawa);
+        cfg.okup_kara_zlamanie = (*okup)["kara_zlamanie"].value_or(cfg.okup_kara_zlamanie);
+    }
 }
 
 toml::table parse_or_throw(const std::string& path) {

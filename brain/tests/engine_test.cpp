@@ -1,9 +1,12 @@
 // Testy silnika relacji (Etap 3) bez gry: reguły zmian, maszyna stanów z histerezą,
 // dryf w ticku, bonus "atak na wroga frakcji", cooldown radia i raport /zf rel.
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include "db.hpp"
 #include "engine.hpp"
@@ -212,6 +215,90 @@ int main() {
         // spawn_wlaczone=false tłumi auto-spawn maszyny stanów (WGR do napięcia = -30).
         se.on_event(make_event("grid_destroyed", {{"faction", "WGR"}, {"grid", "C"}, {"by_player", true}}), scfg, t + 4000);
         assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
+    }
+
+    // --- Okup w surowcach (B+): żądanie trybutu i dostawa ---
+    {
+        zf::Db rdb(":memory:");
+        zf::Fallback rfb(fallback_path.string());
+        zf::Engine re(rdb, rfb, /*rng_seed=*/99);
+        zf::Config rcfg; // defaulty == [okup_surowce] z rules.toml
+        std::int64_t t = 9000000;
+
+        // Wojna KRW (dwa zniszczenia) => aktywny rajd (warunek żądania trybutu).
+        re.on_event(make_event("grid_destroyed", {{"faction", "KRW"}, {"grid", "A"}, {"by_player", true}}), rcfg, t);
+        t += 1000;
+        re.on_event(make_event("grid_destroyed", {{"faction", "KRW"}, {"grid", "B"}, {"by_player", true}}), rcfg, t);
+        re.take_spawns(); // wyczyść bufor spawnów
+
+        // /zf okup-surowce => jedno żądanie trybutu dobrane z configu.
+        t += 1000;
+        re.on_event(make_event("debug_command", {{"cmd", "okup-surowce"}, {"faction", "KRW"}}), rcfg, t);
+        auto demands = re.take_ransom_demands();
+        assert(demands.size() == 1 && demands[0].faction == "KRW" && "okup-surowce ma wystawić żądanie trybutu");
+        assert(demands[0].deadline_s == rcfg.okup_deadline_s);
+        assert(demands[0].amount >= rcfg.okup_ilosc_min && demands[0].amount <= rcfg.okup_ilosc_max &&
+               demands[0].amount % 50 == 0 && "ilość trybutu z zakresu, zaokrąglona do 50");
+        const std::vector<std::string> allowed = {"Iron", "Nickel", "Silicon", "Cobalt"};
+        assert(std::find(allowed.begin(), allowed.end(), demands[0].item) != allowed.end() &&
+               "surowiec z listy configu");
+
+        // Drugie żądanie przy wiszącym okupie => brak dublowania skrzynki.
+        t += 1000;
+        re.on_event(make_event("debug_command", {{"cmd", "okup-surowce"}, {"faction", "KRW"}}), rcfg, t);
+        assert(re.take_ransom_demands().empty() && "wiszący okup nie może się dublować");
+
+        // Dostawa trybutu => relacja rośnie o bonus, wiarygodność czysta.
+        const double before_paid = rdb.get_relation("KRW", "PLAYER").value;
+        t += 1000;
+        re.on_event(make_event("ransom_paid",
+                               {{"faction", "KRW"}, {"item", demands[0].item}, {"amount", demands[0].amount}}),
+                    rcfg, t);
+        const double after_paid = rdb.get_relation("KRW", "PLAYER").value;
+        assert(after_paid > before_paid + rcfg.okup_bonus_dostawa - 0.001 && "dostawa ma podnieść relację o bonus");
+        assert(rdb.ransom_broken("KRW") == 0 && "czysta dostawa nie psuje wiarygodności");
+    }
+
+    // --- Okup w surowcach: złamana obietnica (trwała nieufność) + odkup czynem ---
+    {
+        zf::Db rdb(":memory:");
+        zf::Fallback rfb(fallback_path.string());
+        zf::Engine re(rdb, rfb, /*rng_seed=*/123);
+        zf::Config rcfg;
+        std::int64_t t = 12000000;
+
+        re.on_event(make_event("grid_destroyed", {{"faction", "KRW"}, {"grid", "A"}, {"by_player", true}}), rcfg, t);
+        t += 1000;
+        re.on_event(make_event("grid_destroyed", {{"faction", "KRW"}, {"grid", "B"}, {"by_player", true}}), rcfg, t);
+        re.take_spawns();
+
+        t += 1000;
+        re.on_event(make_event("debug_command", {{"cmd", "okup-surowce"}, {"faction", "KRW"}}), rcfg, t);
+        assert(re.take_ransom_demands().size() == 1);
+
+        // Deadline minął bez dostawy => trwała nieufność, drobna kara relacji, ataki trwają.
+        const double before_exp = rdb.get_relation("KRW", "PLAYER").value;
+        t += 1000;
+        re.on_event(make_event("ransom_expired", {{"faction", "KRW"}}), rcfg, t);
+        assert(rdb.ransom_broken("KRW") == 1 && "złamana obietnica ma dać trwałą nieufność");
+        assert(rdb.get_relation("KRW", "PLAYER").value < before_exp && "złamana obietnica ma drobną karę relacji");
+        bool still_war = false;
+        for (const zf::FactionRow& row : rdb.list_factions()) {
+            if (row.tag == "KRW") {
+                still_war = row.state == "wojna";
+            }
+        }
+        assert(still_war && "po złamaniu obietnicy ataki trwają (wojna)");
+
+        // Odkup CZYNEM: poprzedni okup wygasł, można żądać ponownie; udana dostawa zmniejsza nieufność.
+        t += 1000;
+        re.on_event(make_event("debug_command", {{"cmd", "okup-surowce"}, {"faction", "KRW"}}), rcfg, t);
+        auto d2 = re.take_ransom_demands();
+        assert(d2.size() == 1 && "po wygaśnięciu można żądać ponownie");
+        t += 1000;
+        re.on_event(make_event("ransom_paid", {{"faction", "KRW"}, {"item", d2[0].item}, {"amount", d2[0].amount}}),
+                    rcfg, t);
+        assert(rdb.ransom_broken("KRW") == 0 && "udana dostawa odkupuje trwałą nieufność (czynem)");
     }
 
     std::cout << "zf_engine_test: OK\n";

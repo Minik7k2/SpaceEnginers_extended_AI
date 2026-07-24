@@ -16,6 +16,8 @@ combat_hit     {"attacker":123|null,"faction":"KRW","damage":450.5,"hits":37,"we
 grid_destroyed {"faction":"KRW","grid":"nazwa","by_player":true}
 trade          {"faction":"HEL","kind":"buy"|"sell","value":1500}           Etap 6
 contract_done  {"contract_id":"...","faction":"WGR","success":true}        Etap 6
+ransom_paid    {"faction":"KRW","item":"Iron","amount":500}                  B+ gracz dostarczył trybut do skrzynki zrzutu w oknie — pokój + relacja
+ransom_expired {"faction":"KRW"}                                            B+ minął deadline bez dostawy — ataki trwają, trwała utrata wiarygodności
 debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn","faction":"KRW"}       /zf rel, /zf tick, /zf raid <frakcja>
 
 ## commands.jsonl (brain → mod)
@@ -23,5 +25,6 @@ debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn","faction":"KRW"}       /zf 
 radio_message   {"faction":"KRW","text":"...","color":"red","priority":1}   [RADIO | NAZWA], TTL 2 min
 spawn_request   {"faction":"KRW","kind":"patrol"|"raid"|"convoy","near_player":true,"context":"incydent#123"}
 stand_down      {"faction":"KRW","ransom":4000}   frakcja odpuściła — statki rajdu odlatują; ransom>0 = mod pobiera tyle kredytów gracz→frakcja (Etap 6)
+ransom_demand   {"faction":"KRW","item":"Iron","amount":500,"deadline_s":900}   B+ frakcja żąda trybutu: mod stawia skrzynkę zrzutu (owner=0, GPS), wstrzymuje ogień, pilnuje deadline; dostawa→ransom_paid, brak→ransom_expired
 price_update    {"faction":"HEL","modifier":1.5}                            Etap 6
 contract_create {"faction":"WGR","kind":"escort","reward":50000,"payload":{}}  Etap 6

@@ -213,4 +213,21 @@ void CommandWriter::write_stand_down(const std::string& faction, std::int64_t ra
     write_line(line);
 }
 
+void CommandWriter::write_ransom_demand(const std::string& faction, const std::string& item,
+                                        std::int64_t amount, int deadline_s) {
+    const nlohmann::json line = {
+        {"v", 1},
+        {"seq", db_.next_commands_seq()},
+        {"ts", now_unix_ms()},
+        {"type", "ransom_demand"},
+        {"data", {
+            {"faction", faction},
+            {"item", item},          // logiczny klucz surowca (mod tłumaczy na SubtypeId + nazwę PL)
+            {"amount", amount},
+            {"deadline_s", deadline_s},
+        }},
+    };
+    write_line(line);
+}
+
 } // namespace zf

@@ -30,6 +30,7 @@ struct LlmResult {
     int priority = 0;
     bool from_llm = false;   // false = poszedł fallback
     bool deescalate = false; // model zdecydował odpuścić (tylko gdy expect_decision)
+    bool demand_goods = false; // model zażądał trybutu w surowcach zamiast odpuścić (B+, tylko gdy expect_decision)
     std::string player_msg = {}; // przeniesione z zadania — main dopisuje turę do pamięci dialogu
 };
 

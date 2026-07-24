@@ -45,3 +45,11 @@ CREATE TABLE IF NOT EXISTS bridge_state (
   file TEXT PRIMARY KEY,
   line_offset INTEGER NOT NULL DEFAULT 0
 );
+
+-- Wiarygodność okupu surowcowego (B+): świat mściwy — złamana obietnica okupu
+-- (brak dostawy trybutu w deadline) daje TRWAŁY wskaźnik nieufności; maleje tylko
+-- odkupem czynem (udana dostawa), nie z czasem. Karmi prompt decyzji LLM.
+CREATE TABLE IF NOT EXISTS ransom_credibility (
+  faction TEXT PRIMARY KEY,
+  broken INTEGER NOT NULL DEFAULT 0        -- ile razy gracz złamał obietnicę okupu
+);

@@ -50,6 +50,11 @@ public:
     // statkom rajdu odlecieć i despawnować. Patrz docs/protocol.md.
     void write_stand_down(const std::string& faction, std::int64_t ransom_amount);
 
+    // ransom_demand (B+): frakcja żąda trybutu w surowcach — mod stawia skrzynkę
+    // zrzutu (owner=0, GPS), wstrzymuje ogień i pilnuje deadline. Patrz docs/protocol.md.
+    void write_ransom_demand(const std::string& faction, const std::string& item,
+                             std::int64_t amount, int deadline_s);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();
