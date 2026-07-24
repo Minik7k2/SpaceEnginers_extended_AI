@@ -27,6 +27,7 @@ namespace ZyweFrakcje
         private ProximityWatcher _proximity;
         private RadioDisplay _radio;
         private MESApi _mes;
+        private RansomManager _ransom;
         private int _tick;
 
         public override void LoadData()
@@ -36,6 +37,7 @@ namespace ZyweFrakcje
             _radio = new RadioDisplay();
             _mes = new MESApi(); // rejestruje handler; MESApiReady dopiero gdy MES odeśle API
             TestSpawner.SetMes(_mes);
+            _ransom = new RansomManager(_events); // B+ okup w surowcach: skrzynka zrzutu + detekcja
             MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
         }
 
@@ -99,6 +101,10 @@ namespace ZyweFrakcje
             // MES bywa gotowy dopiero po kilku tikach — rejestrujemy akcję spawnu, gdy wstanie.
             TestSpawner.EnsureSpawnActionRegistered();
             TestSpawner.Update(_tick); // wycofanie: despawn statków po stand_down
+            if (_ransom != null)
+            {
+                _ransom.Update(_tick); // B+ okup: skan skrzynek zrzutu + egzekwowanie deadline'ów
+            }
         }
 
         private void WriteSessionStart()
@@ -188,6 +194,24 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // UWAGA: sprawdzaj PRZED "/zf okup" — inaczej prefiks "/zf okup" przechwyci tę komendę.
+            const string okupSurowcePrefix = "/zf okup-surowce";
+            if (messageText.StartsWith(okupSurowcePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                string tag = messageText.Substring(okupSurowcePrefix.Length).Trim().ToUpperInvariant();
+                if (tag.Length == 0)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf okup-surowce <frakcja> (deterministyczny test żądania trybutu)");
+                }
+                else
+                {
+                    // Wymuszone żądanie trybutu bez LLM: brain dobiera towar/ilość i wysyła ransom_demand.
+                    _events.WriteDebugOkupSurowce(tag);
+                }
+                return;
+            }
+
             const string okupPrefix = "/zf okup";
             if (messageText.StartsWith(okupPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -208,7 +232,7 @@ namespace ZyweFrakcje
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -273,6 +297,10 @@ namespace ZyweFrakcje
                 {
                     HandleStandDown(msg);
                 }
+                else if (type == "ransom_demand")
+                {
+                    HandleRansomDemand(msg);
+                }
                 // price_update / contract_create: obsługa w Etapie 6.
             }
         }
@@ -333,6 +361,18 @@ namespace ZyweFrakcje
             }
 
             TestSpawner.HandleStandDown(faction);
+        }
+
+        // B+ okup w surowcach: brain żąda trybutu — mod stawia skrzynkę zrzutu i pilnuje okna.
+        private void HandleRansomDemand(Dictionary<string, object> msg)
+        {
+            object dataObj;
+            msg.TryGetValue("data", out dataObj);
+            var data = dataObj as Dictionary<string, object>;
+            if (data != null && _ransom != null)
+            {
+                _ransom.HandleDemand(data, _tick);
+            }
         }
 
         /// <summary>

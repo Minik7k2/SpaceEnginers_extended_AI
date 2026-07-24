@@ -173,6 +173,36 @@ namespace ZyweFrakcje
             WriteLine("debug_command", data);
         }
 
+        /// <summary>"/zf okup-surowce &lt;frakcja&gt;" — deterministyczny test żądania trybutu (B+).</summary>
+        public void WriteDebugOkupSurowce(string faction)
+        {
+            string data = new Json.Builder()
+                .Add("cmd", "okup-surowce")
+                .Add("faction", faction)
+                .Build();
+            WriteLine("debug_command", data);
+        }
+
+        /// <summary>B+: gracz dostarczył żądany trybut do skrzynki zrzutu w oknie — pokój + relacja.</summary>
+        public void WriteRansomPaid(string faction, string item, long amount)
+        {
+            string data = new Json.Builder()
+                .Add("faction", faction)
+                .Add("item", item)
+                .Add("amount", amount)
+                .Build();
+            WriteLine("ransom_paid", data);
+        }
+
+        /// <summary>B+: minął deadline bez dostawy — ataki trwają, trwała utrata wiarygodności.</summary>
+        public void WriteRansomExpired(string faction)
+        {
+            string data = new Json.Builder()
+                .Add("faction", faction)
+                .Build();
+            WriteLine("ransom_expired", data);
+        }
+
         /// <summary>Komenda czatu "/zf event {"type":"...","data":{...}}" — testy mostka bez SE.</summary>
         public void WriteRawEvent(string json)
         {

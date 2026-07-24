@@ -168,6 +168,99 @@ namespace ZyweFrakcje
             }
         }
 
+        // Odwrotność NeutralizeGrid: włącza z powrotem broń i zdalne sterowanie (RivalAI
+        // wznawia atak). Używane przy wygaśnięciu okupu surowcowego (B+) — ataki mają trwać dalej.
+        private static void ReactivateGrid(IMyCubeGrid grid)
+        {
+            var blocks = new List<IMySlimBlock>();
+            grid.GetBlocks(blocks);
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                IMyCubeBlock fat = blocks[i].FatBlock;
+                var gun = fat as Sandbox.ModAPI.Ingame.IMyUserControllableGun;
+                if (gun != null)
+                {
+                    gun.Enabled = true;
+                    continue;
+                }
+                var turret = fat as Sandbox.ModAPI.Ingame.IMyLargeTurretBase;
+                if (turret != null)
+                {
+                    turret.Enabled = true;
+                    continue;
+                }
+                if (fat is Sandbox.ModAPI.Ingame.IMyRemoteControl)
+                {
+                    var func = fat as Sandbox.ModAPI.Ingame.IMyFunctionalBlock;
+                    if (func != null)
+                    {
+                        func.Enabled = true;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// B+ okup w surowcach: wstrzymanie ognia NA CZAS okna zrzutu (odwracalne). W odróżnieniu
+        /// od HandleStandDown NIE despawnuje ani nie czyści listy gridów — statki mają czekać, a po
+        /// deadline wznowić ogień (ResumeFire) albo despawnować przy dostawie (HandleStandDown).
+        /// </summary>
+        public static void HoldFire(string faction)
+        {
+            List<IMyCubeGrid> grids;
+            if (!FactionGrids.TryGetValue(faction, out grids))
+            {
+                return;
+            }
+            for (int i = 0; i < grids.Count; i++)
+            {
+                if (grids[i] != null && !grids[i].MarkedForClose)
+                {
+                    NeutralizeGrid(grids[i]);
+                }
+            }
+        }
+
+        /// <summary>B+ okup w surowcach: wznowienie ognia po wygaśnięciu okupu (brak dostawy).</summary>
+        public static void ResumeFire(string faction)
+        {
+            List<IMyCubeGrid> grids;
+            if (!FactionGrids.TryGetValue(faction, out grids))
+            {
+                return;
+            }
+            for (int i = 0; i < grids.Count; i++)
+            {
+                if (grids[i] != null && !grids[i].MarkedForClose)
+                {
+                    ReactivateGrid(grids[i]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pozycja pierwszego żywego statku danej frakcji (kotwica skrzynki zrzutu przy jej gridzie).
+        /// false = brak żywego gridu (skrzynka stanie przy graczu).
+        /// </summary>
+        public static bool TryGetAnchor(string faction, out Vector3D pos)
+        {
+            pos = Vector3D.Zero;
+            List<IMyCubeGrid> grids;
+            if (!FactionGrids.TryGetValue(faction, out grids))
+            {
+                return false;
+            }
+            for (int i = 0; i < grids.Count; i++)
+            {
+                if (grids[i] != null && !grids[i].MarkedForClose)
+                {
+                    pos = grids[i].WorldMatrix.Translation;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>
         /// stand_down z brainu (okup/kapitulacja/rozejm): statki rajdu frakcji natychmiast
         /// przestają strzelać (broń + AI off), a po <see cref="DespawnDelayTicks"/> znikają.

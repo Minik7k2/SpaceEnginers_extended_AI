@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ZF_DropCrate — skrzynka zrzutu okupu w surowcach (B+).
+  Minimalny grid: jeden duży kontener + beacon. Spawnowany przez
+  MyAPIGateway.PrefabManager.SpawnPrefab("ZF_DropCrate", ...), po spawnie mod
+  ustawia właściciela na 0 (nikt), żeby GRACZ mógł włożyć towar (do wrogiego
+  cargo się nie dostanie). Mod obserwuje inwentarz kontenera co tik.
+  UWAGA: prefab do weryfikacji W GRZE (SubtypeId bloków, komplet pól parsera).
+-->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Prefabs>
+    <Prefab>
+      <Id Type="MyObjectBuilder_PrefabDefinition" Subtype="ZF_DropCrate" />
+      <CubeGrids>
+        <CubeGrid>
+          <SubtypeName />
+          <DisplayName>Skrzynka zrzutu</DisplayName>
+          <GridSizeEnum>Large</GridSizeEnum>
+          <IsStatic>false</IsStatic>
+          <PersistentFlags>CastShadows InScene</PersistentFlags>
+          <PositionAndOrientation>
+            <Position x="0" y="0" z="0" />
+            <Forward x="0" y="0" z="-1" />
+            <Up x="0" y="1" z="0" />
+          </PositionAndOrientation>
+          <CubeBlocks>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_CargoContainer">
+              <SubtypeName>LargeBlockSmallContainer</SubtypeName>
+              <Min x="0" y="0" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <ShareMode>None</ShareMode>
+              <CustomName>Skrzynka zrzutu</CustomName>
+            </MyObjectBuilder_CubeBlock>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_Beacon">
+              <SubtypeName>LargeBlockBeacon</SubtypeName>
+              <Min x="0" y="1" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>ZRZUT</CustomName>
+              <BroadcastRadius>5000</BroadcastRadius>
+            </MyObjectBuilder_CubeBlock>
+          </CubeBlocks>
+        </CubeGrid>
+      </CubeGrids>
+    </Prefab>
+  </Prefabs>
+</Definitions>
