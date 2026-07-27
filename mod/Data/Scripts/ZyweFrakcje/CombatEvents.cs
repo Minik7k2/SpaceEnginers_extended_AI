@@ -131,6 +131,10 @@ namespace ZyweFrakcje
             public string Faction;
             public string Name;
             public int LastTick;
+            // Stacja = siatka statyczna (tak SE definiuje station). Zapamiętujemy przy
+            // trafieniu, bo przy OnEntityRemove siatka bywa już w rozsypce; brain karze
+            // za stację dużo mocniej i dokłada trwały sufit relacji (świat mściwy).
+            public bool IsStation;
         }
 
         private readonly EventWriter _events;
@@ -225,6 +229,7 @@ namespace ZyweFrakcje
             damaged.Faction = faction;
             damaged.Name = grid.DisplayName;
             damaged.LastTick = _tick;
+            damaged.IsStation = grid.IsStatic;
         }
 
         /// <summary>Atrybucja: encja atakująca → tożsamość gracza/NPC. 0 = nie ustalono.</summary>
@@ -324,7 +329,7 @@ namespace ZyweFrakcje
             _damaged.Remove(grid.EntityId);
             if (_tick - damaged.LastTick <= FreshDamageTicks)
             {
-                _events.WriteGridDestroyed(damaged.Faction, damaged.Name, true);
+                _events.WriteGridDestroyed(damaged.Faction, damaged.Name, true, damaged.IsStation);
             }
         }
 

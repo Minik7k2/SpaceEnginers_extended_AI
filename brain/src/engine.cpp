@@ -303,18 +303,37 @@ void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int6
     }
     ensure_known_faction(faction);
 
-    // Rozróżnienie statek/stacja przyjdzie z Etapem 6 (własne stacje) — na razie
-    // każda zniszczona siatka liczy się jak statek.
-    const double value = db_.adjust_relation(faction, kPlayer, cfg.zniszczenie_statku);
-    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(cfg.zniszczenie_statku)
-              << " za zniszczenie statku => " << format_value(value) << "\n";
-    db_.add_memory(now_ms, faction, "zniszczenie_statku", 2,
-                   "Gracz zniszczył statek \"" + data_str(ev, "grid") + "\" frakcji " + faction + ".");
+    // Stacja (siatka statyczna) to nie to samo co statek: kara jest wyższa, a do tego
+    // zostaje TRWAŁY modyfikator — sufit relacji. Świat mściwy z CLAUDE.md: takiego
+    // czynu nie zmyje ani dryf, ani okup; górna granica sympatii frakcji spada na stałe.
+    const bool is_station = ev.data.contains("is_station") && ev.data["is_station"].is_boolean() &&
+                            ev.data["is_station"].get<bool>();
+    const std::string what = is_station ? "stację" : "statek";
+    const double delta = is_station ? cfg.zniszczenie_stacji : cfg.zniszczenie_statku;
+
+    if (is_station) {
+        db_.lower_relation_cap(faction, kPlayer, cfg.sufit_po_zniszczeniu_stacji);
+        std::cout << "[brain] sufit relacji " << faction << "->gracz obniżony na stałe do "
+                  << format_value(cfg.sufit_po_zniszczeniu_stacji) << " (zniszczona stacja)\n";
+    }
+
+    const double value = db_.adjust_relation(faction, kPlayer, delta);
+    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta)
+              << " za zniszczenie " << (is_station ? "stacji" : "statku") << " => "
+              << format_value(value) << "\n";
+    db_.add_memory(now_ms, faction, is_station ? "zniszczenie_stacji" : "zniszczenie_statku", 2,
+                   "Gracz zniszczył " + what + " \"" + data_str(ev, "grid") + "\" frakcji " + faction +
+                       (is_station ? " — tego nie zapomnimy nigdy." : "."));
 
     update_state(faction, cfg, now_ms, out);
+    const std::string grid_name = data_str(ev, "grid");
+    const std::string ctx =
+        is_station
+            ? "Gracz właśnie zniszczył waszą STACJĘ \"" + grid_name +
+                  "\" — to strata nie do odrobienia. Zareaguj."
+            : "Gracz właśnie zniszczył wasz statek \"" + grid_name + "\". Zareaguj.";
     emit(out, faction, render_first(faction, {"grozba", "zal", "neutral"}, {{"sekundy", "30"}}),
-         1, cfg, now_ms, "grozba",
-         "Gracz właśnie zniszczył wasz statek \"" + data_str(ev, "grid") + "\". Zareaguj.");
+         1, cfg, now_ms, "grozba", ctx);
 }
 
 void Engine::handle_proximity(const Event& ev, const Config& cfg, std::int64_t now_ms,

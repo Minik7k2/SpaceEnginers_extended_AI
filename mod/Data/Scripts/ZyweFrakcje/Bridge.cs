@@ -124,12 +124,17 @@ namespace ZyweFrakcje
             WriteLine("combat_hit", data);
         }
 
-        public void WriteGridDestroyed(string faction, string grid, bool byPlayer)
+        /// <summary>
+        /// Zniszczona siatka frakcji. is_station (siatka statyczna) decyduje po stronie
+        /// brainu o wadze: statek -30, stacja -50 + TRWAŁY sufit relacji.
+        /// </summary>
+        public void WriteGridDestroyed(string faction, string grid, bool byPlayer, bool isStation)
         {
             string data = new Json.Builder()
                 .Add("faction", faction)
                 .Add("grid", grid)
                 .Add("by_player", byPlayer)
+                .Add("is_station", isStation)
                 .Build();
             WriteLine("grid_destroyed", data);
         }

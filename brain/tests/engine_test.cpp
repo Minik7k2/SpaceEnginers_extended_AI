@@ -214,6 +214,37 @@ int main() {
         assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
     }
 
+    // --- Zniszczenie STACJI: cięższa kara + trwały sufit relacji (świat mściwy) ---
+    {
+        zf::Db sdb(":memory:");
+        zf::Fallback sfb(fallback_path.string());
+        zf::Engine se(sdb, sfb, /*rng_seed=*/3);
+        zf::Config scfg;
+        scfg.spawn_wlaczone = false;
+        std::int64_t t = 7000000;
+
+        se.on_event(make_event("grid_destroyed", {{"faction", "HEL"}, {"grid", "Stacja Helion"},
+                                                  {"by_player", true}, {"is_station", true}}),
+                    scfg, t);
+        const zf::RelationRow rel = sdb.get_relation("HEL", "PLAYER");
+        assert(rel.value <= scfg.zniszczenie_stacji + 0.001 && "stacja ma kosztować zniszczenie_stacji (-50)");
+        assert(rel.cap == scfg.sufit_po_zniszczeniu_stacji && "zniszczona stacja ma obniżyć sufit na stałe");
+
+        // Sufit jest TRWAŁY: nawet duży plus (kontrakty, okupy) nie przebije go z powrotem.
+        sdb.adjust_relation("HEL", "PLAYER", 500.0);
+        assert(sdb.get_relation("HEL", "PLAYER").value == scfg.sufit_po_zniszczeniu_stacji &&
+               "po zniszczeniu stacji relacja nie może wrócić powyżej sufitu");
+
+        // Zwykły statek sufitu nie rusza.
+        t += 20000;
+        se.on_event(make_event("grid_destroyed", {{"faction", "WGR"}, {"grid", "Kopara"},
+                                                  {"by_player", true}, {"is_station", false}}),
+                    scfg, t);
+        const zf::RelationRow ship = sdb.get_relation("WGR", "PLAYER");
+        assert(ship.value <= scfg.zniszczenie_statku + 0.001 && ship.value > scfg.zniszczenie_stacji);
+        assert(ship.cap == 100 && "zniszczony statek nie obniża sufitu");
+    }
+
     // --- Kontrakty (Etap 6) --- świeży silnik: oferta w ticku, utrwalenie ID, rozliczenie.
     {
         zf::Db cdb(":memory:");
