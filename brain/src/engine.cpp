@@ -92,6 +92,20 @@ void Engine::ensure_known_faction(const std::string& tag) {
     }
 }
 
+bool Engine::has_active_raid(const std::string& faction, std::int64_t now_ms) const {
+    const std::int64_t started = db_.get_kv(raid_key(faction));
+    if (started == 0) {
+        return false;
+    }
+    // Bez TTL flaga rajdu z poprzedniej sesji wisiałaby w bazie wiecznie: frakcja
+    // pytałaby o okup za atak, którego dawno nie ma (statki MES same despawnują).
+    return now_ms - started < kRaidTtlMs;
+}
+
+void Engine::set_active_raid(const std::string& faction, std::int64_t now_ms) {
+    db_.set_kv(raid_key(faction), now_ms);
+}
+
 std::string Engine::render_first(const std::string& faction, std::initializer_list<const char*> kinds,
                                  const std::map<std::string, std::string>& vars) const {
     for (const char* kind : kinds) {
@@ -158,14 +172,14 @@ void Engine::request_spawn(const std::string& faction, const std::string& kind, 
             return;
         }
         const std::int64_t cooldown_ms = static_cast<std::int64_t>(cfg.spawn_cooldown_min) * 60000;
-        const auto it = last_spawn_ms_.find(faction);
-        if (it != last_spawn_ms_.end() && now_ms - it->second < cooldown_ms) {
+        const std::int64_t last = db_.get_kv(spawn_key(faction));
+        if (last != 0 && now_ms - last < cooldown_ms) {
             return;
         }
     }
-    last_spawn_ms_[faction] = now_ms;
+    db_.set_kv(spawn_key(faction), now_ms);
     if (kind == "raid") {
-        active_raids_.insert(faction); // można go potem odwołać (okup/kapitulacja/rozejm)
+        set_active_raid(faction, now_ms); // można go potem odwołać (okup/kapitulacja/rozejm)
     }
     std::cout << "[brain] spawn_request " << faction << " kind=" << kind
               << (force ? " (wymuszony)" : "") << "\n";
@@ -206,7 +220,7 @@ void Engine::update_state(const std::string& faction, const Config& cfg, std::in
     std::cout << "[brain] stan " << faction << ": " << row->state << " -> " << next
               << " (relacja " << format_value(value) << ")\n";
     if (next == "spokoj") {
-        active_raids_.erase(faction); // pokój = żaden rajd już nie wisi
+        set_active_raid(faction, 0); // pokój = żaden rajd już nie wisi
     }
 
     if (next == "wojna") {
@@ -397,7 +411,7 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
                 return;
             }
 
-            const bool decyzja = chat_expects_decision(target);
+            const bool decyzja = chat_expects_decision(target, now_ms);
             std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
                               "\". Odpowiedz mu.";
             if (decyzja) {
@@ -522,11 +536,11 @@ void Engine::maybe_offer_contract(const std::string& faction, const Config& cfg,
         return;
     }
     const std::int64_t cooldown_ms = static_cast<std::int64_t>(cfg.kontrakty_cooldown_min) * 60000;
-    const auto it = last_contract_ms_.find(faction);
-    if (it != last_contract_ms_.end() && now_ms - it->second < cooldown_ms) {
+    const std::int64_t last = db_.get_kv(contract_key(faction));
+    if (last != 0 && now_ms - last < cooldown_ms) {
         return;
     }
-    last_contract_ms_[faction] = now_ms;
+    db_.set_kv(contract_key(faction), now_ms);
 
     // Nagroda skalowana relacją: im lepiej was widzą, tym lepiej płatna robota.
     const double span = 100.0 - cfg.kontrakty_prog_relacji;
@@ -540,8 +554,8 @@ void Engine::maybe_offer_contract(const std::string& faction, const Config& cfg,
     pending_contracts_.push_back({faction, "dostawa", reward, cfg.kontrakty_czas_min});
 }
 
-bool Engine::chat_expects_decision(const std::string& faction) const {
-    if (active_raids_.count(faction) > 0) {
+bool Engine::chat_expects_decision(const std::string& faction, std::int64_t now_ms) const {
+    if (has_active_raid(faction, now_ms)) {
         return true;
     }
     const auto rows = db_.list_factions();
@@ -552,10 +566,10 @@ bool Engine::chat_expects_decision(const std::string& faction) const {
 
 void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
                                 std::int64_t now_ms, std::int64_t amount) {
-    if (active_raids_.count(faction) == 0) {
+    if (!has_active_raid(faction, now_ms)) {
         return; // nie ma aktywnego rajdu — nie ma czego odwoływać
     }
-    active_raids_.erase(faction);
+    set_active_raid(faction, 0);
     const double value = db_.adjust_relation(faction, kPlayer, cfg.deeskalacja_bonus);
     const std::string kwota = amount > 0 ? " (okup " + std::to_string(amount) + " kr)" : "";
     db_.add_memory(now_ms, faction, "deeskalacja", 1,
@@ -613,14 +627,14 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
         }
         const auto reward = static_cast<std::int64_t>(cfg.kontrakty_nagroda_min);
         pending_contracts_.push_back({faction, "dostawa", reward, cfg.kontrakty_czas_min});
-        last_contract_ms_[faction] = now_ms;
+        db_.set_kv(contract_key(faction), now_ms);
         out.push_back({"SYSTEM", "Zlecenie " + faction + " za " + std::to_string(reward) + " kr — wystawiam.",
                        "white", 0, {}, {}});
     } else if (cmd == "okup") {
         // /zf okup <frakcja>: deterministyczny wyzwalacz de-eskalacji — niezależny od
         // LLM (qwen-3B bywa za słaby, by sam trafnie odpuścić). Odwołuje aktywny rajd.
         const std::string faction = data_str(ev, "faction");
-        if (active_raids_.count(faction) == 0) {
+        if (!has_active_raid(faction, now_ms)) {
             out.push_back({"SYSTEM", "Frakcja " + faction + " nie prowadzi rajdu — nie ma czego odwołać.",
                            "white", 0, {}, {}});
             return;

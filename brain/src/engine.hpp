@@ -4,7 +4,6 @@
 #include <initializer_list>
 #include <map>
 #include <random>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -90,18 +89,29 @@ private:
     Db& db_;
     Fallback& fallback_;
     std::mt19937 rng_;
+    // Cooldown radia zostaje w pamięci celowo: liczy się w sekundach, więc jego utrata
+    // przy restarcie brainu jest niezauważalna (najwyżej jedna wiadomość więcej).
     std::map<std::string, std::int64_t> last_radio_ms_;
-    std::map<std::string, std::int64_t> last_spawn_ms_;
     std::vector<SpawnOut> pending_spawns_;
     std::vector<ContractOut> pending_contracts_;
-    std::map<std::string, std::int64_t> last_contract_ms_;
-    std::set<std::string> active_raids_;          // frakcje z aktywnym rajdem (można je odwołać)
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
+
+    // Stan gry długiego oddechu (aktywny rajd, cooldowny spawnu i kontraktów) siedzi
+    // w SQLite, nie w pamięci: restart brainu w trakcie rajdu nie może kończyć się tym,
+    // że statki dalej atakują, a frakcja "nie prowadzi rajdu" i nie da się zapłacić okupu.
+    static std::string raid_key(const std::string& tag) { return "__raid__" + tag; }
+    static std::string spawn_key(const std::string& tag) { return "__last_spawn__" + tag; }
+    static std::string contract_key(const std::string& tag) { return "__last_contract__" + tag; }
+    // Rajd starszy niż to uznajemy za wygasły (MES i tak w końcu despawnuje statki) —
+    // inaczej flaga z wczorajszej sesji wisiałaby w bazie w nieskończoność.
+    static constexpr std::int64_t kRaidTtlMs = 60 * 60 * 1000;
+    bool has_active_raid(const std::string& faction, std::int64_t now_ms) const;
+    void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
 
     void ensure_known_faction(const std::string& tag);
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
     // aktywny rajd albo frakcja jest w napięciu/wojnie z graczem.
-    bool chat_expects_decision(const std::string& faction) const;
+    bool chat_expects_decision(const std::string& faction, std::int64_t now_ms) const;
     // Pierwszy istniejący szablon z listy kandydatów; pusty string gdy żadnego nie ma.
     std::string render_first(const std::string& faction, std::initializer_list<const char*> kinds,
                              const std::map<std::string, std::string>& vars = {}) const;

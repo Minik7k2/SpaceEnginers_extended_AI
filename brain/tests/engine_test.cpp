@@ -214,6 +214,48 @@ int main() {
         assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
     }
 
+    // --- Trwałość rajdu: restart brainu w trakcie ataku nie może gubić stanu ---
+    {
+        const fs::path db_file = tmp / "raid_state.sqlite3";
+        std::int64_t t = 6000000;
+        {
+            zf::Db rdb(db_file.string());
+            zf::Fallback rfb(fallback_path.string());
+            zf::Engine re(rdb, rfb, /*rng_seed=*/5);
+            zf::Config rcfg;
+            re.on_event(make_event("debug_command", {{"cmd", "spawn"}, {"faction", "KRW"}, {"kind", "raid"}}),
+                        rcfg, t);
+            auto sp = re.take_spawns();
+            assert(sp.size() == 1 && sp[0].kind == "raid");
+        } // brain "ubity" — obiekty znikają, zostaje tylko plik bazy
+
+        zf::Db rdb2(db_file.string());
+        zf::Fallback rfb2(fallback_path.string());
+        zf::Engine re2(rdb2, rfb2, /*rng_seed=*/5);
+        zf::Config rcfg2;
+        t += 30000;
+        // Po restarcie okup nadal ma kogo odwołać (wcześniej flaga żyła tylko w pamięci).
+        re2.apply_deescalation("KRW", rcfg2, t, /*amount=*/2000);
+        auto sd = re2.take_standdowns();
+        assert(sd.size() == 1 && sd[0].first == "KRW" && sd[0].second == 2000 &&
+               "aktywny rajd ma przeżyć restart brainu");
+
+        // Drugi raz już nie — rajd został odwołany, a to też jest w bazie.
+        re2.apply_deescalation("KRW", rcfg2, t + 1000, 0);
+        assert(re2.take_standdowns().empty() && "odwołany rajd nie odwołuje się drugi raz");
+
+        // Rajd starszy niż TTL (60 min) nie liczy się jako aktywny.
+        zf::Engine re3(rdb2, rfb2, /*rng_seed=*/5);
+        re3.on_event(make_event("debug_command", {{"cmd", "spawn"}, {"faction", "WGR"}, {"kind", "raid"}}),
+                     rcfg2, t);
+        re3.take_spawns();
+        re3.apply_deescalation("WGR", rcfg2, t + 2 * 60 * 60 * 1000, 0);
+        assert(re3.take_standdowns().empty() && "rajd sprzed dwóch godzin jest już nieaktywny");
+
+        std::error_code rm_ec;
+        fs::remove(db_file, rm_ec);
+    }
+
     // --- Zniszczenie STACJI: cięższa kara + trwały sufit relacji (świat mściwy) ---
     {
         zf::Db sdb(":memory:");
