@@ -214,6 +214,199 @@ int main() {
         assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
     }
 
+    // --- Polityka frakcja↔frakcja: zasiana na starcie, nie rozmywa się z czasem ---
+    {
+        zf::Db pdb(":memory:");
+        zf::Fallback pfb(fallback_path.string());
+        zf::Engine pe(pdb, pfb, /*rng_seed=*/9);
+        zf::Config pcfg;
+        pcfg.spawn_wlaczone = false;
+
+        // Wrogość korporacji z piratami istnieje od pierwszego uruchomienia i jest symetryczna.
+        assert(pdb.get_relation("HEL", "KRW").value <= pcfg.prog_wrogi);
+        assert(pdb.get_relation("KRW", "HEL").value == pdb.get_relation("HEL", "KRW").value);
+        assert(pdb.get_relation("HEL", "WGR").value > 0 && "Helion i górnicy handlują");
+        assert(pe.politics_report().find("HEL/KRW") != std::string::npos);
+
+        // Dzięki temu „wróg mojego wroga" DZIAŁA bez ręcznego zasiewania w teście:
+        // ostrzał KRW poprawia stosunki gracza z Helionem.
+        const double hel_before = pdb.get_relation("HEL", "PLAYER").value;
+        std::int64_t pt = 8000000;
+        pe.on_event(make_event("combat_hit", {{"faction", "KRW"}, {"damage", 50.0}, {"hits", 2}, {"weapon", "t"}}),
+                    pcfg, pt);
+        assert(pdb.get_relation("HEL", "PLAYER").value > hel_before &&
+               "atak na piratów ma podnosić relację z ich wrogiem");
+
+        // Dryf nie dotyczy polityki: po dobie zegara wrogość HEL/KRW zostaje bez zmian,
+        // choć uraza wobec gracza już blednie.
+        const double politics_before = pdb.get_relation("HEL", "KRW").value;
+        pdb.adjust_relation("WGR", "PLAYER", -20.0);
+        const double player_before = pdb.get_relation("WGR", "PLAYER").value;
+        pe.tick(pcfg, pt, /*force=*/true); // pierwszy tick tylko ustawia punkt odniesienia dryfu
+        pt += static_cast<std::int64_t>(24) * 60 * kMinuteMs;
+        pe.tick(pcfg, pt, /*force=*/true);
+        assert(pdb.get_relation("HEL", "KRW").value == politics_before &&
+               "polityka frakcji nie może dryfować do zera");
+        assert(pdb.get_relation("WGR", "PLAYER").value > player_before &&
+               "uraza wobec gracza ma nadal blednąć");
+    }
+
+    // --- Trwałość rajdu: restart brainu w trakcie ataku nie może gubić stanu ---
+    {
+        const fs::path db_file = tmp / "raid_state.sqlite3";
+        std::int64_t t = 6000000;
+        {
+            zf::Db rdb(db_file.string());
+            zf::Fallback rfb(fallback_path.string());
+            zf::Engine re(rdb, rfb, /*rng_seed=*/5);
+            zf::Config rcfg;
+            re.on_event(make_event("debug_command", {{"cmd", "spawn"}, {"faction", "KRW"}, {"kind", "raid"}}),
+                        rcfg, t);
+            auto sp = re.take_spawns();
+            assert(sp.size() == 1 && sp[0].kind == "raid");
+        } // brain "ubity" — obiekty znikają, zostaje tylko plik bazy
+
+        zf::Db rdb2(db_file.string());
+        zf::Fallback rfb2(fallback_path.string());
+        zf::Engine re2(rdb2, rfb2, /*rng_seed=*/5);
+        zf::Config rcfg2;
+        t += 30000;
+        // Po restarcie okup nadal ma kogo odwołać (wcześniej flaga żyła tylko w pamięci).
+        re2.apply_deescalation("KRW", rcfg2, t, /*amount=*/2000);
+        auto sd = re2.take_standdowns();
+        assert(sd.size() == 1 && sd[0].first == "KRW" && sd[0].second == 2000 &&
+               "aktywny rajd ma przeżyć restart brainu");
+
+        // Drugi raz już nie — rajd został odwołany, a to też jest w bazie.
+        re2.apply_deescalation("KRW", rcfg2, t + 1000, 0);
+        assert(re2.take_standdowns().empty() && "odwołany rajd nie odwołuje się drugi raz");
+
+        // Rajd starszy niż TTL (60 min) nie liczy się jako aktywny.
+        zf::Engine re3(rdb2, rfb2, /*rng_seed=*/5);
+        re3.on_event(make_event("debug_command", {{"cmd", "spawn"}, {"faction", "WGR"}, {"kind", "raid"}}),
+                     rcfg2, t);
+        re3.take_spawns();
+        re3.apply_deescalation("WGR", rcfg2, t + 2 * 60 * 60 * 1000, 0);
+        assert(re3.take_standdowns().empty() && "rajd sprzed dwóch godzin jest już nieaktywny");
+
+        std::error_code rm_ec;
+        fs::remove(db_file, rm_ec);
+    }
+
+    // --- Zniszczenie STACJI: cięższa kara + trwały sufit relacji (świat mściwy) ---
+    {
+        zf::Db sdb(":memory:");
+        zf::Fallback sfb(fallback_path.string());
+        zf::Engine se(sdb, sfb, /*rng_seed=*/3);
+        zf::Config scfg;
+        scfg.spawn_wlaczone = false;
+        std::int64_t t = 7000000;
+
+        se.on_event(make_event("grid_destroyed", {{"faction", "HEL"}, {"grid", "Stacja Helion"},
+                                                  {"by_player", true}, {"is_station", true}}),
+                    scfg, t);
+        const zf::RelationRow rel = sdb.get_relation("HEL", "PLAYER");
+        assert(rel.value <= scfg.zniszczenie_stacji + 0.001 && "stacja ma kosztować zniszczenie_stacji (-50)");
+        assert(rel.cap == scfg.sufit_po_zniszczeniu_stacji && "zniszczona stacja ma obniżyć sufit na stałe");
+
+        // Sufit jest TRWAŁY: nawet duży plus (kontrakty, okupy) nie przebije go z powrotem.
+        sdb.adjust_relation("HEL", "PLAYER", 500.0);
+        assert(sdb.get_relation("HEL", "PLAYER").value == scfg.sufit_po_zniszczeniu_stacji &&
+               "po zniszczeniu stacji relacja nie może wrócić powyżej sufitu");
+
+        // Zwykły statek sufitu nie rusza.
+        t += 20000;
+        se.on_event(make_event("grid_destroyed", {{"faction", "WGR"}, {"grid", "Kopara"},
+                                                  {"by_player", true}, {"is_station", false}}),
+                    scfg, t);
+        const zf::RelationRow ship = sdb.get_relation("WGR", "PLAYER");
+        assert(ship.value <= scfg.zniszczenie_statku + 0.001 && ship.value > scfg.zniszczenie_stacji);
+        assert(ship.cap == 100 && "zniszczony statek nie obniża sufitu");
+    }
+
+    // --- Kontrakty (Etap 6) --- świeży silnik: oferta w ticku, utrwalenie ID, rozliczenie.
+    {
+        zf::Db cdb(":memory:");
+        zf::Fallback cfb(fallback_path.string());
+        zf::Engine ce(cdb, cfb, /*rng_seed=*/11);
+        zf::Config ccfg;
+        ccfg.spawn_wlaczone = false; // izolujemy kanał kontraktów od spawnów
+        std::int64_t t = 9000000;
+
+        // Pierwszy tick: każda z trzech naszych frakcji wystawia po jednym zleceniu.
+        ce.tick(ccfg, t, /*force=*/true);
+        auto offers = ce.take_contracts();
+        assert(offers.size() == 3 && "spokojne frakcje mają wystawić po zleceniu");
+        assert(ce.take_contracts().empty() && "take_contracts ma czyścić bufor");
+        const std::int64_t reward = offers[0].reward;
+        assert(reward >= ccfg.kontrakty_nagroda_min && reward <= ccfg.kontrakty_nagroda_max);
+
+        // Drugi tick zaraz potem: cooldown (20 min) blokuje kolejne oferty.
+        t += kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        assert(ce.take_contracts().empty() && "cooldown ma blokować drugą ofertę");
+
+        // Mod potwierdza powstanie kontraktu w grze -> ID trafia do SQLite (open).
+        t += kMinuteMs;
+        auto cout_msgs = ce.on_event(
+            make_event("contract_created", {{"contract_id", "1234"}, {"faction", "WGR"},
+                                            {"kind", "dostawa"}, {"opis", "500 rudy żelaza"}}),
+            ccfg, t);
+        assert(cdb.get_contract_faction("1234") == "WGR" && "contract_created ma utrwalić ID");
+        assert(cdb.count_open_contracts("WGR") == 1);
+        assert(cout_msgs.size() == 1 && cout_msgs[0].faction == "WGR" && "ogłoszenie zlecenia przez radio");
+
+        // Limit otwartych zleceń: po upływie cooldownu WGR i tak nie dostanie drugiego.
+        t += static_cast<std::int64_t>(ccfg.kontrakty_cooldown_min + 1) * kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        for (const zf::ContractOut& c : ce.take_contracts()) {
+            assert(c.faction != "WGR" && "max_otwartych=1 ma blokować drugie zlecenie WGR");
+        }
+
+        // Wykonanie: relacja w górę o kontrakt_max, status w bazie na 'done'.
+        const double before = cdb.get_relation("WGR", "PLAYER").value;
+        t += kMinuteMs;
+        ce.on_event(make_event("contract_done", {{"contract_id", "1234"}, {"success", true}}), ccfg, t);
+        const double after = cdb.get_relation("WGR", "PLAYER").value;
+        assert(after > before + ccfg.kontrakt_max - 0.001 && "wykonany kontrakt ma dać +kontrakt_max");
+        assert(cdb.count_open_contracts("WGR") == 0 && "rozliczony kontrakt przestaje być otwarty");
+
+        // contract_done bez pola faction ma działać (frakcja z bazy po ID) — tak
+        // zgłasza je mod po wczytaniu świata, gdy zna już tylko ID kontraktu.
+        ce.on_event(make_event("contract_created", {{"contract_id", "77"}, {"faction", "HEL"}}), ccfg, t);
+        const double hel_before = cdb.get_relation("HEL", "PLAYER").value;
+        t += kMinuteMs;
+        ce.on_event(make_event("contract_done", {{"contract_id", "77"}, {"success", false}}), ccfg, t);
+        assert(cdb.get_relation("HEL", "PLAYER").value < hel_before && "zawalony kontrakt ma karać");
+
+        // Wrogość zamyka kran: przy relacji poniżej progu frakcja nie daje roboty.
+        cdb.adjust_relation("KRW", "PLAYER", -70.0);
+        t += static_cast<std::int64_t>(ccfg.kontrakty_cooldown_min + 1) * kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        for (const zf::ContractOut& c : ce.take_contracts()) {
+            assert(c.faction != "KRW" && "wroga frakcja nie wystawia zleceń");
+        }
+
+        // Wyłącznik globalny.
+        ccfg.kontrakty_wlaczone = false;
+        t += static_cast<std::int64_t>(ccfg.kontrakty_cooldown_min + 1) * kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        assert(ce.take_contracts().empty() && "kontrakty_wlaczone=false ma wyłączyć oferty");
+
+        // /zf kontrakt <frakcja>: wymuszona oferta mimo cooldownu i wyłącznika (jak /zf raid).
+        auto dout = ce.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "HEL"}}),
+                                ccfg, t);
+        auto forced = ce.take_contracts();
+        assert(forced.size() == 1 && forced[0].faction == "HEL" && "/zf kontrakt ma wymusić ofertę");
+        assert(dout.size() == 1 && dout[0].faction == "SYSTEM");
+
+        // Obca frakcja (SPRT/vanilla) nie ma bloku kontraktów — odmowa, nie zlecenie.
+        auto bad = ce.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "SPRT"}}),
+                               ccfg, t);
+        assert(ce.take_contracts().empty() && "obca frakcja nie wystawia kontraktów");
+        assert(bad.size() == 1 && bad[0].faction == "SYSTEM");
+    }
+
     std::cout << "zf_engine_test: OK\n";
     return 0;
 }

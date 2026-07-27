@@ -1,0 +1,53 @@
+name: brain (C++)
+
+# Buduje mózg BEZ llama.cpp (ZF_WITH_LLM=OFF) i puszcza ctest. To celowo ta sama
+# ścieżka, którą gracz dostaje bez modelu GGUF — i to ona zdążyła się po cichu
+# zepsuć (-Werror=unused-function), bo lokalnie budowaliśmy tylko wariant z LLM.
+# Submodułu llama.cpp NIE pobieramy: build bez niego ma działać z definicji.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Konfiguracja CMake (bez LLM, warningi jako błędy)
+        run: >
+          cmake -S brain -B build
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DZF_WITH_LLM=OFF
+          -DZF_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Testy (ctest)
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test --replay (mostek + silnik bez gry)
+        run: |
+          mkdir -p /tmp/zf_storage
+          cat > brain/configs/rules.local.toml <<'EOF'
+          [bridge]
+          storage_dir = "/tmp/zf_storage"
+          db_path = "/tmp/zf_ci_state.sqlite3"
+          EOF
+          cat > /tmp/replay.jsonl <<'EOF'
+          {"v":1,"seq":1,"ts":1000,"type":"session_start","data":{"world":"CI","player_id":1,"player_name":"CI","mod_version":"0.1"}}
+          {"v":1,"seq":2,"ts":2000,"type":"combat_hit","data":{"attacker":1,"faction":"KRW","damage":900,"hits":12,"weapon":"gatling"}}
+          {"v":1,"seq":3,"ts":9000,"type":"grid_destroyed","data":{"faction":"KRW","grid":"CI Test","by_player":true}}
+          {"v":1,"seq":4,"ts":12000,"type":"debug_command","data":{"cmd":"rel"}}
+          EOF
+          # Brain zakłada katalog roboczy brain/ (configs/, personas/ względnie).
+          cd brain && ../build/zf_brain --replay /tmp/replay.jsonl | tee /tmp/replay.log
+          grep -q "replay zakończony" /tmp/replay.log
+          grep -q "KRW" /tmp/replay.log

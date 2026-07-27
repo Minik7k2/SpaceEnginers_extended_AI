@@ -4,7 +4,6 @@
 #include <initializer_list>
 #include <map>
 #include <random>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -40,6 +39,16 @@ struct SpawnOut {
     bool near_player = true;
 };
 
+// Zlecenie wystawienia kontraktu (Etap 6). Silnik decyduje KIEDY i ZA ILE, mod
+// tworzy kontrakt przez MyAPIGateway.ContractSystem na bloku swojej frakcji i
+// odsyła contract_created z prawdziwym ID (dopiero wtedy trafia do SQLite).
+struct ContractOut {
+    std::string faction;
+    std::string kind;      // dostawa (na razie jedyny rodzaj: MyContractAcquisition)
+    std::int64_t reward = 0;   // kredyty
+    int duration_min = 45;
+};
+
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
 // (spokoj/napiecie/wojna z histerezą), tick świata z dryfem i zdarzeniem losowym,
 // głos przez szablony fallback (do Etapu 4 zawsze "mock LLM").
@@ -54,13 +63,20 @@ public:
     // dryf -> maszyna stanów -> budżet akcji -> zdarzenie losowe ważone stanem.
     std::vector<RadioOut> tick(const Config& cfg, std::int64_t now_ms, bool force = false);
 
-    // Raport do /zf rel: relacja frakcja->gracz i stan każdej frakcji.
+    // Raport do /zf rel: relacja frakcja->gracz i stan każdej frakcji, a po "||"
+    // polityka między frakcjami.
     std::string relations_report() const;
+
+    // Same relacje frakcja↔frakcja ("HEL/KRW -70 | ..."), bez gracza.
+    std::string politics_report() const;
 
     // Zlecenia spawnu nazbierane przez on_event/tick — zwraca i czyści bufor.
     // Radio wraca wartością z on_event/tick; spawny osobnym kanałem, żeby nie
     // zmieniać typu zwrotu tamtych (i nie ruszać testów silnika).
     std::vector<SpawnOut> take_spawns();
+
+    // Zlecenia kontraktów nazbierane w ticku — analogicznie do take_spawns().
+    std::vector<ContractOut> take_contracts();
 
     // Reakcja na decyzję LLM o odpuszczeniu (okup/kapitulacja/rozejm), wołana z main
     // po odebraniu wyniku z wątku LLM. Samobramkuje się: jeśli frakcja nie ma
@@ -77,16 +93,31 @@ private:
     Db& db_;
     Fallback& fallback_;
     std::mt19937 rng_;
+    // Cooldown radia zostaje w pamięci celowo: liczy się w sekundach, więc jego utrata
+    // przy restarcie brainu jest niezauważalna (najwyżej jedna wiadomość więcej).
     std::map<std::string, std::int64_t> last_radio_ms_;
-    std::map<std::string, std::int64_t> last_spawn_ms_;
     std::vector<SpawnOut> pending_spawns_;
-    std::set<std::string> active_raids_;          // frakcje z aktywnym rajdem (można je odwołać)
+    std::vector<ContractOut> pending_contracts_;
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
 
+    // Stan gry długiego oddechu (aktywny rajd, cooldowny spawnu i kontraktów) siedzi
+    // w SQLite, nie w pamięci: restart brainu w trakcie rajdu nie może kończyć się tym,
+    // że statki dalej atakują, a frakcja "nie prowadzi rajdu" i nie da się zapłacić okupu.
+    static std::string raid_key(const std::string& tag) { return "__raid__" + tag; }
+    static std::string spawn_key(const std::string& tag) { return "__last_spawn__" + tag; }
+    static std::string contract_key(const std::string& tag) { return "__last_contract__" + tag; }
+    // Rajd starszy niż to uznajemy za wygasły (MES i tak w końcu despawnuje statki) —
+    // inaczej flaga z wczorajszej sesji wisiałaby w bazie w nieskończoność.
+    static constexpr std::int64_t kRaidTtlMs = 60 * 60 * 1000;
+    bool has_active_raid(const std::string& faction, std::int64_t now_ms) const;
+    void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
+
     void ensure_known_faction(const std::string& tag);
+    // Startowe relacje frakcja↔frakcja (raz na świat) — bez nich polityka nie istnieje.
+    void seed_faction_politics();
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
     // aktywny rajd albo frakcja jest w napięciu/wojnie z graczem.
-    bool chat_expects_decision(const std::string& faction) const;
+    bool chat_expects_decision(const std::string& faction, std::int64_t now_ms) const;
     // Pierwszy istniejący szablon z listy kandydatów; pusty string gdy żadnego nie ma.
     std::string render_first(const std::string& faction, std::initializer_list<const char*> kinds,
                              const std::map<std::string, std::string>& vars = {}) const;
@@ -119,6 +150,13 @@ private:
     void handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
     void handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                              std::vector<RadioOut>& out);
+    // Mod potwierdza, że kontrakt naprawdę powstał w grze i podaje jego ID —
+    // dopiero teraz zapisujemy go w SQLite (wymóg: przeżyć wczytanie świata).
+    void handle_contract_created(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                 std::vector<RadioOut>& out);
+    // Tick: czy frakcja wystawia teraz zlecenie (relacja, cooldown, limit otwartych).
+    void maybe_offer_contract(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                               std::vector<RadioOut>& out);
 };
 

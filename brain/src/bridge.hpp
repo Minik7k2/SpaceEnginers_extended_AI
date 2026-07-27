@@ -50,6 +50,12 @@ public:
     // statkom rajdu odlecieć i despawnować. Patrz docs/protocol.md.
     void write_stand_down(const std::string& faction, std::int64_t ransom_amount);
 
+    // Etap 6: zlecenie kontraktu do moda. Mod tworzy go przez MyAPIGateway.ContractSystem
+    // na bloku kontraktów/sklepu tej frakcji i odsyła contract_created z prawdziwym ID
+    // (dopiero wtedy kontrakt trafia do SQLite).
+    void write_contract_create(const std::string& faction, const std::string& kind,
+                               std::int64_t reward, int duration_min);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();

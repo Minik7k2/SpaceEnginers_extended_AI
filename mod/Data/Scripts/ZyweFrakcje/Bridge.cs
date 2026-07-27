@@ -124,12 +124,17 @@ namespace ZyweFrakcje
             WriteLine("combat_hit", data);
         }
 
-        public void WriteGridDestroyed(string faction, string grid, bool byPlayer)
+        /// <summary>
+        /// Zniszczona siatka frakcji. is_station (siatka statyczna) decyduje po stronie
+        /// brainu o wadze: statek -30, stacja -50 + TRWAŁY sufit relacji.
+        /// </summary>
+        public void WriteGridDestroyed(string faction, string grid, bool byPlayer, bool isStation)
         {
             string data = new Json.Builder()
                 .Add("faction", faction)
                 .Add("grid", grid)
                 .Add("by_player", byPlayer)
+                .Add("is_station", isStation)
                 .Build();
             WriteLine("grid_destroyed", data);
         }
@@ -142,6 +147,49 @@ namespace ZyweFrakcje
                 .Add("dist", dist)
                 .Build();
             WriteLine("proximity", data);
+        }
+
+        /// <summary>
+        /// Etap 6 — handel wykryty heurystycznie (zmiana salda przy sklepie frakcji).
+        /// kind: "buy" (gracz kupił) / "sell" (gracz sprzedał), value w kredytach.
+        /// </summary>
+        public void WriteTrade(string faction, string kind, long value)
+        {
+            string data = new Json.Builder()
+                .Add("faction", faction)
+                .Add("kind", kind)
+                .Add("value", value)
+                .Build();
+            WriteLine("trade", data);
+        }
+
+        /// <summary>
+        /// Etap 6 — kontrakt naprawdę powstał w grze. Dopiero to zdarzenie utrwala go
+        /// w SQLite brainu (contract_id z gry musi przeżyć wczytanie świata).
+        /// </summary>
+        public void WriteContractCreated(string contractId, string faction, string kind, long reward,
+                                         string opis)
+        {
+            string data = new Json.Builder()
+                .Add("contract_id", contractId)
+                .Add("faction", faction)
+                .Add("kind", kind)
+                .Add("reward", reward)
+                .Add("reward_str", reward.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Add("opis", opis)
+                .Build();
+            WriteLine("contract_created", data);
+        }
+
+        /// <summary>Etap 6 — kontrakt rozliczony (wykonany albo zawalony).</summary>
+        public void WriteContractDone(string contractId, string faction, bool success)
+        {
+            string data = new Json.Builder()
+                .Add("contract_id", contractId)
+                .Add("faction", faction)
+                .Add("success", success)
+                .Build();
+            WriteLine("contract_done", data);
         }
 
         /// <summary>Komendy testowe "/zf rel" i "/zf tick" — brain odpowiada przez radio_message.</summary>
@@ -158,6 +206,16 @@ namespace ZyweFrakcje
         {
             string data = new Json.Builder()
                 .Add("cmd", "spawn")
+                .Add("faction", faction)
+                .Build();
+            WriteLine("debug_command", data);
+        }
+
+        /// <summary>"/zf kontrakt &lt;frakcja&gt;" — wymusza w brainie wystawienie zlecenia (Etap 6).</summary>
+        public void WriteDebugKontrakt(string faction)
+        {
+            string data = new Json.Builder()
+                .Add("cmd", "kontrakt")
                 .Add("faction", faction)
                 .Build();
             WriteLine("debug_command", data);
