@@ -53,6 +53,17 @@ struct Config {
     // [spawn] — spawny statków frakcji sterowane maszyną stanów (Etap 5).
     bool spawn_wlaczone = true;    // false wyłącza auto-spawny; /zf raid działa niezależnie
     int spawn_cooldown_min = 5;    // min. odstęp między auto-spawnami TEJ SAMEJ frakcji
+
+    // [kontrakty] — Etap 6: frakcja sama wystawia zlecenia (mod tworzy je przez
+    // MyAPIGateway.ContractSystem). To jedyna realna droga ODKUPIENIA: dryf leczy
+    // 1 pkt / 2 h, a wykonany kontrakt daje +kontrakt_max od ręki.
+    bool kontrakty_wlaczone = true;
+    double kontrakty_prog_relacji = -55;  // poniżej tej relacji frakcja nie da ci roboty
+    int kontrakty_cooldown_min = 20;      // min. odstęp między ofertami TEJ SAMEJ frakcji
+    int kontrakty_max_otwartych = 1;      // ile otwartych zleceń naraz na frakcję
+    int kontrakty_nagroda_min = 15000;    // widełki nagrody w kredytach (skalowane relacją)
+    int kontrakty_nagroda_max = 60000;
+    int kontrakty_czas_min = 45;          // czas na wykonanie (minuty)
 };
 
 // Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola

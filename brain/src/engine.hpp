@@ -40,6 +40,16 @@ struct SpawnOut {
     bool near_player = true;
 };
 
+// Zlecenie wystawienia kontraktu (Etap 6). Silnik decyduje KIEDY i ZA ILE, mod
+// tworzy kontrakt przez MyAPIGateway.ContractSystem na bloku swojej frakcji i
+// odsyła contract_created z prawdziwym ID (dopiero wtedy trafia do SQLite).
+struct ContractOut {
+    std::string faction;
+    std::string kind;      // dostawa (na razie jedyny rodzaj: MyContractAcquisition)
+    std::int64_t reward = 0;   // kredyty
+    int duration_min = 45;
+};
+
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
 // (spokoj/napiecie/wojna z histerezą), tick świata z dryfem i zdarzeniem losowym,
 // głos przez szablony fallback (do Etapu 4 zawsze "mock LLM").
@@ -62,6 +72,9 @@ public:
     // zmieniać typu zwrotu tamtych (i nie ruszać testów silnika).
     std::vector<SpawnOut> take_spawns();
 
+    // Zlecenia kontraktów nazbierane w ticku — analogicznie do take_spawns().
+    std::vector<ContractOut> take_contracts();
+
     // Reakcja na decyzję LLM o odpuszczeniu (okup/kapitulacja/rozejm), wołana z main
     // po odebraniu wyniku z wątku LLM. Samobramkuje się: jeśli frakcja nie ma
     // aktywnego rajdu, nic nie robi. W przeciwnym razie: delta relacji (deeskalacja_bonus),
@@ -80,6 +93,8 @@ private:
     std::map<std::string, std::int64_t> last_radio_ms_;
     std::map<std::string, std::int64_t> last_spawn_ms_;
     std::vector<SpawnOut> pending_spawns_;
+    std::vector<ContractOut> pending_contracts_;
+    std::map<std::string, std::int64_t> last_contract_ms_;
     std::set<std::string> active_raids_;          // frakcje z aktywnym rajdem (można je odwołać)
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
 
@@ -119,6 +134,13 @@ private:
     void handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
     void handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                              std::vector<RadioOut>& out);
+    // Mod potwierdza, że kontrakt naprawdę powstał w grze i podaje jego ID —
+    // dopiero teraz zapisujemy go w SQLite (wymóg: przeżyć wczytanie świata).
+    void handle_contract_created(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                 std::vector<RadioOut>& out);
+    // Tick: czy frakcja wystawia teraz zlecenie (relacja, cooldown, limit otwartych).
+    void maybe_offer_contract(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                               std::vector<RadioOut>& out);
 };
 

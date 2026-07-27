@@ -65,6 +65,10 @@ public:
     void upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,
                          const std::string& status, const std::string& payload);
     void set_contract_status(const std::string& id, const std::string& status);
+
+    // Ile zleceń frakcji czeka na rozstrzygnięcie (status 'open') — bramka
+    // kontrakty_max_otwartych, żeby frakcja nie zasypała gracza robotą.
+    int count_open_contracts(const std::string& faction) const;
     // Frakcja kontraktu ("" = nieznany id).
     std::string get_contract_faction(const std::string& id) const;
 

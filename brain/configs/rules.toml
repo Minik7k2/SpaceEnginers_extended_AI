@@ -49,6 +49,19 @@ ttl_sekund = 120
 # clear <=6 km, weak/szum <=15 km, dalej = brak zasięgu). false = rozmowa zewsząd (test).
 wymagaj_zasiegu = true
 
+[kontrakty]
+# Etap 6: frakcja sama wystawia zlecenia na swojej stacji (mod tworzy je przez
+# MyAPIGateway.ContractSystem). To główna droga ODKUPIENIA — dryf leczy 1 pkt / 2 h,
+# a wykonane zlecenie daje +kontrakt_max od ręki. prog_relacji: poniżej tej wartości
+# frakcja nie chce mieć z tobą do czynienia (przy wojnie -60 i tak nie dostaniesz nic).
+wlaczone = true
+prog_relacji = -55
+cooldown_min = 20
+max_otwartych = 1
+nagroda_min = 15000
+nagroda_max = 60000
+czas_min = 45
+
 [spawn]
 # Spawny statków frakcji sterowane maszyną stanów: przejście w napięcie -> patrol,
 # w wojnę -> raid, losowe zdarzenie ticka -> convoy/patrol/raid wg stanu.

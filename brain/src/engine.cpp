@@ -244,10 +244,18 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
         handle_debug(ev, cfg, now_ms, out);
     } else if (ev.type == "trade") {
         handle_trade(ev, cfg, now_ms, out);
+    } else if (ev.type == "contract_created") {
+        handle_contract_created(ev, cfg, now_ms, out);
     } else if (ev.type == "contract_done") {
         handle_contract_done(ev, cfg, now_ms, out);
     }
     return out;
+}
+
+std::vector<ContractOut> Engine::take_contracts() {
+    std::vector<ContractOut> taken;
+    taken.swap(pending_contracts_);
+    return taken;
 }
 
 void Engine::handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -409,15 +417,50 @@ void Engine::handle_trade(const Event& ev, const Config& cfg, std::int64_t now_m
     update_state(faction, cfg, now_ms, out); // handel bez radia — zbyt częsty, żeby nadawać
 }
 
-void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
-                                  std::vector<RadioOut>& out) {
+void Engine::handle_contract_created(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                     std::vector<RadioOut>& out) {
+    const std::string contract_id = data_str(ev, "contract_id");
     const std::string faction = data_str(ev, "faction");
-    if (faction.empty()) {
+    if (contract_id.empty() || faction.empty()) {
         return;
     }
     ensure_known_faction(faction);
 
+    // Utrwalenie: ID z gry musi przeżyć restart świata (CLAUDE.md), a przy
+    // contract_done to stąd bierzemy frakcję — mod nie musi jej pamiętać.
+    const std::string kind = data_str(ev, "kind");
+    db_.upsert_contract(contract_id, faction, kind.empty() ? "dostawa" : kind, "open",
+                        ev.data.dump());
+    std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", "
+              << (kind.empty() ? "dostawa" : kind) << ") wystawiony w grze\n";
+
+    // Głos frakcji: ogłoszenie zlecenia. {oferta} podstawia opis z moda (co i za ile).
+    const std::string opis = data_str(ev, "opis");
+    const std::string reward = data_str(ev, "reward_str");
+    emit(out, faction, render_first(faction, {"oferta", "neutral"}, {{"oferta", opis},
+                                                                    {"kwota", reward}}),
+         0, cfg, now_ms, "oferta",
+         "Wystawiacie właśnie zlecenie dla gracza: " + opis +
+             (reward.empty() ? "" : " Nagroda: " + reward + " kredytów.") +
+             " Ogłoś to krótko przez radio po swojemu.");
+}
+
+void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                  std::vector<RadioOut>& out) {
     const std::string contract_id = data_str(ev, "contract_id");
+    // Frakcja: z pola zdarzenia, a gdy go nie ma — z bazy po ID kontraktu (mod po
+    // wczytaniu świata zna tylko ID, przypisanie do frakcji trzyma brain).
+    std::string faction = data_str(ev, "faction");
+    if (faction.empty() && !contract_id.empty()) {
+        faction = db_.get_contract_faction(contract_id);
+    }
+    if (faction.empty()) {
+        std::cerr << "[brain] contract_done bez frakcji i bez znanego ID (" << contract_id
+                  << ") — pomijam\n";
+        return;
+    }
+    ensure_known_faction(faction);
+
     const bool success = !ev.data.contains("success") || !ev.data["success"].is_boolean()
                              ? true
                              : ev.data["success"].get<bool>();
@@ -442,6 +485,40 @@ void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64
         emit(out, faction, render_first(faction, {"zal", "kpina", "neutral"}), 0, cfg, now_ms, "zal",
              "Gracz zawalił wasz kontrakt. Wyraź niezadowolenie po swojemu.");
     }
+}
+
+void Engine::maybe_offer_contract(const std::string& faction, const Config& cfg,
+                                  std::int64_t now_ms, std::vector<RadioOut>& out) {
+    (void)out; // radio leci dopiero przy contract_created (gdy wiemy, że kontrakt istnieje)
+    if (!cfg.kontrakty_wlaczone || !is_own_faction(faction)) {
+        return;
+    }
+    // Wrogowie nie dają roboty. Próg jest wyżej niż wojna (-60), więc frakcja w wojnie
+    // musi najpierw wyjść na prostą (okup/de-eskalacja), a dopiero potem odrabiać czynami.
+    const double value = db_.get_relation(faction, kPlayer).value;
+    if (value < cfg.kontrakty_prog_relacji) {
+        return;
+    }
+    if (db_.count_open_contracts(faction) >= cfg.kontrakty_max_otwartych) {
+        return;
+    }
+    const std::int64_t cooldown_ms = static_cast<std::int64_t>(cfg.kontrakty_cooldown_min) * 60000;
+    const auto it = last_contract_ms_.find(faction);
+    if (it != last_contract_ms_.end() && now_ms - it->second < cooldown_ms) {
+        return;
+    }
+    last_contract_ms_[faction] = now_ms;
+
+    // Nagroda skalowana relacją: im lepiej was widzą, tym lepiej płatna robota.
+    const double span = 100.0 - cfg.kontrakty_prog_relacji;
+    const double t = span > 0 ? std::clamp((value - cfg.kontrakty_prog_relacji) / span, 0.0, 1.0) : 0.0;
+    const auto reward = static_cast<std::int64_t>(
+        cfg.kontrakty_nagroda_min +
+        (cfg.kontrakty_nagroda_max - cfg.kontrakty_nagroda_min) * t);
+
+    std::cout << "[brain] kontrakt: " << faction << " wystawia zlecenie za " << reward
+              << " kr (relacja " << format_value(value) << ")\n";
+    pending_contracts_.push_back({faction, "dostawa", reward, cfg.kontrakty_czas_min});
 }
 
 bool Engine::chat_expects_decision(const std::string& faction) const {
@@ -506,6 +583,20 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
         }
         request_spawn(faction, kind, cfg, now_ms, "Ręcznie wywołany spawn (/zf raid).", /*force=*/true);
         out.push_back({"SYSTEM", "Spawn zlecony: " + faction + " (" + kind + ").", "white", 0, {}, {}});
+    } else if (cmd == "kontrakt") {
+        // /zf kontrakt <frakcja>: wymuszona oferta (omija cooldown i limit otwartych) —
+        // test potoku kontraktów bez czekania na tick i bez zabawy relacjami.
+        const std::string faction = data_str(ev, "faction");
+        if (!is_own_faction(faction)) {
+            out.push_back({"SYSTEM", "Kontrakty wystawiają tylko HEL/KRW/WGR (nie \"" + faction + "\").",
+                           "white", 0, {}, {}});
+            return;
+        }
+        const auto reward = static_cast<std::int64_t>(cfg.kontrakty_nagroda_min);
+        pending_contracts_.push_back({faction, "dostawa", reward, cfg.kontrakty_czas_min});
+        last_contract_ms_[faction] = now_ms;
+        out.push_back({"SYSTEM", "Zlecenie " + faction + " za " + std::to_string(reward) + " kr — wystawiam.",
+                       "white", 0, {}, {}});
     } else if (cmd == "okup") {
         // /zf okup <frakcja>: deterministyczny wyzwalacz de-eskalacji — niezależny od
         // LLM (qwen-3B bywa za słaby, by sam trafnie odpuścić). Odwołuje aktywny rajd.
@@ -555,10 +646,14 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
         std::cout << "[brain] dryf relacji: " << steps << " krok(ów)\n";
     }
 
-    // 2) Maszyna stanów + odnowienie budżetu akcji.
+    // 2) Maszyna stanów + odnowienie budżetu akcji + ewentualne zlecenie.
     for (const FactionRow& row : db_.list_factions()) {
         update_state(row.tag, cfg, now_ms, out);
         db_.set_faction_budget(row.tag, cfg.budzet_akcji_na_tick);
+        // Kontrakty to jedyna szybka droga odkupienia (dryf to 1 pkt / 2 h), więc
+        // oferta idzie każdym tickiem, w którym frakcja nie jest wroga i nie ma
+        // jeszcze otwartego zlecenia — bramkuje ją cooldown, nie los.
+        maybe_offer_contract(row.tag, cfg, now_ms, out);
     }
 
     // E6: wojna to stan ciągły, nie tylko krawędź wejścia. Dopóki frakcja jest

@@ -74,6 +74,16 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.spawn_wlaczone = (*spawn)["wlaczone"].value_or(cfg.spawn_wlaczone);
         cfg.spawn_cooldown_min = (*spawn)["cooldown_min"].value_or(cfg.spawn_cooldown_min);
     }
+
+    if (const auto* kon = tbl["kontrakty"].as_table()) {
+        cfg.kontrakty_wlaczone = (*kon)["wlaczone"].value_or(cfg.kontrakty_wlaczone);
+        cfg.kontrakty_prog_relacji = (*kon)["prog_relacji"].value_or(cfg.kontrakty_prog_relacji);
+        cfg.kontrakty_cooldown_min = (*kon)["cooldown_min"].value_or(cfg.kontrakty_cooldown_min);
+        cfg.kontrakty_max_otwartych = (*kon)["max_otwartych"].value_or(cfg.kontrakty_max_otwartych);
+        cfg.kontrakty_nagroda_min = (*kon)["nagroda_min"].value_or(cfg.kontrakty_nagroda_min);
+        cfg.kontrakty_nagroda_max = (*kon)["nagroda_max"].value_or(cfg.kontrakty_nagroda_max);
+        cfg.kontrakty_czas_min = (*kon)["czas_min"].value_or(cfg.kontrakty_czas_min);
+    }
 }
 
 toml::table parse_or_throw(const std::string& path) {

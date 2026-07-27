@@ -214,6 +214,89 @@ int main() {
         assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
     }
 
+    // --- Kontrakty (Etap 6) --- świeży silnik: oferta w ticku, utrwalenie ID, rozliczenie.
+    {
+        zf::Db cdb(":memory:");
+        zf::Fallback cfb(fallback_path.string());
+        zf::Engine ce(cdb, cfb, /*rng_seed=*/11);
+        zf::Config ccfg;
+        ccfg.spawn_wlaczone = false; // izolujemy kanał kontraktów od spawnów
+        std::int64_t t = 9000000;
+
+        // Pierwszy tick: każda z trzech naszych frakcji wystawia po jednym zleceniu.
+        ce.tick(ccfg, t, /*force=*/true);
+        auto offers = ce.take_contracts();
+        assert(offers.size() == 3 && "spokojne frakcje mają wystawić po zleceniu");
+        assert(ce.take_contracts().empty() && "take_contracts ma czyścić bufor");
+        const std::int64_t reward = offers[0].reward;
+        assert(reward >= ccfg.kontrakty_nagroda_min && reward <= ccfg.kontrakty_nagroda_max);
+
+        // Drugi tick zaraz potem: cooldown (20 min) blokuje kolejne oferty.
+        t += kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        assert(ce.take_contracts().empty() && "cooldown ma blokować drugą ofertę");
+
+        // Mod potwierdza powstanie kontraktu w grze -> ID trafia do SQLite (open).
+        t += kMinuteMs;
+        auto cout_msgs = ce.on_event(
+            make_event("contract_created", {{"contract_id", "1234"}, {"faction", "WGR"},
+                                            {"kind", "dostawa"}, {"opis", "500 rudy żelaza"}}),
+            ccfg, t);
+        assert(cdb.get_contract_faction("1234") == "WGR" && "contract_created ma utrwalić ID");
+        assert(cdb.count_open_contracts("WGR") == 1);
+        assert(cout_msgs.size() == 1 && cout_msgs[0].faction == "WGR" && "ogłoszenie zlecenia przez radio");
+
+        // Limit otwartych zleceń: po upływie cooldownu WGR i tak nie dostanie drugiego.
+        t += static_cast<std::int64_t>(ccfg.kontrakty_cooldown_min + 1) * kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        for (const zf::ContractOut& c : ce.take_contracts()) {
+            assert(c.faction != "WGR" && "max_otwartych=1 ma blokować drugie zlecenie WGR");
+        }
+
+        // Wykonanie: relacja w górę o kontrakt_max, status w bazie na 'done'.
+        const double before = cdb.get_relation("WGR", "PLAYER").value;
+        t += kMinuteMs;
+        ce.on_event(make_event("contract_done", {{"contract_id", "1234"}, {"success", true}}), ccfg, t);
+        const double after = cdb.get_relation("WGR", "PLAYER").value;
+        assert(after > before + ccfg.kontrakt_max - 0.001 && "wykonany kontrakt ma dać +kontrakt_max");
+        assert(cdb.count_open_contracts("WGR") == 0 && "rozliczony kontrakt przestaje być otwarty");
+
+        // contract_done bez pola faction ma działać (frakcja z bazy po ID) — tak
+        // zgłasza je mod po wczytaniu świata, gdy zna już tylko ID kontraktu.
+        ce.on_event(make_event("contract_created", {{"contract_id", "77"}, {"faction", "HEL"}}), ccfg, t);
+        const double hel_before = cdb.get_relation("HEL", "PLAYER").value;
+        t += kMinuteMs;
+        ce.on_event(make_event("contract_done", {{"contract_id", "77"}, {"success", false}}), ccfg, t);
+        assert(cdb.get_relation("HEL", "PLAYER").value < hel_before && "zawalony kontrakt ma karać");
+
+        // Wrogość zamyka kran: przy relacji poniżej progu frakcja nie daje roboty.
+        cdb.adjust_relation("KRW", "PLAYER", -70.0);
+        t += static_cast<std::int64_t>(ccfg.kontrakty_cooldown_min + 1) * kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        for (const zf::ContractOut& c : ce.take_contracts()) {
+            assert(c.faction != "KRW" && "wroga frakcja nie wystawia zleceń");
+        }
+
+        // Wyłącznik globalny.
+        ccfg.kontrakty_wlaczone = false;
+        t += static_cast<std::int64_t>(ccfg.kontrakty_cooldown_min + 1) * kMinuteMs;
+        ce.tick(ccfg, t, /*force=*/true);
+        assert(ce.take_contracts().empty() && "kontrakty_wlaczone=false ma wyłączyć oferty");
+
+        // /zf kontrakt <frakcja>: wymuszona oferta mimo cooldownu i wyłącznika (jak /zf raid).
+        auto dout = ce.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "HEL"}}),
+                                ccfg, t);
+        auto forced = ce.take_contracts();
+        assert(forced.size() == 1 && forced[0].faction == "HEL" && "/zf kontrakt ma wymusić ofertę");
+        assert(dout.size() == 1 && dout[0].faction == "SYSTEM");
+
+        // Obca frakcja (SPRT/vanilla) nie ma bloku kontraktów — odmowa, nie zlecenie.
+        auto bad = ce.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "SPRT"}}),
+                               ccfg, t);
+        assert(ce.take_contracts().empty() && "obca frakcja nie wystawia kontraktów");
+        assert(bad.size() == 1 && bad[0].faction == "SYSTEM");
+    }
+
     std::cout << "zf_engine_test: OK\n";
     return 0;
 }

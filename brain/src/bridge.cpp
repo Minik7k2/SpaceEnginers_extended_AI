@@ -199,6 +199,23 @@ void CommandWriter::write_spawn_request(const std::string& faction, const std::s
     write_line(line);
 }
 
+void CommandWriter::write_contract_create(const std::string& faction, const std::string& kind,
+                                          std::int64_t reward, int duration_min) {
+    const nlohmann::json line = {
+        {"v", 1},
+        {"seq", db_.next_commands_seq()},
+        {"ts", now_unix_ms()},
+        {"type", "contract_create"},
+        {"data", {
+            {"faction", faction},
+            {"kind", kind},
+            {"reward", reward},
+            {"duration_min", duration_min},
+        }},
+    };
+    write_line(line);
+}
+
 void CommandWriter::write_stand_down(const std::string& faction, std::int64_t ransom_amount) {
     const nlohmann::json line = {
         {"v", 1},

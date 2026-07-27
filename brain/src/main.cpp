@@ -169,6 +169,10 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
         for (const zf::SpawnOut& sp : engine.take_spawns()) {
             std::cout << "  [SPAWN | " << sp.faction << "] kind=" << sp.kind << " — " << sp.context << "\n";
         }
+        for (const zf::ContractOut& c : engine.take_contracts()) {
+            std::cout << "  [KONTRAKT | " << c.faction << "] " << c.kind << " za " << c.reward
+                      << " kr (" << c.duration_min << " min)\n";
+        }
     };
 
     std::string line;
@@ -268,6 +272,15 @@ int main(int argc, char** argv) {
             }
         };
 
+        // Zlecenia kontraktów (Etap 6) — osobny kanał, tak jak spawny.
+        const auto flush_contracts = [&commands, &engine]() {
+            for (const zf::ContractOut& c : engine.take_contracts()) {
+                commands.write_contract_create(c.faction, c.kind, c.reward, c.duration_min);
+                std::cout << "[brain] contract_create [" << c.faction << "] " << c.kind << " za "
+                          << c.reward << " kr, " << c.duration_min << " min\n";
+            }
+        };
+
         // Pamięć dialogu (5c): ostatnie tury Gracz<->frakcja per frakcja, wstrzykiwane
         // do promptu, żeby frakcja trzymała wątek rozmowy, a nie odpowiadała z jednej
         // wiadomości (feedback z gry: „nie trzyma wątku"). Ephemeralna — na sesję braina.
@@ -325,6 +338,7 @@ int main(int argc, char** argv) {
             }
             send_all(engine.tick(cfg, now));
             flush_spawns();   // spawny z on_event (w tym /zf raid) i z ticka
+            flush_contracts(); // zlecenia z ticka i z /zf kontrakt
 
             // Gotowe wypowiedzi z wątku LLM (albo fallbacki po nieudanej generacji).
             for (const zf::LlmResult& res : llm.poll_results()) {
