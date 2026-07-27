@@ -245,6 +245,12 @@ void Db::set_contract_status(const std::string& id, const std::string& status) {
     s.text(1, status).text(2, id).done();
 }
 
+int Db::count_open_contracts(const std::string& faction) const {
+    Stmt s(handle_, "SELECT COUNT(*) FROM contracts WHERE faction = ? AND status = 'open';");
+    s.text(1, faction);
+    return s.row() ? s.col_int(0) : 0;
+}
+
 std::string Db::get_contract_faction(const std::string& id) const {
     Stmt s(handle_, "SELECT faction FROM contracts WHERE contract_id = ?;");
     s.text(1, id);

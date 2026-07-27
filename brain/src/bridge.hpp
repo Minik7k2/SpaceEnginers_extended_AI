@@ -55,6 +55,12 @@ public:
     void write_ransom_demand(const std::string& faction, const std::string& item,
                              std::int64_t amount, int deadline_s);
 
+    // Etap 6: zlecenie kontraktu do moda. Mod tworzy go przez MyAPIGateway.ContractSystem
+    // na bloku kontraktów/sklepu tej frakcji i odsyła contract_created z prawdziwym ID
+    // (dopiero wtedy kontrakt trafia do SQLite).
+    void write_contract_create(const std::string& faction, const std::string& kind,
+                               std::int64_t reward, int duration_min);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();

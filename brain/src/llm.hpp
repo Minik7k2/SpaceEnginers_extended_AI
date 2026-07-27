@@ -59,4 +59,19 @@ private:
 // nie ma persony (SPRT, SYSTEM itd.) — wtedy radio zostaje przy szablonach.
 std::string persona_path(const std::string& faction);
 
+// --- Sanityzacja wyjścia modelu (Etap 5c) ---
+// Publiczne, bo (a) mają własne testy (zf_llm_test) — to czysta logika tekstowa,
+// jedyna część LLM-u testowalna bez modelu, (b) w budowie bez llama.cpp
+// (ZF_WITH_LLM=OFF) funkcje w anonimowym namespace były martwe i wywalały
+// -Werror=unused-function, przez co udokumentowany build "bez LLM" się nie kompilował.
+
+// Usuwa z widocznej treści wyciek markera decyzji ("odpuszcza=true"/"odpuszcza: false"),
+// który mały model wkleja do pola "tresc" mimo osobnego pola JSON. Sprząta też
+// zawisłe separatory na końcu (spacje, przecinki, myślniki ASCII i UTF-8).
+std::string strip_decision_leak(std::string s);
+
+// Obcina artefakty wypowiedzi: podpis tagiem frakcji na końcu ("... — KRW."),
+// prefiks nazwą nadawcy na początku ("KRW: ...") i uchwyt "@Gracz". Trymuje brzegi.
+std::string sanitize_reply(std::string s, const std::string& faction);
+
 } // namespace zf

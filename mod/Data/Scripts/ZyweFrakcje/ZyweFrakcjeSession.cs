@@ -28,6 +28,8 @@ namespace ZyweFrakcje
         private RadioDisplay _radio;
         private MESApi _mes;
         private RansomManager _ransom;
+        private TradeWatcher _trade;
+        private ContractManager _contracts;
         private int _tick;
 
         public override void LoadData()
@@ -46,6 +48,10 @@ namespace ZyweFrakcje
             // DamageSystem jest dostępny dopiero tu, nie w LoadData.
             _combat = new CombatTracker(_events);
             _proximity = new ProximityWatcher(_events);
+            // Ekonomia (Etap 6): handel z heurystyki salda, kontrakty przez ContractSystem.
+            // Też dopiero tu — konto gracza i ContractSystem nie są gotowe w LoadData.
+            _trade = new TradeWatcher(_events);
+            _contracts = new ContractManager(typeof(ZyweFrakcjeSession), _events, _trade);
         }
 
         protected override void UnloadData()
@@ -97,6 +103,14 @@ namespace ZyweFrakcje
             if (_radio != null)
             {
                 _radio.Update(_tick); // kolejka priorytetowa radia: kolor + TTL + odstęp
+            }
+            if (_trade != null)
+            {
+                _trade.Update(); // handel: zmiana salda przy sklepie frakcji
+            }
+            if (_contracts != null)
+            {
+                _contracts.Update(); // stan kontraktów (po wczytaniu świata nie ma callbacków)
             }
             // MES bywa gotowy dopiero po kilku tikach — rejestrujemy akcję spawnu, gdy wstanie.
             TestSpawner.EnsureSpawnActionRegistered();
@@ -212,6 +226,23 @@ namespace ZyweFrakcje
                 return;
             }
 
+            const string kontraktPrefix = "/zf kontrakt";
+            if (messageText.StartsWith(kontraktPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                string tag = messageText.Substring(kontraktPrefix.Length).Trim().ToUpperInvariant();
+                if (tag.Length == 0)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf kontrakt <frakcja> (wymusza zlecenie, omija cooldown)");
+                }
+                else
+                {
+                    // Cały potok: mod -> brain -> contract_create -> ContractSystem -> contract_created.
+                    _events.WriteDebugKontrakt(tag);
+                }
+                return;
+            }
+
             const string okupPrefix = "/zf okup";
             if (messageText.StartsWith(okupPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -232,7 +263,7 @@ namespace ZyweFrakcje
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -301,7 +332,11 @@ namespace ZyweFrakcje
                 {
                     HandleRansomDemand(msg);
                 }
-                // price_update / contract_create: obsługa w Etapie 6.
+                else if (type == "contract_create")
+                {
+                    HandleContractCreate(msg);
+                }
+                // price_update: Etap 6 dalszy ciąg.
             }
         }
 
@@ -328,6 +363,53 @@ namespace ZyweFrakcje
             string kind = kindObj as string ?? "patrol";
 
             TestSpawner.SpawnForFaction(faction, kind);
+        }
+
+        /// <summary>
+        /// Etap 6: brain zleca wystawienie kontraktu (frakcja, nagroda, czas). Liczby z JSON
+        /// są double (Json.ParseNumber), stąd rzuty.
+        /// </summary>
+        private void HandleContractCreate(Dictionary<string, object> msg)
+        {
+            if (_contracts == null)
+            {
+                return;
+            }
+            object dataObj;
+            msg.TryGetValue("data", out dataObj);
+            var data = dataObj as Dictionary<string, object>;
+            if (data == null)
+            {
+                return;
+            }
+
+            object factionObj;
+            data.TryGetValue("faction", out factionObj);
+            string faction = factionObj as string;
+            if (string.IsNullOrEmpty(faction))
+            {
+                return;
+            }
+
+            object kindObj;
+            data.TryGetValue("kind", out kindObj);
+            string kind = kindObj as string ?? "dostawa";
+
+            long reward = 0;
+            object rewardObj;
+            if (data.TryGetValue("reward", out rewardObj) && rewardObj is double)
+            {
+                reward = (long)(double)rewardObj;
+            }
+
+            int durationMin = 45;
+            object durationObj;
+            if (data.TryGetValue("duration_min", out durationObj) && durationObj is double)
+            {
+                durationMin = (int)(double)durationObj;
+            }
+
+            _contracts.Create(faction, kind, reward, durationMin);
         }
 
         private void HandleStandDown(Dictionary<string, object> msg)
@@ -403,6 +485,12 @@ namespace ZyweFrakcje
             {
                 fac.RequestChangeBalance(taken);
             }
+            // Nasz własny przelew nie może wyglądać jak handel ze sklepem frakcji —
+            // TradeWatcher bierze nowe saldo za punkt odniesienia i nic nie zgłasza.
+            if (_trade != null)
+            {
+                _trade.Suppress();
+            }
             string note = taken < amount ? " (tyle miałeś z żądanych " + amount + ")" : "";
             MyAPIGateway.Utilities.ShowMessage("ZF", "Okup zapłacony: " + taken + " kr dla " + faction + note);
         }
@@ -431,8 +519,16 @@ namespace ZyweFrakcje
                     count++;
                     ids += (ids.Length > 0 ? ", " : "") + station.Id;
                 }
+                // Etap 6: dla kontraktów liczy się nie tyle stacja Economy, co BLOK
+                // (kontraktów albo sklepu) należący do frakcji — to on jest startBlockId.
+                long blockId;
+                string gridName;
+                string blok = FactionEconomy.TryFindContractBlock(tags[i], out blockId, out gridName)
+                    ? " | blok kontraktów: " + (gridName ?? "?") + " (" + blockId + ")"
+                    : " | BRAK bloku kontraktów/sklepu — zlecenia nie powstaną";
+
                 MyAPIGateway.Utilities.ShowMessage("ZF",
-                    tags[i] + ": stacji=" + count + (count > 0 ? " [" + ids + "]" : ""));
+                    tags[i] + ": stacji=" + count + (count > 0 ? " [" + ids + "]" : "") + blok);
             }
         }
 

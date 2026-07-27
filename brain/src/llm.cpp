@@ -34,30 +34,6 @@ std::string persona_path(const std::string& faction) {
     return {};
 }
 
-namespace {
-
-// Gramatyka GBNF wymuszająca dokładnie {"tresc":"...","ton":"..."} (CLAUDE.md).
-// Limit znaków treści pilnuje walidacja (config llm.max_chars) — gramatyka daje
-// twardy strop, żeby model nie mógł uciec w elaborat.
-constexpr const char* kRadioGrammar = R"GBNF(
-root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\"}"
-tresc ::= znak{1,220}
-ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
-znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
-)GBNF";
-
-// Wariant dla rozmowy w trakcie wrogości: dokłada pola "odpuszcza" (bool) — decyzję
-// frakcji o przyjęciu okupu/kapitulacji/rozejmu — oraz "zada_surowce" (bool, B+) —
-// żądanie trybutu w surowcach zamiast odpuszczenia. Reszta jak wyżej, żeby głos
-// Etapu 4 się nie zmienił poza tymi polami.
-constexpr const char* kDeescalationGrammar = R"GBNF(
-root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\",\"odpuszcza\":" bool ",\"zada_surowce\":" bool "}"
-tresc ::= znak{1,220}
-ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
-bool ::= "true" | "false"
-znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
-)GBNF";
-
 // Sanityzacja treści radia w trybie decyzji. Mimo gramatyki mały model (3B) bywa
 // echem promptu i wkleja marker decyzji ("odpuszcza=true"/"false") do pola "tresc",
 // czyli do tekstu widocznego dla gracza. Prawdziwą flagę czytamy z osobnego pola
@@ -120,6 +96,30 @@ std::string sanitize_reply(std::string s, const std::string& faction) {
     }
     return s.substr(b, s.find_last_not_of(ws) - b + 1);
 }
+
+namespace {
+
+// Gramatyka GBNF wymuszająca dokładnie {"tresc":"...","ton":"..."} (CLAUDE.md).
+// Limit znaków treści pilnuje walidacja (config llm.max_chars) — gramatyka daje
+// twardy strop, żeby model nie mógł uciec w elaborat.
+constexpr const char* kRadioGrammar = R"GBNF(
+root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\"}"
+tresc ::= znak{1,220}
+ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
+znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
+)GBNF";
+
+// Wariant dla rozmowy w trakcie wrogości: dokłada pola "odpuszcza" (bool) — decyzję
+// frakcji o przyjęciu okupu/kapitulacji/rozejmu — oraz "zada_surowce" (bool, B+) —
+// żądanie trybutu w surowcach zamiast odpuszczenia. Reszta jak wyżej, żeby głos
+// Etapu 4 się nie zmienił poza tymi polami.
+constexpr const char* kDeescalationGrammar = R"GBNF(
+root ::= "{\"tresc\":\"" tresc "\",\"ton\":\"" ton "\",\"odpuszcza\":" bool ",\"zada_surowce\":" bool "}"
+tresc ::= znak{1,220}
+ton ::= [a-zA-ZąćęłńóśźżA-ŻĄĆĘŁŃÓŚŹŻ ]{2,24}
+bool ::= "true" | "false"
+znak ::= [^"\\\x0A\x0D] | "\\" ["\\nt]
+)GBNF";
 
 } // namespace
 

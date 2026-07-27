@@ -16,6 +16,9 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
   Configi i persony hot-reloadowane (mtime check co tick pętli).
   Ścieżki per maszyna (np. `[bridge].storage_dir`) w `brain/configs/rules.local.toml`
   (poza gitem) — nadpisuje wartości z `rules.toml`; każdy komputer ma własny.
+  Gdy `storage_dir` jest puste albo wskazuje nieistniejący katalog, brain sam
+  znajduje storage: szuka najświeższego `events.jsonl` w zapisach SE
+  (`%APPDATA%/SpaceEngineers/Saves`, korzeń nadpisywalny przez `ZF_SAVES_DIR`).
 - **Most:** pliki JSONL w storage moda (append-only).
   - `events.jsonl` — mod pisze, brain czyta.
   - `commands.jsonl` — brain pisze, mod czyta co ~60 tików.
@@ -44,15 +47,22 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
 
 ## Silnik relacji (brain)
 
-- Skala -100..+100, frakcja↔gracz i frakcja↔frakcja.
+- Skala -100..+100, frakcja↔gracz i frakcja↔frakcja. Polityka między frakcjami
+  jest zasiana raz na świat (HEL/KRW -70, KRW/WGR -50, HEL/WGR +10) — bez tego
+  „atak na wroga frakcji" nie miał jak zadziałać. Podgląd: `/zf rel` po `||`.
 - Progi: >=+40 sojusznik; -30 wrogi; -60 wojna; wyjście z wojny dopiero >-50
   (histereza). Wartości w `brain/configs/rules.toml`.
 - Zmiany bazowe: ostrzał -5..-15 (wg dmg), zniszczenie statku -30, stacji -50
-  (+trwały modyfikator), handel +1..+3, kontrakt +10..+20, atak na wroga
-  frakcji: +5 u niej.
+  (+trwały sufit relacji = 20, świat mściwy), handel +1..+3, kontrakt +20 /
+  -10 za zawalony, atak na wroga frakcji: +5 u niej, de-eskalacja +15.
 - Tick świata co 3-5 min: dryf → maszyna stanów per frakcja
   (spokój/napięcie/wojna, budżet akcji chroni przed spamem patroli) →
-  zdarzenie losowe ważone stanem → decyzje do kolejki LLM/komend.
+  oferta kontraktu (jeśli relacja i cooldown pozwalają) → zdarzenie losowe
+  ważone stanem → decyzje do kolejki LLM/komend.
+- Dryf dotyczy WYŁĄCZNIE relacji do gracza. Wojny między frakcjami nie kończy
+  upływ czasu, tylko zdarzenia.
+- Stan długiego oddechu (aktywny rajd z TTL 60 min, cooldowny spawnu i
+  kontraktów) siedzi w SQLite — restart brainu w trakcie rajdu nie gubi okupu.
 - Reakcje na zdarzenia z gry: natychmiastowe, poza tickiem.
 
 ## Struktura repo
@@ -101,20 +111,34 @@ docs/protocol.md                # spec mostka JSONL
   w commands.jsonl; do weryfikacji w grze wg docs/testy-reczne.md sekcja D)
   integracja llama.cpp, GBNF, karty person, walidacja+retry. Wątek LlmWorker,
   prompt = persona + pamięć frakcji + kontekst z silnika, fallback na szablony.
-- **Etap 5 — ręce:** radio na czacie (format `[RADIO | NAZWA]`, kolor frakcji,
-  limit 1/min/frakcję poza walką, kolejka priorytetowa, TTL 2 min),
-  spawn_request → MES API, adresowanie czatu (@frakcja / zasięg / szum).
-- **Etap 6 — kontrakty i ceny:** ContractSystem + własne stacje frakcji z
-  blokiem kontraktów, price_update, zdarzenia handlowe do silnika.
+- **Etap 5 — ręce:** ✅ radio na czacie (format `[RADIO | NAZWA]`, kolejka
+  priorytetowa, TTL 2 min; kolor frakcji jedzie w JSON, ale czat SE rysuje biało —
+  `MyVisualScriptLogicProvider` poza whitelistą), spawn_request → MES API,
+  adresowanie czatu (@frakcja / zasięg / szum), de-eskalacja z realnym okupem.
+- **Etap 6 — kontrakty i ceny:** kod gotowy, DO WERYFIKACJI W GRZE (sekcja I
+  w docs/testy-reczne.md). Frakcja wystawia zlecenie w ticku (`[kontrakty]`
+  w rules.toml) → mod tworzy je przez `MyAPIGateway.ContractSystem`
+  (`MyContractAcquisition`) na bloku kontraktów/sklepu frakcji → `contract_created`
+  z prawdziwym ID ląduje w SQLite → wykonanie/porażka wraca jako `contract_done`.
+  Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
+  nie ma zdarzenia transakcji. Zostało: `price_update` i własne stacje frakcji.
 - **Etap 7 — polish:** Kult, LCD na stacjach, emisariusze (AiEnabled API),
   własne flagowce, A/B Bielik. Dalej: QLoRA fine-tune radia, RL zachowań.
 
 ## Testowanie
 
-- Komendy czatu w modzie: `/zf rel` (relacje), `/zf event <json>` (wstrzyknij
-  zdarzenie), `/zf tick` (wymuś tick), `/zf spawn <frakcja>` (test MES).
+- Komendy czatu w modzie: `/zf rel` (relacje + polityka frakcji), `/zf tick`
+  (wymuś tick), `/zf spawn <frakcja>` (vanilla prefab), `/zf raid <frakcja>`
+  (potok MES), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
+  <frakcja>` (wymuszone zlecenie), `/zf stations` (stacje i blok kontraktów),
+  `/zf event <json>` (wstrzyknij zdarzenie).
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
+- `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/polityka),
+  sanityzacja wyjścia LLM, config z auto-wykrywaniem storage. Testy wymuszają
+  asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
+- CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
+  i smoke test `--replay`. Wariant bez LLM łatwo psuje się niezauważenie.
 
 ## Konwencje
 

@@ -1,8 +1,10 @@
 #include "config.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 #include <toml++/toml.hpp>
 
@@ -83,6 +85,68 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.okup_bonus_dostawa = (*okup)["bonus_dostawa"].value_or(cfg.okup_bonus_dostawa);
         cfg.okup_kara_zlamanie = (*okup)["kara_zlamanie"].value_or(cfg.okup_kara_zlamanie);
     }
+
+    if (const auto* kon = tbl["kontrakty"].as_table()) {
+        cfg.kontrakty_wlaczone = (*kon)["wlaczone"].value_or(cfg.kontrakty_wlaczone);
+        cfg.kontrakty_prog_relacji = (*kon)["prog_relacji"].value_or(cfg.kontrakty_prog_relacji);
+        cfg.kontrakty_cooldown_min = (*kon)["cooldown_min"].value_or(cfg.kontrakty_cooldown_min);
+        cfg.kontrakty_max_otwartych = (*kon)["max_otwartych"].value_or(cfg.kontrakty_max_otwartych);
+        cfg.kontrakty_nagroda_min = (*kon)["nagroda_min"].value_or(cfg.kontrakty_nagroda_min);
+        cfg.kontrakty_nagroda_max = (*kon)["nagroda_max"].value_or(cfg.kontrakty_nagroda_max);
+        cfg.kontrakty_czas_min = (*kon)["czas_min"].value_or(cfg.kontrakty_czas_min);
+    }
+}
+
+// Automatyczne znalezienie katalogu storage moda. Ścieżka wygląda tak:
+//   %APPDATA%/SpaceEngineers/Saves/<steamid>/<świat>/Storage/<mod>/events.jsonl
+// i zmienia się przy KAŻDYM nowym świecie — ręczne wpisywanie jej do rules.local.toml
+// było najczęstszym powodem „brain nie widzi gry". Szukamy więc pliku events.jsonl
+// w drzewie zapisów i bierzemy katalog z najświeższym (mod pisze session_start przy
+// każdym wczytaniu świata, więc najnowszy = ten, w którym gracz właśnie jest).
+// ZF_SAVES_DIR nadpisuje korzeń poszukiwań (testy, nietypowe instalacje, Linux/Proton).
+std::string detect_storage_dir() {
+    namespace fs = std::filesystem;
+
+    std::vector<fs::path> roots;
+    if (const char* override_root = std::getenv("ZF_SAVES_DIR")) {
+        // Prawdziwe nadpisanie, nie dodatkowy korzeń: testy (i nietypowe instalacje)
+        // muszą móc odciąć się od prawdziwych zapisów SE na tej samej maszynie.
+        roots.emplace_back(override_root);
+    } else if (const char* appdata = std::getenv("APPDATA")) {
+        roots.emplace_back(fs::path(appdata) / "SpaceEngineers" / "Saves");
+    }
+
+    fs::path best;
+    fs::file_time_type best_time{};
+    for (const fs::path& root : roots) {
+        std::error_code ec;
+        if (!fs::is_directory(root, ec)) {
+            continue;
+        }
+        auto it = fs::recursive_directory_iterator(
+            root, fs::directory_options::skip_permission_denied, ec);
+        if (ec) {
+            continue;
+        }
+        for (const auto& entry : it) {
+            if (it.depth() >= 5) {
+                it.disable_recursion_pending(); // Saves/<user>/<świat>/Storage/<mod>/plik
+            }
+            std::error_code entry_ec;
+            if (entry.path().filename() != "events.jsonl" || !entry.is_regular_file(entry_ec)) {
+                continue;
+            }
+            const auto mtime = fs::last_write_time(entry.path(), entry_ec);
+            if (entry_ec) {
+                continue;
+            }
+            if (best.empty() || mtime > best_time) {
+                best = entry.path().parent_path();
+                best_time = mtime;
+            }
+        }
+    }
+    return best.empty() ? std::string{} : best.generic_string();
 }
 
 toml::table parse_or_throw(const std::string& path) {
@@ -117,9 +181,26 @@ Config load_config(const std::string& path) {
         apply_table(parse_or_throw(local_path), cfg);
     }
 
+    // Pusta albo nieistniejąca ścieżka (typowo: nowy świat) — spróbuj wykryć sam.
+    std::error_code storage_ec;
+    if (cfg.storage_dir.empty() || !std::filesystem::is_directory(cfg.storage_dir, storage_ec)) {
+        const std::string detected = detect_storage_dir();
+        if (!detected.empty()) {
+            if (cfg.storage_dir.empty()) {
+                std::cerr << "[brain] storage wykryty automatycznie: " << detected << "\n";
+            } else {
+                std::cerr << "[brain] storage z configu nie istnieje (" << cfg.storage_dir
+                          << ") — biorę wykryty: " << detected << "\n";
+            }
+            cfg.storage_dir = detected;
+        }
+    }
+
     if (cfg.storage_dir.empty()) {
-        throw std::runtime_error("config " + path + ": [bridge].storage_dir jest puste — utwórz " + local_path +
-                                 " z sekcją [bridge] i ścieżką storage_dir do storage moda na tej maszynie");
+        throw std::runtime_error("config " + path + ": nie znalazłem storage moda ani w [bridge].storage_dir, "
+                                 "ani automatycznie w zapisach Space Engineers. Wczytaj raz świat z modem "
+                                 "(wtedy powstaje events.jsonl) albo wpisz ścieżkę ręcznie w " + local_path +
+                                 " w sekcji [bridge]");
     }
 
     return cfg;
