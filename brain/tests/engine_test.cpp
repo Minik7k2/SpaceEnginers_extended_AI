@@ -214,6 +214,43 @@ int main() {
         assert(se.take_spawns().empty() && "spawn_wlaczone=false ma tłumić auto-patrol");
     }
 
+    // --- Polityka frakcja↔frakcja: zasiana na starcie, nie rozmywa się z czasem ---
+    {
+        zf::Db pdb(":memory:");
+        zf::Fallback pfb(fallback_path.string());
+        zf::Engine pe(pdb, pfb, /*rng_seed=*/9);
+        zf::Config pcfg;
+        pcfg.spawn_wlaczone = false;
+
+        // Wrogość korporacji z piratami istnieje od pierwszego uruchomienia i jest symetryczna.
+        assert(pdb.get_relation("HEL", "KRW").value <= pcfg.prog_wrogi);
+        assert(pdb.get_relation("KRW", "HEL").value == pdb.get_relation("HEL", "KRW").value);
+        assert(pdb.get_relation("HEL", "WGR").value > 0 && "Helion i górnicy handlują");
+        assert(pe.politics_report().find("HEL/KRW") != std::string::npos);
+
+        // Dzięki temu „wróg mojego wroga" DZIAŁA bez ręcznego zasiewania w teście:
+        // ostrzał KRW poprawia stosunki gracza z Helionem.
+        const double hel_before = pdb.get_relation("HEL", "PLAYER").value;
+        std::int64_t pt = 8000000;
+        pe.on_event(make_event("combat_hit", {{"faction", "KRW"}, {"damage", 50.0}, {"hits", 2}, {"weapon", "t"}}),
+                    pcfg, pt);
+        assert(pdb.get_relation("HEL", "PLAYER").value > hel_before &&
+               "atak na piratów ma podnosić relację z ich wrogiem");
+
+        // Dryf nie dotyczy polityki: po dobie zegara wrogość HEL/KRW zostaje bez zmian,
+        // choć uraza wobec gracza już blednie.
+        const double politics_before = pdb.get_relation("HEL", "KRW").value;
+        pdb.adjust_relation("WGR", "PLAYER", -20.0);
+        const double player_before = pdb.get_relation("WGR", "PLAYER").value;
+        pe.tick(pcfg, pt, /*force=*/true); // pierwszy tick tylko ustawia punkt odniesienia dryfu
+        pt += static_cast<std::int64_t>(24) * 60 * kMinuteMs;
+        pe.tick(pcfg, pt, /*force=*/true);
+        assert(pdb.get_relation("HEL", "KRW").value == politics_before &&
+               "polityka frakcji nie może dryfować do zera");
+        assert(pdb.get_relation("WGR", "PLAYER").value > player_before &&
+               "uraza wobec gracza ma nadal blednąć");
+    }
+
     // --- Trwałość rajdu: restart brainu w trakcie ataku nie może gubić stanu ---
     {
         const fs::path db_file = tmp / "raid_state.sqlite3";

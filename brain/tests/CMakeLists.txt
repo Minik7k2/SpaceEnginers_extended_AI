@@ -17,3 +17,4 @@ zf_add_test(bridge_test bridge_test.cpp)
 zf_add_test(engine_test engine_test.cpp)
 # Sanityzacja wyjścia modelu — czysta logika tekstowa, działa też w buildzie bez llama.cpp.
 zf_add_test(llm_test llm_test.cpp)
+zf_add_test(config_test config_test.cpp)

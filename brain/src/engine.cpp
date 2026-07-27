@@ -84,6 +84,35 @@ Engine::Engine(Db& db, Fallback& fallback, std::uint32_t rng_seed)
     db_.ensure_faction("HEL", "Korporacja Helion");
     db_.ensure_faction("KRW", "Krwawa Ręka");
     db_.ensure_faction("WGR", "Wolni Górnicy");
+    seed_faction_politics();
+}
+
+void Engine::seed_faction_politics() {
+    // Świat nie zaczyna się od zera: korporacja i piraci są w stanie zimnej wojny,
+    // piraci łupią górników, a Helion z górnikami handluje. Bez tych wartości relacje
+    // frakcja↔frakcja były wyłącznie teoretyczne — a to od nich zależy, czy strzelanie
+    // do wroga danej frakcji cokolwiek u niej daje (atak_na_wroga_bonus).
+    // Zasiewamy RAZ na świat; potem zmieniają je wyłącznie zdarzenia, nie config.
+    constexpr const char* kSeededKey = "__politics_seeded__";
+    if (db_.get_kv(kSeededKey) != 0) {
+        return;
+    }
+    struct Pair {
+        const char* a;
+        const char* b;
+        double value;
+    };
+    static const Pair kStart[] = {
+        {"HEL", "KRW", -70}, // korporacja vs piractwo: otwarta wrogość
+        {"KRW", "WGR", -50}, // Krwawa Ręka żeruje na konwojach górników
+        {"HEL", "WGR", 10},  // Helion skupuje urobek — chłodna współpraca
+    };
+    for (const Pair& p : kStart) {
+        db_.adjust_relation(p.a, p.b, p.value); // relacje są dwukierunkowe i symetryczne
+        db_.adjust_relation(p.b, p.a, p.value);
+    }
+    db_.set_kv(kSeededKey, 1);
+    std::cout << "[brain] polityka frakcji zasiana: " << politics_report() << "\n";
 }
 
 void Engine::ensure_known_faction(const std::string& tag) {
@@ -669,6 +698,12 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
     const std::int64_t steps = drift_period_ms > 0 ? (now_ms - last_drift) / drift_period_ms : 0;
     if (steps > 0) {
         for (const auto& [a, b] : db_.list_relation_pairs()) {
+            // Dryf dotyczy WYŁĄCZNIE stosunku do gracza: uraza do niego blednie z czasem,
+            // ale wojna Helionu z piratami nie kończy się sama dlatego, że minął tydzień.
+            // Politykę frakcji zmieniają zdarzenia, nie zegar.
+            if (b != kPlayer) {
+                continue;
+            }
             const double value = db_.get_relation(a, b).value;
             const double magnitude = std::min(std::abs(value), cfg.dryf_pkt * static_cast<double>(steps));
             if (magnitude > 0) {
@@ -730,6 +765,24 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
     return out;
 }
 
+std::string Engine::politics_report() const {
+    std::string report;
+    const std::vector<FactionRow> rows = db_.list_factions();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        for (std::size_t j = i + 1; j < rows.size(); ++j) {
+            const RelationRow rel = db_.get_relation(rows[i].tag, rows[j].tag);
+            if (rel.value == 0) {
+                continue; // nieznajome frakcje nie zaśmiecają raportu
+            }
+            if (!report.empty()) {
+                report += " | ";
+            }
+            report += rows[i].tag + "/" + rows[j].tag + " " + format_value(rel.value);
+        }
+    }
+    return report.empty() ? "brak" : report;
+}
+
 std::string Engine::relations_report() const {
     std::string report;
     for (const FactionRow& row : db_.list_factions()) {
@@ -742,7 +795,10 @@ std::string Engine::relations_report() const {
             report += " sufit " + format_value(rel.cap);
         }
     }
-    return report.empty() ? "Brak frakcji w bazie." : report;
+    if (report.empty()) {
+        return "Brak frakcji w bazie.";
+    }
+    return report + " || polityka: " + politics_report();
 }
 
 } // namespace zf

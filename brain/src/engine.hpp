@@ -63,8 +63,12 @@ public:
     // dryf -> maszyna stanów -> budżet akcji -> zdarzenie losowe ważone stanem.
     std::vector<RadioOut> tick(const Config& cfg, std::int64_t now_ms, bool force = false);
 
-    // Raport do /zf rel: relacja frakcja->gracz i stan każdej frakcji.
+    // Raport do /zf rel: relacja frakcja->gracz i stan każdej frakcji, a po "||"
+    // polityka między frakcjami.
     std::string relations_report() const;
+
+    // Same relacje frakcja↔frakcja ("HEL/KRW -70 | ..."), bez gracza.
+    std::string politics_report() const;
 
     // Zlecenia spawnu nazbierane przez on_event/tick — zwraca i czyści bufor.
     // Radio wraca wartością z on_event/tick; spawny osobnym kanałem, żeby nie
@@ -109,6 +113,8 @@ private:
     void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
 
     void ensure_known_faction(const std::string& tag);
+    // Startowe relacje frakcja↔frakcja (raz na świat) — bez nich polityka nie istnieje.
+    void seed_faction_politics();
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
     // aktywny rajd albo frakcja jest w napięciu/wojnie z graczem.
     bool chat_expects_decision(const std::string& faction, std::int64_t now_ms) const;

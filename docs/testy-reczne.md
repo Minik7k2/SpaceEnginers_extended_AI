@@ -9,8 +9,9 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 
 ## A. Most (regresja Etapów 1–2)
 
-- [x] **A1. Echo:** napisz cokolwiek na czacie (bez `@` i `/`) → w <3 s wraca
-  `[RADIO | TEST] Echo: ...`.
+- [x] ~~**A1. Echo:** napisz cokolwiek na czacie → wraca `[RADIO | TEST] Echo: ...`~~
+  NIEAKTUALNE: echo z Etapu 1 usunięte (od Etapu 5 było już tylko szumem w czacie).
+  Życie mostka sprawdzasz teraz przez `/zf rel` albo `@KRW ...` — patrz J5.
 - [x] **A2. Proximity:** `/zf spawn`, podleć <3 km do statku → w konsoli
   `proximity ... enter`; odleć >4 km → `exit`. Krążenie w pasie 3–4 km nie
   generuje kolejnych zdarzeń (histereza).
@@ -206,6 +207,65 @@ na `--replay` (bramka none/clear/weak); w grze do odhaczenia:
   za każdym razem od zera. Ephemeralne — restart braina czyści pamięć rozmowy.
 - [ ] **H7. Sanitizer wyjścia:** w wypowiedziach frakcji **nie ma** końcowego podpisu
   (`- KRW`), prefiksu nazwą (`KRW: ...`) ani `@Gracz` (co najwyżej „Gracz").
+
+## I. Ekonomia: handel i kontrakty (Etap 6) — DO WERYFIKACJI
+
+Ta sekcja jest nowa i **żaden test nie jest jeszcze odhaczony**. Kod kontraktów
+opiera się na `MyAPIGateway.ContractSystem` (`MyContractAcquisition`), którego nie
+da się skompilować poza grą — jeśli mod nie wstanie, log SE wskaże plik
+`Contracts.cs` i konkretną linię; najbardziej podejrzane są sygnatura konstruktora
+i jednostka `duration` (zakładamy SEKUNDY: `durationMin * 60`).
+
+- [ ] **I0. Mod się ładuje:** świat startuje, w logu SE brak błędów kompilacji
+  z `Contracts.cs` / `Economy.cs`. To bramka dla całej sekcji.
+- [ ] **I1. Diagnostyka bloków:** `/zf stations` → dla każdej frakcji widać albo
+  `blok kontraktów: <nazwa> (id)`, albo `BRAK bloku kontraktów/sklepu`. Bez bloku
+  zlecenia nie powstaną — to oczekiwane, nie błąd (potrzebna stacja frakcji, np.
+  ze spawnu MES z blokiem sklepu/kontraktów).
+- [ ] **I2. Wymuszone zlecenie:** `/zf kontrakt WGR` → konsola braina
+  `contract_create [WGR] dostawa za N kr`, a na czacie `[ZF] Nowe zlecenie WGR: …`.
+  Jeśli zamiast tego „pominięty: frakcja nie ma bloku…" — patrz I1.
+- [ ] **I3. Zlecenie widać w grze:** w terminalu stacji tej frakcji (zakładka
+  kontraktów) jest nowe zlecenie na dostawę, z nagrodą z I2.
+- [ ] **I4. Utrwalenie ID:** konsola braina `kontrakt <ID> (WGR, dostawa) wystawiony
+  w grze`; po `/zf rel` frakcja bez zmian (samo wystawienie nie rusza relacji).
+- [ ] **I5. Wykonanie:** przyjmij i wykonaj zlecenie → `[ZF] Zlecenie WGR wykonane`,
+  konsola: `relacja WGR->gracz +20 za wykonany kontrakt`. To ma być SZYBSZA droga
+  do poprawy relacji niż dryf — o to w tym całym etapie chodzi.
+- [ ] **I6. Porażka:** przyjmij zlecenie i daj mu wygasnąć → `Zlecenie … zawalone`
+  i `-10` w konsoli.
+- [ ] **I7. Po wczytaniu świata:** wystaw zlecenie, zapisz i wczytaj świat, dopiero
+  potem je wykonaj → rozliczenie MIMO że callbacki nie przeżywają zapisu (mod
+  dopytuje o stan co ~5 s, ID trzyma w `contracts_mod_state.txt`).
+- [ ] **I8. Limit i cooldown:** po wystawieniu jednego zlecenia frakcja nie wystawia
+  drugiego (`max_otwartych = 1`), a po jego rozliczeniu następne dopiero po
+  `cooldown_min` (20 min).
+- [ ] **I9. Wrogość zamyka kran:** doprowadź KRW do wojny → w ticku nie ma dla niej
+  `contract_create` (próg `prog_relacji = -55`).
+- [ ] **I10. Handel:** sprzedaj/kup coś w sklepie frakcji (≤300 m od jej stacji) →
+  na czacie `[ZF] Handel z <TAG>: N kr`, w konsoli `relacja … +1..+3 za handel`.
+- [ ] **I11. Fałszywe alarmy handlu:** zapłać okup (`/zf okup KRW` przy rajdzie) i
+  odbierz nagrodę za kontrakt → **NIE MA** komunikatu o handlu (wyciszenie ~10 s).
+- [ ] **I12. Stacja to nie statek:** zniszcz statyczną siatkę frakcji (stację) →
+  konsola `-50 za zniszczenie stacji` ORAZ `sufit relacji … obniżony na stałe do +20`;
+  `/zf rel` pokazuje `sufit +20`. Potem nawet wykonane kontrakty nie podniosą
+  relacji powyżej sufitu — to celowe (świat mściwy).
+
+## J. Trwałość i wygoda (nowe)
+
+- [ ] **J1. Auto-ścieżka storage:** usuń (albo zostaw pusty) `storage_dir`
+  w `rules.local.toml`, odpal brain przy działającym świecie → konsola
+  `storage wykryty automatycznie: …` ze ścieżką TEGO świata. Ręczna, istniejąca
+  ścieżka nadal ma pierwszeństwo.
+- [ ] **J2. Rajd przeżywa restart braina:** `/zf raid KRW`, ubij `zf_brain.exe`
+  (Ctrl+C), odpal ponownie, potem `/zf okup KRW` → rajd zostaje odwołany
+  (`stand_down`), statki odlatują. Wcześniej brain odpowiadał „nie prowadzi rajdu".
+- [ ] **J3. Polityka frakcji:** `/zf rel` → po `||` widać `polityka: HEL/KRW -70 |
+  HEL/WGR +10 | KRW/WGR -50`.
+- [ ] **J4. Wróg mojego wroga:** ostrzelaj statek KRW → w konsoli obok kary dla KRW
+  jest `relacja HEL->gracz +5 (wróg KRW ostrzelany)`.
+- [ ] **J5. Koniec echa:** napisz zwykłą wiadomość na czacie (bez `@`) → **NIE MA**
+  już `[RADIO | TEST] Echo: …` (test A1 jest tym samym unieważniony).
 
 ## Znane zachowania (to nie błędy)
 
