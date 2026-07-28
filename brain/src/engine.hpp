@@ -109,6 +109,13 @@ public:
     // Żądania trybutu nazbierane przez decyzję/komendę — zwraca i czyści bufor.
     std::vector<RansomDemandOut> take_ransom_demands();
 
+    // Ile kredytów gracz musi położyć na stole, żeby frakcja MUSIAŁA odwołać atak
+    // niezależnie od decyzji modelu (0 = bramka wyłączona configiem).
+    std::int64_t cash_ransom_threshold(const std::string& faction, const Config& cfg) const;
+    // Ostatnie znane saldo gracza (mod dosyła je w chat_message). <0 = nieznane, wtedy
+    // bramka kredytowa milczy — nie kupujemy obietnic, których nie da się sprawdzić.
+    std::int64_t player_balance() const { return player_balance_; }
+
 private:
     Db& db_;
     Fallback& fallback_;
@@ -119,8 +126,19 @@ private:
     std::vector<SpawnOut> pending_spawns_;
     std::vector<ContractOut> pending_contracts_;
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
-    std::set<std::string> pending_ransoms_;       // frakcje z wystawionym okupem surowcowym (anty-dublowanie)
+    // Wiszące okupy surowcowe: anty-dublowanie + treść żądania, żeby frakcja umiała
+    // odpowiedzieć na "ile mi zostało czasu?" (bez tego LLM zmyślał).
+    struct PendingRansom {
+        std::string item;
+        std::int64_t amount = 0;
+        std::int64_t deadline_ms = 0;
+    };
+    std::map<std::string, PendingRansom> pending_ransoms_;
     std::vector<RansomDemandOut> pending_ransom_demands_; // do wysłania jako ransom_demand
+    // Cooldown bonusu "wróg mojego wroga": (obserwator, ostrzelany) -> ostatnia wypłata.
+    // W pamięci jak cooldown radia — chodzi o minuty, restart brainu niczego nie psuje.
+    std::map<std::pair<std::string, std::string>, std::int64_t> enemy_bonus_at_;
+    std::int64_t player_balance_ = -1; // ostatnie saldo z chat_message; <0 = nieznane
 
     // Stan gry długiego oddechu (aktywny rajd, cooldowny spawnu i kontraktów) siedzi
     // w SQLite, nie w pamięci: restart brainu w trakcie rajdu nie może kończyć się tym,

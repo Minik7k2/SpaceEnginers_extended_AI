@@ -239,29 +239,6 @@ namespace ZyweFrakcje
         }
 
         /// <summary>
-        /// Pozycja pierwszego żywego statku danej frakcji (kotwica skrzynki zrzutu przy jej gridzie).
-        /// false = brak żywego gridu (skrzynka stanie przy graczu).
-        /// </summary>
-        public static bool TryGetAnchor(string faction, out Vector3D pos)
-        {
-            pos = Vector3D.Zero;
-            List<IMyCubeGrid> grids;
-            if (!FactionGrids.TryGetValue(faction, out grids))
-            {
-                return false;
-            }
-            for (int i = 0; i < grids.Count; i++)
-            {
-                if (grids[i] != null && !grids[i].MarkedForClose)
-                {
-                    pos = grids[i].WorldMatrix.Translation;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        /// <summary>
         /// stand_down z brainu (okup/kapitulacja/rozejm): statki rajdu frakcji natychmiast
         /// przestają strzelać (broń + AI off), a po <see cref="DespawnDelayTicks"/> znikają.
         /// </summary>

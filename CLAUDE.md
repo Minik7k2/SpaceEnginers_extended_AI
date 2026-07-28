@@ -131,6 +131,9 @@ docs/protocol.md                # spec mostka JSONL
   (wymuś tick), `/zf spawn <frakcja>` (vanilla prefab), `/zf raid <frakcja>`
   (potok MES), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
   <frakcja>` (wymuszone zlecenie), `/zf stations` (stacje i blok kontraktów),
+  `/zf daj <surowiec> [ilość]` (towar do inwentarza — do testu trybutu bez trybu
+  eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
+  jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.

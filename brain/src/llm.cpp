@@ -94,7 +94,18 @@ std::string sanitize_reply(std::string s, const std::string& faction) {
     if (b == std::string::npos) {
         return {};
     }
-    return s.substr(b, s.find_last_not_of(ws) - b + 1);
+    s = s.substr(b, s.find_last_not_of(ws) - b + 1);
+
+    // Model dobity stropem gramatyki (220 znaków) kończy w pół słowa: "...Ale nie zapomnij, g".
+    // Doczyszczamy do ostatniego pełnego zdania, ale tylko gdy zostaje sensowny kawałek —
+    // krótkiej, celowo urwanej kwestii nie ruszamy.
+    if (!s.empty() && s.back() != '.' && s.back() != '!' && s.back() != '?') {
+        const std::size_t cut = s.find_last_of(".!?");
+        if (cut != std::string::npos && cut + 1 >= s.size() * 3 / 5) {
+            s.erase(cut + 1);
+        }
+    }
+    return s;
 }
 
 namespace {
@@ -317,6 +328,10 @@ struct LlmWorker::Impl {
         const char* grammar = expect_decision ? kDeescalationGrammar : kRadioGrammar;
         llama_sampler* chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
         llama_sampler_chain_add(chain, llama_sampler_init_grammar(vocab, grammar, "root"));
+        // Kara za powtórzenia. Bez niej model przepisywał własną poprzednią kwestię z pamięci
+        // dialogu — w grze cztery razy pod rząd "Dawaj więcej, a może pomyślę", z narastającymi
+        // literówkami. Okno 256 tokenów obejmuje kilka tur rozmowy.
+        llama_sampler_chain_add(chain, llama_sampler_init_penalties(256, 1.15f, 0.0f, 0.0f));
         llama_sampler_chain_add(chain, llama_sampler_init_top_p(0.9f, 1));
         llama_sampler_chain_add(chain, llama_sampler_init_temp(0.7f));
         llama_sampler_chain_add(chain, llama_sampler_init_dist(seed));

@@ -190,6 +190,15 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Oddanie siatki frakcji NPC — bez tego nie ma gdzie wystawić kontraktu (Etap 6).
+            const string stacjaPrefix = "/zf stacja";
+            if (messageText.StartsWith(stacjaPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                DebugStation.Handle(messageText.Substring(stacjaPrefix.Length));
+                return;
+            }
+
             const string raidPrefix = "/zf raid";
             if (messageText.StartsWith(raidPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -260,10 +269,19 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Narzędzie testowe: surowiec do ręki bez trybu eksperymentalnego (np. trybut B+).
+            const string dajPrefix = "/zf daj";
+            if (messageText.StartsWith(dajPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                DebugGive.Handle(messageText.Substring(dajPrefix.Length));
+                return;
+            }
+
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja>, /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -304,7 +322,14 @@ namespace ZyweFrakcje
                     }
                 }
             }
-            _events.WriteChatMessage(outgoing, target, inRange, signal);
+            // Saldo gracza jedzie razem z wiadomością: brain bramkuje nim okup w kredytach
+            // (oferta bez pokrycia nie kupuje pokoju). -1 = nieznane, brain wtedy nie ryzykuje.
+            long balance = -1;
+            if (chatPlayer != null && !chatPlayer.TryGetBalanceInfo(out balance))
+            {
+                balance = -1;
+            }
+            _events.WriteChatMessage(outgoing, target, inRange, signal, balance);
         }
 
         private void PollCommands()
@@ -440,6 +465,15 @@ namespace ZyweFrakcje
                 {
                     CollectRansom(faction, ransom);
                 }
+            }
+
+            // Pokój unieważnia wiszący trybut w surowcach: brain przy stand_down kasuje swój
+            // pending ("mod sprząta skrzynkę"), więc bez tego skrzynka + GPS wisiały do końca
+            // deadline'u, a potem leciał ransom_expired — kara za niedostarczenie okupu, który
+            // przed chwilą został rozliczony inaczej.
+            if (_ransom != null)
+            {
+                _ransom.Cancel(faction);
             }
 
             TestSpawner.HandleStandDown(faction);

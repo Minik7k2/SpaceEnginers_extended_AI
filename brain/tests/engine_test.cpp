@@ -146,6 +146,41 @@ int main() {
         assert(krw_after > krw_before + 4.9 && "wróg ostrzelanej frakcji ma dostać bonus");
     }
 
+    // Cooldown bonusu: mod zgłasza combat_hit co 3 s, więc kolejne trafienia w TEJ SAMEJ
+    // potyczce nie mogą dosypywać relacji (regresja: minuta ostrzału = +100 u wszystkich).
+    {
+        const double before = db.get_relation("KRW", "PLAYER").value;
+        now += 3000;
+        engine.on_event(
+            make_event("combat_hit", {{"faction", "SPRT"}, {"damage", 100.0}, {"hits", 5}, {"weapon", "test"}}),
+            cfg, now);
+        const double after = db.get_relation("KRW", "PLAYER").value;
+        assert(std::abs(after - before) < 0.001 && "bonus w oknie cooldownu ma się NIE powtórzyć");
+
+        // Po cooldownie to już inna potyczka — bonus wraca.
+        now += static_cast<std::int64_t>(cfg.atak_na_wroga_cooldown_min) * kMinuteMs + 1000;
+        engine.on_event(
+            make_event("combat_hit", {{"faction", "SPRT"}, {"damage", 100.0}, {"hits", 5}, {"weapon", "test"}}),
+            cfg, now);
+        assert(db.get_relation("KRW", "PLAYER").value > after + 4.9 &&
+               "po cooldownie bonus ma znów przysługiwać");
+    }
+
+    // Próg okupu kredytowego rośnie z wrogością: przy relacji -80 jest 1,8x bazy.
+    {
+        zf::Db db2(":memory:");
+        zf::Engine e2(db2, fallback, /*rng_seed=*/1);
+        db2.ensure_faction("KRW", "Krwawa Ręka");
+        const std::int64_t baza = e2.cash_ransom_threshold("KRW", cfg);
+        assert(baza == cfg.deeskalacja_prog_kredyty && "przy relacji 0 próg == baza z configu");
+        db2.adjust_relation("KRW", "PLAYER", -80.0);
+        const std::int64_t drogo = e2.cash_ransom_threshold("KRW", cfg);
+        assert(drogo > baza && "im gorsza relacja, tym droższy pokój");
+        zf::Config wylaczone = cfg;
+        wylaczone.deeskalacja_prog_kredyty = 0;
+        assert(e2.cash_ransom_threshold("KRW", wylaczone) == 0 && "0 w configu wyłącza bramkę");
+    }
+
     // Dryf: -45 wraca w stronę 0 o dryf_pkt na dryf_co_minut.
     {
         const double before = db.get_relation("KRW", "PLAYER").value;

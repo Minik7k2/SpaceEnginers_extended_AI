@@ -37,8 +37,19 @@ struct Config {
     double kontrakt_min = 10;
     double kontrakt_max = 20;
     double atak_na_wroga_bonus = 5;
+    // Bonus "wróg mojego wroga" leciał przy KAŻDYM combat_hit, a mod agreguje trafienia co
+    // 3 s — jedna strzelanina dawała +15 i więcej u wszystkich wrogów ostrzelanej frakcji.
+    // Cooldown liczony per para (obserwator, ostrzelany).
+    int atak_na_wroga_cooldown_min = 10;
     double deeskalacja_bonus = 15;   // przyjęty okup/kapitulacja/rozejm: relacja rośnie,
                                      // ale trwałe modyfikatory (sufit) zostają — spokój, nie amnestia
+    // Twarda bramka na okup w kredytach: model 4,5B potrafi w nieskończoność mówić „dawaj
+    // więcej" i nigdy nie ustawić odpuszcza=true, więc oferta >= progu wymusza pokój bez
+    // pytania modelu o zdanie. 0 = wyłączone (decyduje wyłącznie LLM).
+    std::int64_t deeskalacja_prog_kredyty = 3000;
+    // Im gorzej was widzą, tym drożej: próg rośnie o ten ułamek za każdy punkt relacji
+    // poniżej zera (0.01 => przy relacji -80 próg jest 1,8x wyższy).
+    double deeskalacja_prog_za_punkt = 0.01;
 
     // [tick]
     int tick_co_minut = 4;

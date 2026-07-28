@@ -86,7 +86,13 @@ namespace ZyweFrakcje
             WriteLine("heartbeat", data);
         }
 
-        public void WriteChatMessage(string text, string target, IEnumerable<string> inRange, string signal)
+        /// <param name="balance">
+        /// Saldo gracza w kredytach; -1 = nieznane. Brain przyjmuje okup w kredytach tylko
+        /// wtedy, gdy oferta z czatu ma pokrycie — inaczej „dam ci milion" z pustym kontem
+        /// kupowałoby pokój za darmo.
+        /// </param>
+        public void WriteChatMessage(string text, string target, IEnumerable<string> inRange,
+                                     string signal, long balance)
         {
             var builder = new Json.Builder().Add("text", text);
             if (target == null)
@@ -100,6 +106,10 @@ namespace ZyweFrakcje
             builder.AddStringArray("in_range", inRange);
             // 5c: jakość łączności do adresata (clear/weak/none) — brain bramkuje zasięgiem.
             builder.Add("signal", signal ?? "clear");
+            if (balance >= 0)
+            {
+                builder.Add("balans", balance);
+            }
             WriteLine("chat_message", builder.Build());
         }
 
@@ -253,10 +263,16 @@ namespace ZyweFrakcje
         }
 
         /// <summary>B+: minął deadline bez dostawy — ataki trwają, trwała utrata wiarygodności.</summary>
-        public void WriteRansomExpired(string faction)
+        /// <param name="reason">
+        /// "deadline" — gracz nie dostarczył trybutu w oknie (kara, trwała nieufność).
+        /// "brak_skrzynki" — to NASZA skrzynka przepadła (sprzątacz śmieci SE, despawn):
+        /// gracz nie miał gdzie zapłacić, więc brain kasuje żądanie BEZ kary.
+        /// </param>
+        public void WriteRansomExpired(string faction, string reason)
         {
             string data = new Json.Builder()
                 .Add("faction", faction)
+                .Add("reason", reason ?? "deadline")
                 .Build();
             WriteLine("ransom_expired", data);
         }

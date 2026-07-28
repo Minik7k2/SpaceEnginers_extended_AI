@@ -10,7 +10,7 @@ Rotacja: nadawca po 5 MB zaczyna `events-NNNN.jsonl` / `commands-NNNN.jsonl`; od
 
 session_start  {"world":"nazwa","player_id":123,"player_name":"Minik","mod_version":"0.1"}
 heartbeat      {"pos":[x,y,z],"speed":m_s}                                  co 10 s
-chat_message   {"text":"...","target":"KRW"|null,"in_range":["WGR"],"signal":"clear"|"weak"|"none"}   target=@frakcja; signal=łączność do adresata (5c)
+chat_message   {"text":"...","target":"KRW"|null,"in_range":["WGR"],"signal":"clear"|"weak"|"none","balans":4500}   target=@frakcja; signal=łączność do adresata (5c); balans=saldo gracza (pole opcjonalne, brak = nieznane)
 proximity      {"faction":"WGR","state":"enter"|"exit","dist":2900}         enter<3000m, exit>4000m
 combat_hit     {"attacker":123|null,"faction":"KRW","damage":450.5,"hits":37,"weapon":"gatling"}  agregat 3 s
 grid_destroyed {"faction":"KRW","grid":"nazwa","by_player":true}
@@ -18,7 +18,7 @@ trade          {"faction":"HEL","kind":"buy"|"sell","value":1500}           heur
 contract_created {"contract_id":"123","faction":"WGR","kind":"dostawa","reward":50000,"reward_str":"50000","opis":"dostawa 600 płyt stalowych"}  kontrakt naprawdę powstał w grze; ID -> SQLite
 contract_done  {"contract_id":"...","faction":"WGR","success":true}        faction opcjonalne — brain zna je z ID
 ransom_paid    {"faction":"KRW","item":"Iron","amount":500}                  B+ gracz dostarczył trybut do skrzynki zrzutu w oknie — pokój + relacja
-ransom_expired {"faction":"KRW"}                                            B+ minął deadline bez dostawy — ataki trwają, trwała utrata wiarygodności
+ransom_expired {"faction":"KRW","reason":"deadline"|"brak_skrzynki"}         B+ koniec żądania bez dostawy. deadline = gracz nie zdążył (kara + trwała nieufność); brak_skrzynki = skrzynka przepadła (sprzątacz śmieci SE) i brain kasuje żądanie BEZ kary
 debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn"|"okup"|"okup-surowce"|"kontrakt","faction":"KRW"}   /zf rel, /zf tick, /zf raid, /zf okup, /zf okup-surowce, /zf kontrakt
 
 ## commands.jsonl (brain → mod)

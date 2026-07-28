@@ -360,21 +360,48 @@ int main(int argc, char** argv) {
                 // placeholder), żeby nie zaśmiecać historii. player_msg pusty poza czatem.
                 if (res.from_llm && !res.player_msg.empty()) {
                     auto& dq = dialog[res.faction];
-                    auto clip = [](std::string t) { if (t.size() > 200) t.resize(200); return t; };
+                    // Przycięcie po BAJTACH rozcinało polskie litery (2 bajty) i wstawiało
+                    // do promptu śmieć — cofamy się do początku znaku UTF-8.
+                    auto clip = [](std::string t) {
+                        if (t.size() > 200) {
+                            std::size_t n = 200;
+                            while (n > 0 && (static_cast<unsigned char>(t[n]) & 0xC0) == 0x80) {
+                                --n;
+                            }
+                            t.resize(n);
+                        }
+                        return t;
+                    };
                     dq.emplace_back(clip(res.player_msg), clip(res.text));
                     while (dq.size() > kDialogTurns) {
                         dq.pop_front();
                     }
                 }
-                if (res.demand_goods) {
+                // Twarda bramka na okup w kredytach: konkretna oferta pokryta saldem gracza
+                // kończy rajd, choćby model dalej mówił "dawaj więcej" (obserwacja z gry:
+                // 4,5B potrafi zapętlić targ i NIGDY nie ustawić odpuszcza=true).
+                const std::int64_t oferta = parse_ransom_amount(res.player_msg);
+                const std::int64_t prog = engine.cash_ransom_threshold(res.faction, cfg);
+                const std::int64_t saldo = engine.player_balance();
+                const bool oferta_wiazaca =
+                    prog > 0 && oferta >= prog && saldo >= 0 && saldo >= oferta;
+                if (oferta_wiazaca) {
+                    std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
+                              << " kr >= próg " << prog << " kr (saldo " << saldo
+                              << ") — pokój niezależnie od decyzji modelu\n";
+                } else if (prog > 0 && oferta >= prog && saldo >= 0 && saldo < oferta) {
+                    std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
+                              << " kr bez pokrycia (saldo " << saldo << ") — pusta obietnica\n";
+                }
+
+                if (res.demand_goods && !oferta_wiazaca) {
                     // B+: frakcja żąda trybutu w surowcach zamiast odpuścić — brain dobiera
                     // towar/ilość/deadline z configu i wystawia ransom_demand (drenaż niżej).
                     engine.request_goods_ransom(res.faction, cfg, now);
-                } else if (res.deescalate) {
-                    // Frakcja odpuszcza: wyłuskaj kwotę okupu z wiadomości gracza (Etap 6).
-                    // >0 = realny okup w kredytach — mod pobierze go z konta gracza przy stand_down.
-                    engine.apply_deescalation(res.faction, cfg, now,
-                                              parse_ransom_amount(res.player_msg));
+                } else if (res.deescalate || oferta_wiazaca) {
+                    // Frakcja odpuszcza: kwota z wiadomości gracza (Etap 6) — mod pobierze ją
+                    // z konta przy stand_down.
+                    engine.apply_deescalation(res.faction, cfg, now, oferta);
                 }
             }
             for (const auto& sd : engine.take_standdowns()) {

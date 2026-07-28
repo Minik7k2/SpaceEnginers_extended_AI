@@ -29,6 +29,21 @@ double data_num(const Event& ev, const char* key) {
     return ev.data.contains(key) && ev.data[key].is_number() ? ev.data[key].get<double>() : 0.0;
 }
 
+// Klucz surowca -> nazwa po polsku do promptu. Brain operuje kluczami (mod tłumaczy je na
+// SubtypeId), ale model ma mówić do gracza po ludzku.
+std::string item_pl(const std::string& key) {
+    if (key == "Iron") return "sztabek żelaza";
+    if (key == "Nickel") return "sztabek niklu";
+    if (key == "Silicon") return "sztabek krzemu";
+    if (key == "Cobalt") return "sztabek kobaltu";
+    if (key == "Silver") return "sztabek srebra";
+    if (key == "Gold") return "sztabek złota";
+    if (key == "Platinum") return "sztabek platyny";
+    if (key == "Magnesium") return "sztabek magnezu";
+    if (key == "Uranium") return "sztabek uranu";
+    return key;
+}
+
 std::string state_display(const std::string& state) {
     if (state == "napiecie") {
         return "napięcie";
@@ -344,12 +359,22 @@ void Engine::handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t 
                    "Gracz ostrzelał " + faction + " (" + data_str(ev, "weapon") + ").");
 
     // Atak na wroga frakcji cieszy jej wrogów: +bonus u każdej frakcji będącej
-    // z ostrzelaną w relacji <= prog_wrogi.
+    // z ostrzelaną w relacji <= prog_wrogi. Z cooldownem — mod zgłasza combat_hit co 3 s,
+    // więc bez niego jedna dłuższa strzelanina wywindowała relacje u wszystkich wrogów
+    // ostrzelanej frakcji (obserwacja z gry: +15 u HEL i WGR w 20 sekund).
+    const std::int64_t enemy_cd_ms =
+        static_cast<std::int64_t>(std::max(0, cfg.atak_na_wroga_cooldown_min)) * 60 * 1000;
     for (const FactionRow& other : db_.list_factions()) {
         if (other.tag == faction) {
             continue;
         }
         if (db_.get_relation(other.tag, faction).value <= cfg.prog_wrogi) {
+            const auto key = std::make_pair(other.tag, faction);
+            const auto seen = enemy_bonus_at_.find(key);
+            if (seen != enemy_bonus_at_.end() && now_ms - seen->second < enemy_cd_ms) {
+                continue; // ta sama potyczka — bonus już wypłacony
+            }
+            enemy_bonus_at_[key] = now_ms;
             const double v = db_.adjust_relation(other.tag, kPlayer, cfg.atak_na_wroga_bonus);
             std::cout << "[brain] relacja " << other.tag << "->gracz "
                       << format_value(cfg.atak_na_wroga_bonus) << " (wróg " << faction
@@ -429,6 +454,13 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
     // Etap 3: odpowiadamy szablonem tylko na wiadomości adresowane (@TAG) do znanej
     // frakcji. Etap 4: rozmowa (LLM + persony). Etap 5c: adresowanie ZASIĘGIEM —
     // mod podaje "signal" (clear/weak/none) adresata wg najbliższego grida frakcji.
+    // Saldo gracza dosyłane przez mod (ModAPI ma je od ręki, brain nie ma jak policzyć).
+    // Bramka kredytowa przyjmuje tylko ofertę pokrytą saldem — inaczej "dam ci milion"
+    // z pustym kontem kupowałoby pokój za darmo.
+    if (ev.data.contains("balans") && ev.data["balans"].is_number()) {
+        player_balance_ = static_cast<std::int64_t>(ev.data["balans"].get<double>());
+    }
+
     const std::string target = data_str(ev, "target");
     if (target.empty()) {
         return;
@@ -468,6 +500,25 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
             const bool decyzja = chat_expects_decision(target, now_ms);
             std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
                               "\". Odpowiedz mu.";
+
+            // Wiszący trybut w kontekście: bez tego na pytanie "ile mi zostało czasu?"
+            // model zmyślał, bo o żadnym terminie nie wiedział (obserwacja z gry).
+            const auto ransom = pending_ransoms_.find(target);
+            if (ransom != pending_ransoms_.end()) {
+                const std::int64_t left_ms = ransom->second.deadline_ms - now_ms;
+                if (left_ms > 0) {
+                    const std::int64_t left_min = (left_ms + 59999) / 60000;
+                    ctx += " Wisi twoje żądanie trybutu: gracz ma dostarczyć " +
+                           std::to_string(ransom->second.amount) + " " +
+                           item_pl(ransom->second.item) +
+                           " do skrzynki zrzutu (ma ją oznaczoną na mapie jako ZRZUT " + target +
+                           "), a do końca terminu zostało mu " + std::to_string(left_min) +
+                           " min. Jeśli pyta o czas, ilość albo miejsce — podaj te liczby wprost "
+                           "i nie zmyślaj innych.";
+                } else {
+                    pending_ransoms_.erase(target); // termin minął, zaraz przyjdzie ransom_expired
+                }
+            }
             if (decyzja) {
                 ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. Masz dwie osobne "
                        "decyzje w polach JSON (obie domyślnie false). \"odpuszcza\": wpisz true, "
@@ -640,6 +691,15 @@ void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
     pending_standdowns_.push_back({faction, amount});
 }
 
+std::int64_t Engine::cash_ransom_threshold(const std::string& faction, const Config& cfg) const {
+    if (cfg.deeskalacja_prog_kredyty <= 0) {
+        return 0; // bramka wyłączona configiem — o pokoju decyduje wyłącznie model
+    }
+    const double value = db_.get_relation(faction, kPlayer).value;
+    const double mnoznik = 1.0 + std::max(0.0, -value) * cfg.deeskalacja_prog_za_punkt;
+    return static_cast<std::int64_t>(static_cast<double>(cfg.deeskalacja_prog_kredyty) * mnoznik);
+}
+
 std::vector<std::pair<std::string, std::int64_t>> Engine::take_standdowns() {
     std::vector<std::pair<std::string, std::int64_t>> taken;
     taken.swap(pending_standdowns_);
@@ -671,7 +731,8 @@ void Engine::request_goods_ransom(const std::string& faction, const Config& cfg,
         amount = 50;
     }
 
-    pending_ransoms_.insert(faction);
+    pending_ransoms_[faction] = PendingRansom{
+        item, amount, now_ms + static_cast<std::int64_t>(cfg.okup_deadline_s) * 1000};
     pending_ransom_demands_.push_back({faction, item, amount, cfg.okup_deadline_s});
     db_.add_memory(now_ms, faction, "okup_surowce_zadanie", 1,
                    "Frakcja " + faction + " zażądała od gracza trybutu: " + std::to_string(amount) +
@@ -727,6 +788,15 @@ void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int6
     ensure_known_faction(faction);
     pending_ransoms_.erase(faction);
     // flaga rajdu w SQLite zostaje — ataki trwają dalej (mod wznawia ogień statków rajdu).
+
+    // Mod zgłasza powód. "brak_skrzynki" = to skrzynka przepadła (sprzątacz śmieci SE),
+    // a nie gracz zawiódł — kasujemy żądanie bez kary i bez nieufności. Karanie za własny
+    // brak skrzynki byłoby najgorszą wersją świata mściwego.
+    if (data_str(ev, "reason") == "brak_skrzynki") {
+        std::cout << "[brain] okup surowcowy " << faction
+                  << ": skrzynka zrzutu przepadła — żądanie anulowane BEZ kary\n";
+        return;
+    }
 
     const int broken = db_.ransom_broken(faction) + 1;
     db_.set_ransom_broken(faction, broken); // trwały modyfikator: kolejne okupy trudniejsze/odrzucane

@@ -199,13 +199,13 @@ na `--replay` (bramka none/clear/weak); w grze do odhaczenia:
 - [x] **H4. Wyłącznik zasięgu:** `rules.toml` → `[radio] wymagaj_zasiegu = false`
   (hot-reload) → `@KRW` z dowolnej odległości znów odpowiada (zachowanie sprzed 5c).
   Cofnij po teście.
-- [ ] **H5. Reakcja na szum (ulepszone):** przy słabym sygnale (~6–15 km) frakcja
+- [x] **H5. Reakcja na szum (ulepszone):** przy słabym sygnale (~6–15 km) frakcja
   ma **zareagować na zakłócenia** — powiedzieć, że rwie się/trzeszczy i kazać powtórzyć
   albo podejść bliżej, a NIE zgadywać treści ani (w trakcie rajdu) przyjmować okupu.
-- [ ] **H6. Pamięć dialogu:** rozmawiaj z KRW w zasięgu przez kilka wiadomości (np.
+- [x] **H6. Pamięć dialogu:** rozmawiaj z KRW w zasięgu przez kilka wiadomości (np.
   negocjuj rozejm) → frakcja **trzyma wątek** (pamięta ostatnie ~4 tury), nie odpowiada
   za każdym razem od zera. Ephemeralne — restart braina czyści pamięć rozmowy.
-- [ ] **H7. Sanitizer wyjścia:** w wypowiedziach frakcji **nie ma** końcowego podpisu
+- [x] **H7. Sanitizer wyjścia:** w wypowiedziach frakcji **nie ma** końcowego podpisu
   (`- KRW`), prefiksu nazwą (`KRW: ...`) ani `@Gracz` (co najwyżej „Gracz").
 
 ## I. Ekonomia: handel i kontrakty (Etap 6) — DO WERYFIKACJI
@@ -216,12 +216,21 @@ da się skompilować poza grą — jeśli mod nie wstanie, log SE wskaże plik
 `Contracts.cs` i konkretną linię; najbardziej podejrzane są sygnatura konstruktora
 i jednostka `duration` (zakładamy SEKUNDY: `durationMin * 60`).
 
-- [ ] **I0. Mod się ładuje:** świat startuje, w logu SE brak błędów kompilacji
+- [x] **I0. Mod się ładuje:** świat startuje, w logu SE brak błędów kompilacji
   z `Contracts.cs` / `Economy.cs`. To bramka dla całej sekcji.
-- [ ] **I1. Diagnostyka bloków:** `/zf stations` → dla każdej frakcji widać albo
+- [x] **I1. Diagnostyka bloków:** `/zf stations` → dla każdej frakcji widać albo
   `blok kontraktów: <nazwa> (id)`, albo `BRAK bloku kontraktów/sklepu`. Bez bloku
   zlecenia nie powstaną — to oczekiwane, nie błąd (potrzebna stacja frakcji, np.
   ze spawnu MES z blokiem sklepu/kontraktów).
+**Jak w ogóle dojść do bloku kontraktów (2026-07-28).** Vanilla nie pozwala oddać
+budowli frakcji NPC, a bez tego I2-I10 nie da się ruszyć. Droga na skróty:
+1. tryb kreatywny / narzędzia kreatywne → postaw mały statyczny grid,
+2. dostaw **Blok kontraktów** (albo Sklep) i włącz zasilanie,
+3. wyceluj w grid i wpisz `/zf stacja WGR` → mod przepisuje siatkę na frakcję i od razu
+   mówi, czy blok kontraktów został wykryty,
+4. `/zf stations` musi teraz pokazać `blok kontraktów: <nazwa> (id)` zamiast `BRAK`.
+Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowaniem do testów.
+
 - [ ] **I2. Wymuszone zlecenie:** `/zf kontrakt WGR` → konsola braina
   `contract_create [WGR] dostawa za N kr`, a na czacie `[ZF] Nowe zlecenie WGR: …`.
   Jeśli zamiast tego „pominięty: frakcja nie ma bloku…" — patrz I1.
@@ -266,6 +275,60 @@ i jednostka `duration` (zakładamy SEKUNDY: `durationMin * 60`).
   jest `relacja HEL->gracz +5 (wróg KRW ostrzelany)`.
 - [ ] **J5. Koniec echa:** napisz zwykłą wiadomość na czacie (bez `@`) → **NIE MA**
   już `[RADIO | TEST] Echo: …` (test A1 jest tym samym unieważniony).
+
+## K. Okup w surowcach — B+ (nowe)
+
+Żeby było czym płacić: `/zf daj <surowiec> [ilość]` wrzuca towar prosto do inwentarza
+postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
+
+- [ ] **K1. Towar do ręki:** `/zf daj nikiel 700` → `ZF: dodano 700x
+  MyObjectBuilder_Ingot/Nickel (w inwentarzu: 700)`, sztabki widać w plecaku.
+  Warianty: `/zf daj Ore/Ice 100`, `/zf daj Component/SteelPlate 50`, samo
+  `/zf daj` → podpowiedź składni, `/zf daj bzdura 5` → „nic nie weszło".
+- [ ] **K2. Żądanie trybutu:** `/zf raid KRW`, potem `/zf okup-surowce KRW` →
+  `[KRW] Trybut za pokój: dostarcz N …` + GPS `ZRZUT KRW`, w świecie stoi skrzynka
+  z beaconem ZRZUT, statki KRW wstrzymują ogień.
+- [ ] **K3. Dostawa:** `/zf daj <żądany surowiec> <żądana ilość>`, przełóż towar do
+  skrzynki → `[KRW] Trybut dostarczony`, `ransom_paid` w events.jsonl, relacja +20,
+  skrzynka i GPS znikają, statki odlatują.
+- [ ] **K4. Deadline:** to samo bez dostawy → po `deadline_s` `[KRW] Czas na trybut
+  minął`, `ransom_expired`, skrzynka i GPS znikają, ataki wracają.
+- [ ] **K5. Pokój kasuje trybut (regresja 2026-07-28):** przy wiszącym żądaniu
+  `/zf okup KRW` → `[KRW] Żądanie trybutu odwołane — skrzynka zrzutu znika`,
+  skrzynka i GPS znikają od razu, a po upływie deadline'u NIE ma `ransom_expired`
+  ani kary za złamaną obietnicę. Wcześniej skrzynka wisiała do końca okna i pokój
+  kończył się karą.
+- [ ] **K6. Skrzynka NIE znika sama (regresja 2026-07-28):** po `/zf okup-surowce KRW`
+  skrzynka stoi ~120 m przed graczem i **zostaje** — wcześniej zjadał ją sprzątacz śmieci
+  SE (świat: `TrashRemovalEnabled=true`, `BlockCountThreshold=20`, `PlayerDistanceThreshold=500`;
+  2-blokowy, niestatyczny, bezpański grid dalej niż 500 m = podręcznikowy śmieć). Teraz
+  prefab jest statyczny i ma baterię, więc beacon `ZRZUT` świeci i grid jest nietykalny.
+  Kontrtest: gdyby mimo to przepadła, ma przyjść `[KRW] Skrzynka zrzutu przepadła —
+  żądanie trybutu anulowane (bez kary)` i BRAK kary w konsoli braina.
+- [ ] **K7. Frakcja wie, ile zostało czasu:** przy wiszącym żądaniu napisz
+  `@krw ile mi zostało czasu?` → odpowiedź podaje realną liczbę minut i ilość surowca
+  (brain wstrzykuje to do promptu). Wcześniej model zmyślał.
+- [ ] **K8. Sierota po wczytaniu świata:** przy wiszącym żądaniu zapisz i wczytaj świat
+  → ~3 s po wczytaniu skrzynka i GPS znikają (`sprzątnięto porzucone skrzynki
+  zrzutu: 1`). Pending nie przeżywa reloadu (zakres v1), więc do tej skrzynki i tak
+  nie dałoby się już dostarczyć trybutu.
+
+## L. Targ o okup i reputacja (2026-07-28)
+
+- [ ] **L1. Kredyty kończą rajd:** w trakcie rajdu napisz `@krw dam ci 5000 kredytów`
+  (musisz je MIEĆ na koncie) → konsola braina: `okup kredytowy KRW: oferta 5000 kr >=
+  próg … — pokój niezależnie od decyzji modelu`, leci `stand_down`, kasa schodzi z konta.
+  Wcześniej model potrafił w kółko odpowiadać „dawaj więcej" i nigdy nie odpuścić.
+- [ ] **L2. Pusta obietnica nie kupuje pokoju:** to samo z kwotą większą niż saldo →
+  `oferta … bez pokrycia (saldo …) — pusta obietnica`, rajd trwa.
+- [ ] **L3. Próg rośnie z wrogością:** przy relacji -80 próg jest ~1,8x bazy
+  (`deeskalacja_prog_kredyty` w rules.toml, hot-reload).
+- [ ] **L4. Koniec farmienia reputacji:** ostrzeliwuj jeden statek KRW przez minutę →
+  HEL/WGR dostają bonus „wróg KRW ostrzelany" **raz**, nie co 3 s
+  (`atak_na_wroga_cooldown_min = 10`). Regresja: wcześniej minuta ostrzału robiła
+  z gracza sojusznika wszystkich pozostałych frakcji.
+- [ ] **L5. Radio się nie zapętla:** dłuższy targ na czacie (kilka wiadomości pod rząd) →
+  frakcja nie powtarza w kółko tego samego zdania (kara za powtórzenia w samplerze).
 
 ## Znane zachowania (to nie błędy)
 

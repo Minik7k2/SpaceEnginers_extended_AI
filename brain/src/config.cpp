@@ -54,7 +54,13 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.kontrakt_min = (*zm)["kontrakt_min"].value_or(cfg.kontrakt_min);
         cfg.kontrakt_max = (*zm)["kontrakt_max"].value_or(cfg.kontrakt_max);
         cfg.atak_na_wroga_bonus = (*zm)["atak_na_wroga_bonus"].value_or(cfg.atak_na_wroga_bonus);
+        cfg.atak_na_wroga_cooldown_min =
+            (*zm)["atak_na_wroga_cooldown_min"].value_or(cfg.atak_na_wroga_cooldown_min);
         cfg.deeskalacja_bonus = (*zm)["deeskalacja_bonus"].value_or(cfg.deeskalacja_bonus);
+        cfg.deeskalacja_prog_kredyty =
+            (*zm)["deeskalacja_prog_kredyty"].value_or(cfg.deeskalacja_prog_kredyty);
+        cfg.deeskalacja_prog_za_punkt =
+            (*zm)["deeskalacja_prog_za_punkt"].value_or(cfg.deeskalacja_prog_za_punkt);
     }
 
     if (const auto* tick = tbl["tick"].as_table()) {

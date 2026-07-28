@@ -36,6 +36,20 @@ int main() {
     // Bez tagu frakcji (SYSTEM/SPRT) obcinamy tylko brzegi i @Gracz.
     assert(zf::sanitize_reply(" Nic tu po tobie. ", "") == "Nic tu po tobie.");
 
+    // --- ucięcie w pół słowa (strop gramatyki 220 znaków, obserwacja z gry) ---
+    // Zdanie urwane po długiej, kompletnej wypowiedzi -> docinamy do ostatniej kropki.
+    assert(zf::sanitize_reply("Wojna to wojna, frajerze. Twoje wraki zasilą nasz zlomowiec. "
+                              "I nie zapomnij, g", "KRW") ==
+           "Wojna to wojna, frajerze. Twoje wraki zasilą nasz zlomowiec.");
+    // Krótka kwestia bez kropki na końcu ZOSTAJE — to nie jest ucięcie, tylko styl.
+    assert(zf::sanitize_reply("Placz albo gin", "KRW") == "Placz albo gin");
+    // Wykrzyknik/pytajnik kończy zdanie tak samo jak kropka.
+    assert(zf::sanitize_reply("Won stąd!", "KRW") == "Won stąd!");
+    // Gdy po ostatniej kropce zostałaby resztka wypowiedzi, nie kaleczymy treści.
+    assert(zf::sanitize_reply("Tak. A teraz posłuchaj mnie uważnie, bo powtarzać nie zamierzam ani",
+                              "KRW") ==
+           "Tak. A teraz posłuchaj mnie uważnie, bo powtarzać nie zamierzam ani");
+
     // --- persona_path: tylko nasze frakcje mają karty person ---
     assert(zf::persona_path("KRW") == "personas/krwawa_reka.md");
     assert(zf::persona_path("HEL") == "personas/helion.md");

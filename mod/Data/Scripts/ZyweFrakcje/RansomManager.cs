@@ -23,10 +23,16 @@ namespace ZyweFrakcje
     internal sealed class RansomManager
     {
         private const string CratePrefab = "ZF_DropCrate";
+        private const string CrateGridName = "Skrzynka zrzutu"; // DisplayName z prefabu — po nim poznajemy sieroty
+        private const string GpsPrefix = "ZRZUT ";
         private const int TicksPerSecond = 60;
-        private const double CrateDistance = 90;  // m przed graczem, jeśli brak kotwicy przy statku frakcji
+        private const int SweepTick = 180;        // ~3 s po wczytaniu świata: encje są już w scenie
+        private const int CrateGraceTicks = 300;  // ~5 s na powstanie skrzynki (SpawnPrefab jest async)
+        private const double CrateDistance = 120; // m przed graczem — w zasięgu, ale nie na kolanach
+        private const float CrateFreeRadius = 15; // promień szukania wolnego miejsca (FindFreePlace)
 
         private readonly EventWriter _events;
+        private bool _swept;
 
         private sealed class Pending
         {
@@ -36,6 +42,7 @@ namespace ZyweFrakcje
             public MyDefinitionId ItemDef; // rzeczywisty przedmiot w inwentarzu (ingot)
             public long Amount;
             public int DeadlineTick;
+            public int SpawnTick;          // do wykrycia „skrzynka nie powstała / przepadła"
             public IMyCubeGrid Crate;
             public IMyGps Gps;
         }
@@ -81,7 +88,7 @@ namespace ZyweFrakcje
             string itemPl = PolishName(itemKey);
 
             Vector3D pos;
-            if (!ChooseDropPos(faction, out pos))
+            if (!ChooseDropPos(out pos))
             {
                 Show("okup " + faction + ": brak miejsca na skrzynkę (brak gracza) — pominięto");
                 return;
@@ -97,6 +104,7 @@ namespace ZyweFrakcje
                 ItemDef = def,
                 Amount = amount,
                 DeadlineTick = tick + deadlineS * TicksPerSecond,
+                SpawnTick = tick,
             };
             _pending[faction] = pending;
 
@@ -109,9 +117,35 @@ namespace ZyweFrakcje
                  " min. Inaczej ataki trwają.");
         }
 
+        /// <summary>
+        /// Odwołanie wiszącego żądania bez kary i bez wznawiania ognia (stand_down: okup
+        /// gotówkowy, kapitulacja, rozejm). Brain przy stand_down kasuje swój pending
+        /// z założeniem, że skrzynkę sprząta mod — to jest to sprzątanie.
+        /// </summary>
+        public void Cancel(string faction)
+        {
+            if (string.IsNullOrEmpty(faction))
+            {
+                return;
+            }
+            Pending p;
+            if (!_pending.TryGetValue(faction, out p))
+            {
+                return;
+            }
+            Cleanup(p);
+            _pending.Remove(faction);
+            Show("[" + faction + "] Żądanie trybutu odwołane — skrzynka zrzutu znika.");
+        }
+
         /// <summary>Co tik z sesji: skan skrzynek i egzekwowanie deadline'ów.</summary>
         public void Update(int tick)
         {
+            if (!_swept && tick >= SweepTick)
+            {
+                _swept = true;
+                SweepOrphans();
+            }
             if (_pending.Count == 0)
             {
                 return;
@@ -133,10 +167,23 @@ namespace ZyweFrakcje
                     continue;
                 }
 
+                // Skrzynka przepadła (nie powstała albo zjadł ją sprzątacz śmieci SE): gracz
+                // nie ma gdzie zapłacić, więc kasujemy żądanie BEZ kary. Karać za nasz brak
+                // skrzynki to najgorszy możliwy wariant świata mściwego.
+                if (tick - p.SpawnTick > CrateGraceTicks && (p.Crate == null || p.Crate.MarkedForClose))
+                {
+                    _events.WriteRansomExpired(p.Faction, "brak_skrzynki");
+                    Cleanup(p);
+                    TestSpawner.ResumeFire(p.Faction);
+                    Show("[" + p.Faction + "] Skrzynka zrzutu przepadła — żądanie trybutu anulowane (bez kary).");
+                    (done ?? (done = new List<string>())).Add(kv.Key);
+                    continue;
+                }
+
                 // Deadline: minął czas bez dostawy.
                 if (tick >= p.DeadlineTick)
                 {
-                    _events.WriteRansomExpired(p.Faction);
+                    _events.WriteRansomExpired(p.Faction, "deadline");
                     Cleanup(p);
                     TestSpawner.ResumeFire(p.Faction); // brak dostawy — ataki wznowione
                     Show("[" + p.Faction + "] Czas na trybut minął. Ataki trwają.");
@@ -152,24 +199,26 @@ namespace ZyweFrakcje
             }
         }
 
-        // Skrzynka przy gridzie frakcji (klimat: „ich" punkt zrzutu), inaczej przed graczem.
-        private static bool ChooseDropPos(string faction, out Vector3D pos)
+        /// <summary>
+        /// Skrzynka ZAWSZE przed graczem, nie przy statku frakcji. Dwa powody z gry:
+        /// (1) sprzątacz śmieci SE kasuje małe gridy dalej niż PlayerDistanceThreshold (500 m)
+        /// od gracza, a statek rajdu bywa kilometry stąd; (2) 25 m nad kadłubem lecącego
+        /// drona to kolizja albo skrzynka zabrana w podróż. FindFreePlace pilnuje, żeby
+        /// nie wsadzić jej w asteroidę ani w cudzy grid.
+        /// </summary>
+        private static bool ChooseDropPos(out Vector3D pos)
         {
-            Vector3D anchor;
-            if (TestSpawner.TryGetAnchor(faction, out anchor))
-            {
-                pos = anchor + new Vector3D(0, 25, 0); // trochę nad statkiem, żeby się nie nakładały
-                return true;
-            }
-            IMyPlayer player = MyAPIGateway.Session.Player;
-            if (player != null && player.Character != null)
-            {
-                MatrixD m = player.Character.WorldMatrix;
-                pos = m.Translation + m.Forward * CrateDistance + m.Up * 5;
-                return true;
-            }
             pos = Vector3D.Zero;
-            return false;
+            IMyPlayer player = MyAPIGateway.Session.Player;
+            if (player == null || player.Character == null)
+            {
+                return false;
+            }
+            MatrixD m = player.Character.WorldMatrix;
+            Vector3D wanted = m.Translation + m.Forward * CrateDistance + m.Up * 5;
+            Vector3D? free = MyAPIGateway.Entities.FindFreePlace(wanted, CrateFreeRadius);
+            pos = free.HasValue ? free.Value : wanted;
+            return true;
         }
 
         private void SpawnCrate(Pending pending, Vector3D pos)
@@ -210,7 +259,7 @@ namespace ZyweFrakcje
                 return null;
             }
             IMyGps gps = MyAPIGateway.Session.GPS.Create(
-                "ZRZUT " + faction,
+                GpsPrefix + faction,
                 "Skrzynka zrzutu okupu — dostarcz " + amount + " " + itemPl,
                 pos, true, false);
             MyAPIGateway.Session.GPS.AddGps(player.IdentityId, gps);
@@ -219,20 +268,87 @@ namespace ZyweFrakcje
 
         private void Cleanup(Pending p)
         {
-            if (p.Gps != null)
-            {
-                IMyPlayer player = MyAPIGateway.Session.Player;
-                if (player != null)
-                {
-                    MyAPIGateway.Session.GPS.RemoveGps(player.IdentityId, p.Gps);
-                }
-                p.Gps = null;
-            }
+            RemoveGps(GpsPrefix + p.Faction, p.Gps);
+            p.Gps = null;
             if (p.Crate != null && !p.Crate.MarkedForClose)
             {
                 p.Crate.Close();
             }
             p.Crate = null;
+        }
+
+        // Kasowanie po instancji potrafi nie trafić (kolekcja gracza trzyma własny wpis,
+        // wyszukiwany po hashu z nazwy/opisu/pozycji), więc na wszelki wypadek dobijamy
+        // po nazwie. Hashe zbieramy przed usuwaniem — nie modyfikujemy listy w trakcie.
+        private static void RemoveGps(string name, IMyGps instance)
+        {
+            IMyPlayer player = MyAPIGateway.Session != null ? MyAPIGateway.Session.Player : null;
+            if (player == null)
+            {
+                return;
+            }
+            if (instance != null)
+            {
+                MyAPIGateway.Session.GPS.RemoveGps(player.IdentityId, instance);
+            }
+            List<IMyGps> list = MyAPIGateway.Session.GPS.GetGpsList(player.IdentityId);
+            if (list == null)
+            {
+                return;
+            }
+            var hashes = new List<int>();
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] != null && list[i].Name != null && list[i].Name.StartsWith(name))
+                {
+                    hashes.Add(list[i].Hash);
+                }
+            }
+            for (int i = 0; i < hashes.Count; i++)
+            {
+                MyAPIGateway.Session.GPS.RemoveGps(player.IdentityId, hashes[i]);
+            }
+        }
+
+        // Sprzątanie po poprzedniej sesji: pending nie przeżywa wczytania świata (zakres v1),
+        // więc każda skrzynka ZF i każdy GPS „ZRZUT ..." w świeżo wczytanym świecie to sierota
+        // po przerwanym oknie okupu. Bramka na _pending chroni przed zabiciem świeżej skrzynki,
+        // gdyby żądanie przyszło w pierwszych sekundach po wczytaniu.
+        private void SweepOrphans()
+        {
+            if (_pending.Count > 0)
+            {
+                return;
+            }
+            RemoveGps(GpsPrefix, null);
+
+            var entities = new HashSet<IMyEntity>();
+            MyAPIGateway.Entities.GetEntities(entities, e => e is IMyCubeGrid);
+            int closed = 0;
+            foreach (IMyEntity entity in entities)
+            {
+                var grid = entity as IMyCubeGrid;
+                if (grid == null || grid.MarkedForClose)
+                {
+                    continue;
+                }
+                if (grid.DisplayName == null || !grid.DisplayName.StartsWith(CrateGridName))
+                {
+                    continue;
+                }
+                // Nasza skrzynka jest bezpańska (ownerId=0) — cudzej budowli nie ruszamy.
+                List<long> owners = grid.BigOwners;
+                if (owners != null && owners.Count > 0)
+                {
+                    continue;
+                }
+                grid.Close();
+                closed++;
+            }
+            if (closed > 0)
+            {
+                Show("sprzątnięto porzucone skrzynki zrzutu: " + closed);
+            }
         }
 
         // Suma danego surowca we wszystkich kontenerach skrzynki.

@@ -32,7 +32,17 @@ handel_max = 3
 kontrakt_min = 10
 kontrakt_max = 20
 atak_na_wroga_bonus = 5
+# Bonus "wróg mojego wroga" ma być nagrodą za potyczkę, nie dojną krową: mod zgłasza
+# combat_hit co 3 s, więc bez cooldownu minuta ostrzału jednego statku robiła z gracza
+# sojusznika wszystkich pozostałych frakcji. Cooldown per para (obserwator, ostrzelany).
+atak_na_wroga_cooldown_min = 10
 deeskalacja_bonus = 15   # przyjęty okup/kapitulacja/rozejm; trwałe modyfikatory (sufit) zostają
+# Okup w KREDYTACH: oferta gracza >= progu wymusza pokój niezależnie od decyzji modelu
+# (mały model potrafi w kółko mówić "dawaj więcej" i nigdy nie odpuścić). Brain przyjmuje
+# tylko ofertę pokrytą saldem gracza — mod dosyła saldo w chat_message. 0 = wyłącz bramkę.
+deeskalacja_prog_kredyty = 3000
+# Im gorsza relacja, tym drożej: +1% progu za każdy punkt relacji poniżej zera.
+deeskalacja_prog_za_punkt = 0.01
 
 [tick]
 co_minut = 4
@@ -76,8 +86,8 @@ cooldown_min = 10
 # czasu. Dostawa => pokój + relacja rośnie; brak dostawy => ataki trwają DALEJ +
 # trwała utrata wiarygodności (świat mściwy: odkupienie czynem, nie czasem).
 towary = "Iron,Nickel,Silicon,Cobalt"   # dozwolone surowce; brain losuje jeden, mod tłumaczy na SubtypeId + nazwę PL
-ilosc_min = 300
-ilosc_max = 800
+ilosc_min = 50
+ilosc_max = 100
 deadline_s = 900         # 15 min na dostarczenie trybutu
 bonus_dostawa = 20       # relacja += po dostarczeniu (jak wykonany kontrakt)
 kara_zlamanie = 5        # relacja -= za złamaną obietnicę (główna kara to trwała nieufność)

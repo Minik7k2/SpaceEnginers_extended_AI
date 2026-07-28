@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   ZF_DropCrate — skrzynka zrzutu okupu w surowcach (B+).
-  Minimalny grid: jeden duży kontener + beacon. Spawnowany przez
+  Minimalny grid: kontener + beacon + bateria. Spawnowany przez
   MyAPIGateway.PrefabManager.SpawnPrefab("ZF_DropCrate", ...), po spawnie mod
   ustawia właściciela na 0 (nikt), żeby GRACZ mógł włożyć towar (do wrogiego
   cargo się nie dostanie). Mod obserwuje inwentarz kontenera co tik.
-  UWAGA: prefab do weryfikacji W GRZE (SubtypeId bloków, komplet pól parsera).
+
+  IsStatic=true I bateria to NIE ozdoba — bez nich sprzątacz śmieci SE zjadał
+  skrzynkę zanim gracz doleciał (świat: TrashRemovalEnabled=true, flagi Default
+  = 7706 → usuwane są gridy niestatyczne o liczbie bloków < BlockCountThreshold
+  (20) dalej niż PlayerDistanceThreshold (500 m) od gracza; flaga Fixed NIE jest
+  ustawiona, więc gridy statyczne są nietykalne). Bateria dodatkowo zasila beacon,
+  bez niej „ZRZUT" nie świecił na HUD.
+
+  Układ bloków w pionie: kontener y=0, beacon y=1..2 (blok 1x2x1), bateria y=3.
 -->
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <Prefabs>
@@ -16,7 +24,7 @@
           <SubtypeName />
           <DisplayName>Skrzynka zrzutu</DisplayName>
           <GridSizeEnum>Large</GridSizeEnum>
-          <IsStatic>false</IsStatic>
+          <IsStatic>true</IsStatic>
           <PersistentFlags>CastShadows InScene</PersistentFlags>
           <PositionAndOrientation>
             <Position x="0" y="0" z="0" />
@@ -37,6 +45,17 @@
               <BlockOrientation Forward="Forward" Up="Up" />
               <CustomName>ZRZUT</CustomName>
               <BroadcastRadius>5000</BroadcastRadius>
+            </MyObjectBuilder_CubeBlock>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_BatteryBlock">
+              <SubtypeName>LargeBlockBatteryBlock</SubtypeName>
+              <Min x="0" y="3" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>Zasilanie zrzutu</CustomName>
+              <Enabled>true</Enabled>
+              <CurrentStoredPower>3</CurrentStoredPower>
+              <MaxStoredPower>3</MaxStoredPower>
+              <ProducerEnabled>true</ProducerEnabled>
+              <SemiautoEnabled>false</SemiautoEnabled>
             </MyObjectBuilder_CubeBlock>
           </CubeBlocks>
         </CubeGrid>
