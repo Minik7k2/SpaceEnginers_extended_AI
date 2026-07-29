@@ -216,6 +216,23 @@ void CommandWriter::write_contract_create(const std::string& faction, const std:
     write_line(line);
 }
 
+void CommandWriter::write_reputation_sync(const std::string& faction, const std::string& other,
+                                          double value, int vanilla) {
+    const nlohmann::json line = {
+        {"v", 1},
+        {"seq", db_.next_commands_seq()},
+        {"ts", now_unix_ms()},
+        {"type", "reputation_sync"},
+        {"data", {
+            {"faction", faction},
+            {"other", other},
+            {"value", value},
+            {"vanilla", vanilla},
+        }},
+    };
+    write_line(line);
+}
+
 void CommandWriter::write_stand_down(const std::string& faction, std::int64_t ransom_amount) {
     const nlohmann::json line = {
         {"v", 1},

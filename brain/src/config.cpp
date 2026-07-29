@@ -101,6 +101,13 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.kontrakty_nagroda_max = (*kon)["nagroda_max"].value_or(cfg.kontrakty_nagroda_max);
         cfg.kontrakty_czas_min = (*kon)["czas_min"].value_or(cfg.kontrakty_czas_min);
     }
+
+    if (const auto* rep = tbl["reputacja"].as_table()) {
+        cfg.reputacja_sync = (*rep)["sync"].value_or(cfg.reputacja_sync);
+        cfg.reputacja_zakres = (*rep)["zakres"].value_or(cfg.reputacja_zakres);
+        cfg.reputacja_prog = (*rep)["prog"].value_or(cfg.reputacja_prog);
+        cfg.reputacja_polityka = (*rep)["polityka"].value_or(cfg.reputacja_polityka);
+    }
 }
 
 // Automatyczne znalezienie katalogu storage moda. Ścieżka wygląda tak:

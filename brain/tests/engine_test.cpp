@@ -529,6 +529,94 @@ int main() {
         assert(bad.size() == 1 && bad[0].faction == "SYSTEM");
     }
 
+    // --- Reputacja: rzutowanie naszej skali na natywną SE (hybryda) ---
+    {
+        zf::Config rcfg; // zakres 1500, prog 500, prog_wrogi -30, prog_sojusznik +40
+
+        assert(zf::vanilla_reputation(0, rcfg) == 0);
+        assert(zf::vanilla_reputation(100, rcfg) == rcfg.reputacja_zakres);
+        assert(zf::vanilla_reputation(-100, rcfg) == -rcfg.reputacja_zakres);
+        // Poza skalą (nie powinno się zdarzyć) nie może wyjść poza zakres gry.
+        assert(zf::vanilla_reputation(999, rcfg) == rcfg.reputacja_zakres);
+        assert(zf::vanilla_reputation(-999, rcfg) == -rcfg.reputacja_zakres);
+
+        // Progi muszą się zgadzać z etykietami w grze: na naszym progu wrogości gracz
+        // jest WROGIEM (<= -500), na progu sojuszu SOJUSZNIKIEM (>= +500).
+        assert(zf::vanilla_reputation(rcfg.prog_wrogi, rcfg) <= -rcfg.reputacja_prog);
+        assert(zf::vanilla_reputation(rcfg.prog_wrogi + 1, rcfg) > -rcfg.reputacja_prog);
+        assert(zf::vanilla_reputation(rcfg.prog_sojusznik, rcfg) >= rcfg.reputacja_prog);
+        assert(zf::vanilla_reputation(rcfg.prog_sojusznik - 1, rcfg) < rcfg.reputacja_prog);
+        // Monotoniczność — bez niej „lepsza relacja" mogłaby oznaczać gorszą reputację.
+        for (double v = -100; v < 100; v += 1) {
+            assert(zf::vanilla_reputation(v, rcfg) <= zf::vanilla_reputation(v + 1, rcfg));
+        }
+
+        zf::Db rdb(":memory:");
+        zf::Engine re(rdb, fallback, /*rng_seed=*/7);
+        std::int64_t t = 5000000;
+
+        // session_start = pełny resync: 3 nasze frakcje + 3 pary polityki.
+        re.on_event(make_event("session_start", {{"world", "test"}}), rcfg, t);
+        auto reps = re.take_reputations();
+        assert(reps.size() == 6 && "session_start ma przepisać wszystkie relacje i politykę");
+        int do_gracza = 0;
+        for (const zf::ReputationOut& r : reps) {
+            if (r.other.empty()) {
+                ++do_gracza;
+                assert(r.vanilla == 0 && "świeży świat: relacja 0 => reputacja 0");
+            } else if ((r.faction == "HEL" && r.other == "KRW") ||
+                       (r.faction == "KRW" && r.other == "HEL")) {
+                assert(r.vanilla < -rcfg.reputacja_prog && "HEL/KRW -70 => wrogowie w grze");
+            }
+        }
+        assert(do_gracza == 3);
+
+        // Bez zmiany relacji nie ma po co pisać do gry.
+        t += kMinuteMs;
+        re.on_event(make_event("proximity", {{"faction", "KRW"}, {"state", "enter"}, {"dist", 2000}}),
+                    rcfg, t);
+        assert(re.take_reputations().empty() && "brak zmiany relacji = brak reputation_sync");
+
+        // Zniszczona stacja: relacja leci w dół, reputacja w grze też — i to poniżej progu.
+        t += kMinuteMs;
+        re.on_event(make_event("grid_destroyed",
+                               {{"faction", "KRW"}, {"grid", "Stacja"}, {"is_station", true}}),
+                    rcfg, t);
+        auto after_boom = re.take_reputations();
+        bool krw_hostile = false;
+        for (const zf::ReputationOut& r : after_boom) {
+            if (r.faction == "KRW" && r.other.empty()) {
+                krw_hostile = r.vanilla <= -rcfg.reputacja_prog;
+            }
+            assert(zf::faction_color(r.faction) != "white" && "sync tylko dla naszych frakcji");
+        }
+        assert(krw_hostile && "zniszczenie stacji ma zrobić z gracza wroga także w grze");
+
+        // Wyłącznik configiem, a po ponownym włączeniu — pełny resync.
+        rcfg.reputacja_sync = false;
+        t += kMinuteMs;
+        re.on_event(make_event("combat_hit",
+                               {{"faction", "KRW"}, {"damage", 100.0}, {"hits", 1}, {"weapon", "t"}}),
+                    rcfg, t);
+        assert(re.take_reputations().empty() && "sync=false ma wyłączyć zapis do gry");
+        rcfg.reputacja_sync = true;
+        t += kMinuteMs;
+        re.on_event(make_event("proximity", {{"faction", "HEL"}, {"state", "enter"}, {"dist", 2000}}),
+                    rcfg, t);
+        assert(re.take_reputations().size() == 6 && "włączenie synchronizacji = pełny resync");
+
+        // Polityka frakcji wyłączona: tylko relacje do gracza.
+        rcfg.reputacja_polityka = false;
+        t += kMinuteMs;
+        auto only_player = re.on_event(make_event("session_start", {{"world", "test"}}), rcfg, t);
+        (void)only_player;
+        auto reps2 = re.take_reputations();
+        assert(reps2.size() == 3);
+        for (const zf::ReputationOut& r : reps2) {
+            assert(r.other.empty());
+        }
+    }
+
     std::cout << "zf_engine_test: OK\n";
     return 0;
 }

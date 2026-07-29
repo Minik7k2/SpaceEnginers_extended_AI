@@ -61,6 +61,12 @@ public:
     void write_contract_create(const std::string& faction, const std::string& kind,
                                std::int64_t reward, int duration_min);
 
+    // reputation_sync: przepisanie naszej relacji na natywną reputację SE. other pusty =
+    // relacja frakcja→gracz, niepusty = druga frakcja (polityka). value idzie tylko dla
+    // czytelności logów moda — do zapisu w grze służy vanilla. Patrz docs/protocol.md.
+    void write_reputation_sync(const std::string& faction, const std::string& other, double value,
+                               int vanilla);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();

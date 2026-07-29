@@ -47,7 +47,8 @@ int main() {
     const fs::path cfg_path = tmp / "rules.toml";
     write_file(cfg_path,
                "[bridge]\nstorage_dir = \"\"\npoll_ms = 250\n"
-               "[kontrakty]\nwlaczone = false\nnagroda_min = 1234\n");
+               "[kontrakty]\nwlaczone = false\nnagroda_min = 1234\n"
+               "[reputacja]\nsync = false\nzakres = 900\npolityka = false\n");
     {
         const zf::Config cfg = zf::load_config(cfg_path.string());
         assert(cfg.storage_dir == nowy.parent_path().generic_string() &&
@@ -55,6 +56,9 @@ int main() {
         assert(cfg.poll_ms == 250);
         assert(!cfg.kontrakty_wlaczone && cfg.kontrakty_nagroda_min == 1234 &&
                "sekcja [kontrakty] ma być wczytywana");
+        assert(!cfg.reputacja_sync && cfg.reputacja_zakres == 900 && !cfg.reputacja_polityka &&
+               "sekcja [reputacja] ma być wczytywana");
+        assert(cfg.reputacja_prog == 500 && "brak klucza => domyślny próg gry");
     }
 
     // 2. Ścieżka z configu, która NIE istnieje (typowo: świat skasowany albo inna maszyna)

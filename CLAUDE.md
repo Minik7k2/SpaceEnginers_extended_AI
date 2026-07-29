@@ -41,7 +41,9 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
   ID kontraktów utrwalane w SQLite (wymóg: odtworzenie po wczytaniu świata).
   Blok kontraktów stawiamy na WŁASNYCH stacjach frakcji (znany bug: kontrakty
   z API nie pokazują się na stacjach spawnowanych przez vanilla Economy).
-  Vanilla reputacja — ignorowana, mamy własną.
+  Vanilla reputacja — HYBRYDA (zmiana decyzji, 2026-07-29): źródłem prawdy jest nasz
+  silnik relacji, ale jego wynik jest rzutowany na natywną reputację SE, żeby gracz
+  widział stan w oknie frakcji, a wieżyczki/ceny/strefy reagowały. Szczegóły niżej.
 - **Floty:** na start gotowe paczki statków z Workshopu podpięte pod nasze
   frakcje w spawn groups; własne flagowce w Etapie 7.
 
@@ -63,6 +65,14 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
   upływ czasu, tylko zdarzenia.
 - Stan długiego oddechu (aktywny rajd z TTL 60 min, cooldowny spawnu i
   kontraktów) siedzi w SQLite — restart brainu w trakcie rajdu nie gubi okupu.
+- **Reputacja natywna (hybryda):** po każdej zmianie relacji brain wysyła
+  `reputation_sync`, a mod zapisuje wartość przez `MyAPIGateway.Session.Factions`
+  (`SetReputationBetweenPlayerAndFaction`, dla polityki `SetReputation`). Odwzorowanie
+  odcinkowo-liniowe -100..+100 → -1500..+1500 z węzłami w progach gry (±500), więc
+  etykieta „wróg/neutralny/sojusznik" w oknie frakcji zgadza się z `/zf rel`. Kierunek
+  jednostronny: mod co ~5 s przywraca wartość z brainu, gdy gra ruszy ją sama (nagrody
+  kontraktów vanilla) — bez tego to samo zdarzenie liczyłoby się dwa razy. Synchronizujemy
+  tylko HEL/KRW/WGR; reputacja frakcji vanilla/MES zostaje grze. Config: `[reputacja]`.
 - Reakcje na zdarzenia z gry: natychmiastowe, poza tickiem.
 
 ## Struktura repo
@@ -127,7 +137,8 @@ docs/protocol.md                # spec mostka JSONL
 
 ## Testowanie
 
-- Komendy czatu w modzie: `/zf rel` (relacje + polityka frakcji), `/zf tick`
+- Komendy czatu w modzie: `/zf rel` (relacje + polityka frakcji), `/zf rep`
+  (natywna reputacja w grze vs cel z brainu — kontrola hybrydy), `/zf tick`
   (wymuś tick), `/zf spawn <frakcja>` (vanilla prefab), `/zf raid <frakcja>`
   (potok MES), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
   <frakcja>` (wymuszone zlecenie), `/zf stations` (stacje i blok kontraktów),

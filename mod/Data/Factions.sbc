@@ -4,8 +4,10 @@
      dzięki czemu jej FounderId istnieje i statki da się spawnować na jej własność.
      UWAGA: IsDefault działa przy GENEROWANIU świata — na już istniejącym zapisie frakcje
      mogą się nie pojawić; do weryfikacji odpal NOWY świat testowy.
-     Vanilla reputacja jest ignorowana (mamy własny silnik relacji), ale DefaultRelation
-     steruje wrogością statków na starcie: KRW (piraci) = Enemies, HEL/WGR = Neutral. -->
+     Vanilla reputacja jest RZUTEM naszego silnika relacji (hybryda: brain liczy, mod
+     zapisuje ją przez komendę reputation_sync — patrz Reputation.cs). DefaultRelation
+     ustawia tylko punkt startowy, zanim brain przyśle pierwsze wartości: KRW (piraci)
+     = Enemies, HEL/WGR = Neutral. -->
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <Factions>
 

@@ -181,6 +181,11 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
             std::cout << "  [KONTRAKT | " << c.faction << "] " << c.kind << " za " << c.reward
                       << " kr (" << c.duration_min << " min)\n";
         }
+        for (const zf::ReputationOut& r : engine.take_reputations()) {
+            std::cout << "  [REPUTACJA | " << r.faction
+                      << (r.other.empty() ? "->gracz" : "->" + r.other) << "] " << r.value
+                      << " => " << r.vanilla << " (skala gry)\n";
+        }
     };
     const auto print_ransoms = [&engine]() {
         for (const zf::RansomDemandOut& rd : engine.take_ransom_demands()) {
@@ -287,6 +292,18 @@ int main(int argc, char** argv) {
             }
         };
 
+        // Reputacja: nasza relacja przepisana na skalę gry (hybryda). Mod zapisuje ją
+        // przez MyAPIGateway.Session.Factions, więc gracz widzi jedną liczbę — w oknie
+        // frakcji, nie tylko po /zf rel.
+        const auto flush_reputations = [&commands, &engine]() {
+            for (const zf::ReputationOut& rep : engine.take_reputations()) {
+                commands.write_reputation_sync(rep.faction, rep.other, rep.value, rep.vanilla);
+                std::cout << "[brain] reputation_sync [" << rep.faction
+                          << (rep.other.empty() ? "->gracz" : "->" + rep.other) << "] "
+                          << rep.value << " => " << rep.vanilla << " (skala gry)\n";
+            }
+        };
+
         // Zlecenia kontraktów (Etap 6) — osobny kanał, tak jak spawny.
         const auto flush_contracts = [&commands, &engine]() {
             for (const zf::ContractOut& c : engine.take_contracts()) {
@@ -350,6 +367,7 @@ int main(int argc, char** argv) {
             send_all(engine.tick(cfg, now));
             flush_spawns();   // spawny z on_event (w tym /zf raid) i z ticka
             flush_contracts(); // zlecenia z ticka i z /zf kontrakt
+            flush_reputations(); // zmiany relacji -> natywna reputacja w grze
 
             // Gotowe wypowiedzi z wątku LLM (albo fallbacki po nieudanej generacji).
             for (const zf::LlmResult& res : llm.poll_results()) {
