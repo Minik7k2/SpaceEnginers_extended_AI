@@ -330,6 +330,31 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
 - [ ] **L5. Radio się nie zapętla:** dłuższy targ na czacie (kilka wiadomości pod rząd) →
   frakcja nie powtarza w kółko tego samego zdania (kara za powtórzenia w samplerze).
 
+## M. Reputacja natywna — hybryda (2026-07-29) — DO WERYFIKACJI
+
+Cel: to, co liczy brain, ma być widoczne w ZWYKŁYM oknie frakcji (F1 → Frakcje /
+terminal → Frakcje), a nie tylko w `/zf rel`. Nowa komenda: `/zf rep` pokazuje
+wartość, którą gra ma naprawdę, i cel przysłany przez brain (przy rozjeździe krzyczy
+`ROZJAZD`). Świat testowy musi być NOWY (frakcje `IsDefault` powstają przy generowaniu).
+
+- [ ] **M1. Start świata:** wejdź do świata z działającym brainem → konsola braina
+  wypisuje `reputation_sync [HEL->gracz] …`, `[KRW->gracz] …`, `[WGR->gracz] …` oraz
+  pary polityki. `/zf rep` pokazuje 6 linii bez słowa `ROZJAZD`.
+- [ ] **M2. Zgodność z oknem frakcji:** otwórz listę frakcji w grze → HEL/WGR neutralni,
+  KRW wrogo (polityka HEL/KRW -70 i KRW/WGR -50 są przepisane na skalę gry).
+- [ ] **M3. Strzelanina zmienia liczbę w grze:** ostrzelaj statek HEL do relacji poniżej
+  -30 (`/zf rel`) → w oknie frakcji HEL robi się WRÓG, `/zf rep` pokazuje ≤ -500.
+  To jest sedno zmiany: wcześniej brain ogłaszał wojnę, a gra dalej miała neutralność.
+- [ ] **M4. Powrót:** wykonaj kontrakt tej frakcji (albo `/zf event` z `contract_done`)
+  → relacja rośnie, reputacja w grze rośnie razem z nią.
+- [ ] **M5. Brak podwójnego liczenia:** po nagrodzie reputacyjnej z kontraktu vanilla
+  `/zf rep` w ciągu ~5 s wraca do wartości z brainu (mod przywraca cel). Krótki
+  `ROZJAZD` zaraz po rozliczeniu kontraktu jest OK, utrzymujący się — nie.
+- [ ] **M6. Wyłącznik:** `sync = false` w `[reputacja]` (hot-reload) → brain przestaje
+  wysyłać, gra zostaje na ostatniej wartości; po `sync = true` leci pełny resync.
+- [ ] **M7. Nic nie psuje ekonomii:** reputacja frakcji vanilla (RTSL/UNIV itd.) w oknie
+  frakcji nie zmienia się przez nasz mod — synchronizujemy tylko HEL/KRW/WGR.
+
 ## Znane zachowania (to nie błędy)
 
 - Po pierwszym starcie braina mogą przyjść zaległe echa wiadomości z

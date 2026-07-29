@@ -59,6 +59,19 @@ ttl_sekund = 120
 # clear <=6 km, weak/szum <=15 km, dalej = brak zasięgu). false = rozmowa zewsząd (test).
 wymagaj_zasiegu = true
 
+[reputacja]
+# HYBRYDA: nasz silnik relacji (-100..+100) zostaje źródłem prawdy, ale jego wynik
+# jest RZUTOWANY na natywną reputację SE (-1500..+1500). Dzięki temu gracz widzi stan
+# relacji w zwykłym oknie frakcji (F1 -> Frakcje), a wieżyczki, ceny w sklepach i
+# strefy stacji reagują na nasze wojny i sojusze. Bez tego były dwie liczby naraz:
+# nasza (żywa) i vanillowa (martwa albo ruszana przez nagrody kontraktowe) — rozjazd.
+# Odwzorowanie jest odcinkowo-liniowe i celuje w progi vanilli: nasze prog_wrogi (-30)
+# ląduje na -500 (wróg w grze), a prog_sojusznik (+40) na +500 (sojusznik w grze).
+sync = true
+zakres = 1500     # |reputacja| w vanilli odpowiadająca naszemu ±100
+prog = 500        # próg wroga/sojusznika w vanilli (dokumentacja SE: ±500)
+polityka = true   # synchronizuj też relacje frakcja↔frakcja (SetReputation)
+
 [kontrakty]
 # Etap 6: frakcja sama wystawia zlecenia na swojej stacji (mod tworzy je przez
 # MyAPIGateway.ContractSystem). To główna droga ODKUPIENIA — dryf leczy 1 pkt / 2 h,

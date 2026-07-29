@@ -30,6 +30,7 @@ namespace ZyweFrakcje
         private RansomManager _ransom;
         private TradeWatcher _trade;
         private ContractManager _contracts;
+        private ReputationSync _reputation;
         private int _tick;
 
         public override void LoadData()
@@ -40,6 +41,8 @@ namespace ZyweFrakcje
             _mes = new MESApi(); // rejestruje handler; MESApiReady dopiero gdy MES odeśle API
             TestSpawner.SetMes(_mes);
             _ransom = new RansomManager(_events); // B+ okup w surowcach: skrzynka zrzutu + detekcja
+            // Hybryda reputacji: brain liczy, gra pokazuje (okno frakcji, wieżyczki, ceny).
+            _reputation = new ReputationSync();
             MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
         }
 
@@ -119,6 +122,12 @@ namespace ZyweFrakcje
             {
                 _ransom.Update(_tick); // B+ okup: skan skrzynek zrzutu + egzekwowanie deadline'ów
             }
+            if (_reputation != null)
+            {
+                // Pilnuje, żeby natywna reputacja trzymała się wartości z brainu (gra
+                // potrafi ruszyć ją sama, np. nagrodą za kontrakt).
+                _reputation.Update(_tick);
+            }
         }
 
         private void WriteSessionStart()
@@ -180,6 +189,17 @@ namespace ZyweFrakcje
             {
                 sendToOthers = false;
                 _events.WriteDebugCommand("tick");
+                return;
+            }
+
+            if (messageText.Trim().Equals("/zf rep", StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                // Kontrola hybrydy: co brain chce mieć w oknie frakcji vs co gra ma naprawdę.
+                if (_reputation != null)
+                {
+                    _reputation.Report();
+                }
                 return;
             }
 
@@ -281,7 +301,7 @@ namespace ZyweFrakcje
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja>, /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja>, /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -361,6 +381,10 @@ namespace ZyweFrakcje
                 {
                     HandleContractCreate(msg);
                 }
+                else if (type == "reputation_sync")
+                {
+                    HandleReputationSync(msg);
+                }
                 // price_update: Etap 6 dalszy ciąg.
             }
         }
@@ -435,6 +459,21 @@ namespace ZyweFrakcje
             }
 
             _contracts.Create(faction, kind, reward, durationMin);
+        }
+
+        /// <summary>
+        /// Hybryda reputacji: brain przysyła swoją relację przepisaną na skalę gry, mod
+        /// zapisuje ją przez MyAPIGateway.Session.Factions (patrz Reputation.cs).
+        /// </summary>
+        private void HandleReputationSync(Dictionary<string, object> msg)
+        {
+            if (_reputation == null)
+            {
+                return;
+            }
+            object dataObj;
+            msg.TryGetValue("data", out dataObj);
+            _reputation.Handle(dataObj as Dictionary<string, object>);
         }
 
         private void HandleStandDown(Dictionary<string, object> msg)

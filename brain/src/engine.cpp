@@ -113,6 +113,45 @@ std::string faction_color(const std::string& tag) {
     return "white";
 }
 
+namespace {
+
+// Liniowa interpolacja między dwoma węzłami odwzorowania relacja->reputacja.
+double map_segment(double v, double x0, double x1, double y0, double y1) {
+    if (x1 == x0) {
+        return y1;
+    }
+    return y0 + (v - x0) / (x1 - x0) * (y1 - y0);
+}
+
+} // namespace
+
+int vanilla_reputation(double value, const Config& cfg) {
+    const double zakres = std::max(1, cfg.reputacja_zakres);
+    // Próg musi zostawić miejsce na odcinek wroga/sojusznika, inaczej całe pasmo
+    // -100..prog_wrogi zeszłoby do jednej liczby.
+    const double prog = std::clamp(static_cast<double>(cfg.reputacja_prog), 1.0, zakres - 1.0);
+    // Nasze progi z [relacje] są hot-reloadowane, więc bierzemy je z configu, ale
+    // pilnujemy sensownego znaku (dodatni prog_wrogi wywróciłby odwzorowanie).
+    const double wrogi = std::min(cfg.prog_wrogi, -1.0);
+    const double sojusz = std::max(cfg.prog_sojusznik, 1.0);
+    const double v = std::clamp(value, -100.0, 100.0);
+
+    double out;
+    if (v <= wrogi) {
+        // Węzeł na progu to -(prog+1), a nie -prog: dokładnie na naszym progu wrogości
+        // gracz ma być w grze WROGIEM, a nie stać jedną nogą w neutralności.
+        out = map_segment(v, -100.0, wrogi, -zakres, -(prog + 1.0));
+    } else if (v < 0) {
+        out = map_segment(v, wrogi, 0.0, -prog, 0.0);
+    } else if (v < sojusz) {
+        out = map_segment(v, 0.0, sojusz, 0.0, prog);
+    } else {
+        out = map_segment(v, sojusz, 100.0, prog + 1.0, zakres);
+    }
+    const double clamped = std::clamp(out, -zakres, zakres);
+    return static_cast<int>(std::llround(clamped));
+}
+
 Engine::Engine(Db& db, Fallback& fallback, std::uint32_t rng_seed)
     : db_(db), fallback_(fallback), rng_(rng_seed) {
     // Nasze frakcje istnieją od startu; obce tagi (np. SPRT z vanilla/MES)
@@ -332,6 +371,9 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
     } else if (ev.type == "ransom_expired") {
         handle_ransom_expired(ev, cfg, now_ms, out);
     }
+    // Świeżo wczytany świat ma reputację z zapisu (albo z DefaultRelation w SBC), a nie
+    // z naszej bazy — po session_start przepisujemy WSZYSTKO, bez czekania na zmianę.
+    sync_reputations(cfg, /*force=*/ev.type == "session_start");
     return out;
 }
 
@@ -339,6 +381,57 @@ std::vector<ContractOut> Engine::take_contracts() {
     std::vector<ContractOut> taken;
     taken.swap(pending_contracts_);
     return taken;
+}
+
+std::vector<ReputationOut> Engine::take_reputations() {
+    std::vector<ReputationOut> taken;
+    taken.swap(pending_reputations_);
+    return taken;
+}
+
+void Engine::sync_reputations(const Config& cfg, bool force) {
+    if (!cfg.reputacja_sync) {
+        reputacja_byla_wlaczona_ = false;
+        return;
+    }
+    if (!reputacja_byla_wlaczona_) {
+        force = true; // włączone dopiero co (hot-reload) — mod nie zna jeszcze żadnej wartości
+        reputacja_byla_wlaczona_ = true;
+    }
+
+    // Kolejka wychodząca tylko dla NASZYCH frakcji. Reputacja frakcji vanilla/MES
+    // (RTSL, SPRT, ...) należy do gry — nadpisywanie jej naszymi liczbami psułoby
+    // ekonomię, której nie prowadzimy.
+    const auto push = [&](const std::string& a, const std::string& b, double value) {
+        const int vanilla = vanilla_reputation(value, cfg);
+        const std::string key = b.empty() ? a : a + "|" + b;
+        const auto it = last_vanilla_.find(key);
+        if (!force && it != last_vanilla_.end() && it->second == vanilla) {
+            return;
+        }
+        last_vanilla_[key] = vanilla;
+        pending_reputations_.push_back({a, b, value, vanilla});
+    };
+
+    std::vector<std::string> own;
+    for (const FactionRow& row : db_.list_factions()) {
+        if (is_own_faction(row.tag)) {
+            own.push_back(row.tag);
+        }
+    }
+    for (const std::string& tag : own) {
+        push(tag, {}, db_.get_relation(tag, kPlayer).value);
+    }
+    if (!cfg.reputacja_polityka) {
+        return;
+    }
+    // Polityka frakcja↔frakcja: w grze reputacja pary jest symetryczna (SetReputation
+    // ustawia ją w obie strony), więc wysyłamy każdą parę raz.
+    for (std::size_t i = 0; i < own.size(); ++i) {
+        for (std::size_t j = i + 1; j < own.size(); ++j) {
+            push(own[i], own[j], db_.get_relation(own[i], own[j]).value);
+        }
+    }
 }
 
 void Engine::handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -980,6 +1073,10 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
             }
         }
     }
+
+    // Dryf zmienia relacje bez żadnego zdarzenia z gry — bez tego okno frakcji
+    // zamarłoby na wartości z ostatniej strzelaniny.
+    sync_reputations(cfg, /*force=*/false);
 
     return out;
 }

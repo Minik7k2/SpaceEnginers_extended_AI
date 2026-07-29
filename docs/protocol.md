@@ -27,8 +27,23 @@ radio_message   {"faction":"KRW","text":"...","color":"red","priority":1}   [RAD
 spawn_request   {"faction":"KRW","kind":"patrol"|"raid"|"convoy","near_player":true,"context":"incydent#123"}
 stand_down      {"faction":"KRW","ransom":4000}   frakcja odpuściła — statki rajdu odlatują; ransom>0 = mod pobiera tyle kredytów gracz→frakcja (Etap 6)
 ransom_demand   {"faction":"KRW","item":"Iron","amount":500,"deadline_s":900}   B+ frakcja żąda trybutu: mod stawia skrzynkę zrzutu (owner=0, GPS), wstrzymuje ogień, pilnuje deadline; dostawa→ransom_paid, brak→ransom_expired
+reputation_sync {"faction":"KRW","other":"","value":-72.0,"vanilla":-1050}   HYBRYDA: nasza relacja przepisana na natywną reputację SE. other="" = relacja frakcja→gracz (SetReputationBetweenPlayerAndFaction), other="WGR" = polityka frakcja↔frakcja (SetReputation, symetryczna). Do zapisu służy `vanilla`; `value` (nasza skala) jest tylko do logów/`/zf rep`
 price_update    {"faction":"HEL","modifier":1.5}                            Etap 6 (jeszcze nieobsługiwane)
 contract_create {"faction":"WGR","kind":"dostawa","reward":50000,"duration_min":45}  mod stawia kontrakt na bloku frakcji i odsyła contract_created
+
+## Reputacja — kto tu rządzi
+
+- Źródłem prawdy jest silnik relacji brainu (-100..+100, sufity, histereza, pamięć).
+  Natywna reputacja SE (-1500..+1500) jest tylko JEGO RZUTEM: brain liczy, mod zapisuje.
+- Odwzorowanie jest odcinkowo-liniowe i celuje w progi gry (±500): nasz `prog_wrogi`
+  ląduje tuż poniżej -500 (w grze „wróg"), `prog_sojusznik` tuż powyżej +500
+  („sojusznik"), 0 → 0, ±100 → ±1500. Wartości w `[reputacja]` w rules.toml.
+- Kierunek jest jednostronny. Mod co ~5 s sprawdza, czy gra nie zmieniła reputacji po
+  swojemu (nagrody z kontraktów vanilla) i przywraca wartość z brainu — inaczej to samo
+  zdarzenie liczyłoby się dwa razy, a obie liczby znowu by się rozjechały.
+- Synchronizowane są WYŁĄCZNIE nasze frakcje (HEL/KRW/WGR). Reputacja frakcji vanilla/MES
+  (RTSL, SPRT...) należy do gry.
+- Po `session_start` brain wysyła komplet wartości (mod nie utrwala ich między sesjami).
 
 ## Ekonomia — czego mostek NIE gwarantuje
 

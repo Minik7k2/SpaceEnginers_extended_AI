@@ -74,6 +74,15 @@ struct Config {
     double okup_bonus_dostawa = 20;   // relacja += po dostarczeniu (jak wykonany kontrakt)
     double okup_kara_zlamanie = 5;    // relacja -= za złamaną obietnicę (główna kara: trwała nieufność)
 
+    // [reputacja] — rzutowanie naszej relacji (-100..+100) na NATYWNĄ reputację SE
+    // (-1500..+1500). Silnik relacji zostaje źródłem prawdy; mod tylko zapisuje wynik
+    // przez SetReputationBetweenPlayerAndFaction, żeby gracz widział tę samą liczbę
+    // w oknie frakcji, a wieżyczki/ceny/strefy reagowały na nasze wojny i sojusze.
+    bool reputacja_sync = true;
+    int reputacja_zakres = 1500;     // |reputacja| w vanilli przy naszym ±100
+    int reputacja_prog = 500;        // vanilla: ≤ -500 wróg, ≥ +500 sojusznik
+    bool reputacja_polityka = true;  // synchronizuj też relacje frakcja↔frakcja (SetReputation)
+
     // [kontrakty] — Etap 6: frakcja sama wystawia zlecenia (mod tworzy je przez
     // MyAPIGateway.ContractSystem). To jedyna realna droga ODKUPIENIA: dryf leczy
     // 1 pkt / 2 h, a wykonany kontrakt daje +kontrakt_max od ręki.

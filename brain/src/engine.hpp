@@ -50,6 +50,18 @@ struct RansomDemandOut {
     int deadline_s = 0;
 };
 
+// Rzutowanie relacji na NATYWNĄ reputację SE (hybryda). Silnik zostaje źródłem prawdy
+// (bo tylko on ma sufity relacji, histerezę i pamięć), a mod zapisuje `vanilla` przez
+// MyAPIGateway.Session.Factions — gracz widzi jedną liczbę w oknie frakcji, a wieżyczki
+// i ceny reagują na nasze wojny. other pusty = relacja frakcja→gracz; niepusty = tag
+// drugiej frakcji (polityka frakcja↔frakcja).
+struct ReputationOut {
+    std::string faction;
+    std::string other;
+    double value = 0;   // nasza skala -100..+100 (log/diagnostyka)
+    int vanilla = 0;    // skala gry, -zakres..+zakres
+};
+
 // Zlecenie wystawienia kontraktu (Etap 6). Silnik decyduje KIEDY i ZA ILE, mod
 // tworzy kontrakt przez MyAPIGateway.ContractSystem na bloku swojej frakcji i
 // odsyła contract_created z prawdziwym ID (dopiero wtedy trafia do SQLite).
@@ -88,6 +100,9 @@ public:
 
     // Zlecenia kontraktów nazbierane w ticku — analogicznie do take_spawns().
     std::vector<ContractOut> take_contracts();
+
+    // Zmiany reputacji do przepisania na stronę gry — analogicznie do take_spawns().
+    std::vector<ReputationOut> take_reputations();
 
     // Reakcja na decyzję LLM o odpuszczeniu (okup/kapitulacja/rozejm), wołana z main
     // po odebraniu wyniku z wątku LLM. Samobramkuje się: jeśli frakcja nie ma
@@ -135,6 +150,12 @@ private:
     };
     std::map<std::string, PendingRansom> pending_ransoms_;
     std::vector<RansomDemandOut> pending_ransom_demands_; // do wysłania jako ransom_demand
+    // Ostatnio wysłane do gry wartości reputacji ("HEL" / "HEL|KRW" -> wartość vanilli).
+    // W pamięci: przy starcie świata mod i tak dostaje pełny resync (session_start), a
+    // wysłanie tej samej liczby drugi raz nic nie psuje.
+    std::map<std::string, int> last_vanilla_;
+    std::vector<ReputationOut> pending_reputations_;
+    bool reputacja_byla_wlaczona_ = false; // hot-reload: włączenie synchronizacji = pełny resync
     // Cooldown bonusu "wróg mojego wroga": (obserwator, ostrzelany) -> ostatnia wypłata.
     // W pamięci jak cooldown radia — chodzi o minuty, restart brainu niczego nie psuje.
     std::map<std::pair<std::string, std::string>, std::int64_t> enemy_bonus_at_;
@@ -174,6 +195,10 @@ private:
     // (komenda /zf raid) omija cooldown i globalny włącznik spawn_wlaczone.
     void request_spawn(const std::string& faction, const std::string& kind, const Config& cfg,
                        std::int64_t now_ms, std::string context, bool force = false);
+    // Po każdej obsłudze zdarzenia i po ticku: przelicz relacje naszych frakcji na skalę
+    // gry i wystaw do wysyłki te, które się zmieniły. force = wyślij wszystko (start
+    // sesji, włączenie synchronizacji configiem) — wtedy mod nie zgaduje, co przegapił.
+    void sync_reputations(const Config& cfg, bool force);
 
     void handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t now_ms,
                            std::vector<RadioOut>& out);
@@ -209,5 +234,11 @@ private:
 
 // Kolor czatu frakcji (CLAUDE.md): HEL niebieski, KRW czerwony, WGR żółty.
 std::string faction_color(const std::string& tag);
+
+// Nasza relacja (-100..+100) -> natywna reputacja SE (-zakres..+zakres). Odcinkowo
+// liniowa, z węzłami w progach: prog_wrogi -> tuż poniżej -prog (w grze „wróg"),
+// prog_sojusznik -> tuż powyżej +prog („sojusznik"), 0 -> 0, ±100 -> ±zakres.
+// Dzięki temu etykieta w oknie frakcji zgadza się z tym, co mówi /zf rel.
+int vanilla_reputation(double value, const Config& cfg);
 
 } // namespace zf
