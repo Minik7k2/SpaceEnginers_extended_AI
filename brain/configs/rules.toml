@@ -10,7 +10,12 @@ max_chars = 200
 # poza gitem). Wartości z rules.local.toml nadpisują te z rules.toml.
 storage_dir = ""
 poll_ms = 500
-db_path = "state/zf_state.sqlite3"   # ścieżka do bazy brain (offsety, relacje)
+db_path = "state/zf_state.sqlite3"   # wzorzec nazwy bazy brain (offsety, relacje)
+# Stan należy do KONKRETNEGO zapisu, więc z db_path robimy nazwę per świat:
+# state/zf_state_<świat>_<hash storage>.sqlite3. Bez tego nowy świat dziedziczył
+# relacje po poprzednim, a hybryda reputacji wpisywała je od razu do okna frakcji.
+# false = jedna wspólna baza (zachowanie sprzed 2026-07-29).
+db_per_swiat = true
 rotate_bytes = 5242880               # 5 MB, próg rotacji plików JSONL
 
 [relacje]
@@ -165,7 +170,7 @@ wlasne = 1.1
 # w wojnę -> raid, losowe zdarzenie ticka -> convoy/patrol/raid wg stanu.
 # wlaczone=false wyłącza auto-spawny (komenda /zf raid <frakcja> działa mimo to).
 # cooldown_min: minimalny odstęp między auto-spawnami TEJ SAMEJ frakcji (anty-spam).
-wlaczone = true
+wlaczone = false
 cooldown_min = 10
 
 [okup_surowce]

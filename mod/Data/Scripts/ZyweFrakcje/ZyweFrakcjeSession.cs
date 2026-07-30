@@ -210,6 +210,16 @@ namespace ZyweFrakcje
                 return;
             }
 
+            if (messageText.Trim().Equals("/zf kontrakty", StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                // Diag „zlecenie powstało, ale go nie widać": pytamy grę, jakie kontrakty
+                // wisi na naszym bloku i na stacjach frakcji — to rozstrzyga, czy problem
+                // jest po stronie tworzenia, czy tylko wyświetlania w terminalu.
+                _contracts.Report();
+                return;
+            }
+
             // Oddanie siatki frakcji NPC — bez tego nie ma gdzie wystawić kontraktu (Etap 6).
             const string stacjaPrefix = "/zf stacja";
             if (messageText.StartsWith(stacjaPrefix, StringComparison.OrdinalIgnoreCase))
@@ -251,6 +261,48 @@ namespace ZyweFrakcje
                 {
                     // Wymuszone żądanie trybutu bez LLM: brain dobiera towar/ilość i wysyła ransom_demand.
                     _events.WriteDebugOkupSurowce(tag);
+                }
+                return;
+            }
+
+            // Dosypanie kasy graczowi — potrzebne, by sprawdzić, czy sufit nagrody kontraktu
+            // idzie za saldem gracza (test: zmierz próg, dosyp, zmierz próg jeszcze raz).
+            const string kasaPrefix = "/zf kasa";
+            if (messageText.StartsWith(kasaPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                long kwota;
+                string arg = messageText.Substring(kasaPrefix.Length).Trim();
+                IMyPlayer player = MyAPIGateway.Session.Player;
+                if (!long.TryParse(arg, out kwota) || player == null)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf kasa <ile> (np. /zf kasa 10000000)");
+                }
+                else
+                {
+                    long przed;
+                    player.TryGetBalanceInfo(out przed);
+                    player.RequestChangeBalance(kwota);
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "zlecono zmianę salda o " + kwota + " kr (przed: " + przed + ") — księgowanie może zająć chwilę");
+                }
+                return;
+            }
+
+            // UWAGA: musi być sprawdzone PRZED "/zf kontrakt", bo tamten prefiks połknąłby
+            // "-test" jako nazwę frakcji.
+            const string kontraktTestPrefix = "/zf kontrakt-test";
+            if (messageText.StartsWith(kontraktTestPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                string tag = messageText.Substring(kontraktTestPrefix.Length).Trim().ToUpperInvariant();
+                if (tag.Length == 0)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf kontrakt-test <frakcja>");
+                }
+                else
+                {
+                    _contracts.SelfTest(tag);
                 }
                 return;
             }
@@ -611,7 +663,8 @@ namespace ZyweFrakcje
                     : " | BRAK bloku kontraktów/sklepu — zlecenia nie powstaną";
 
                 MyAPIGateway.Utilities.ShowMessage("ZF",
-                    tags[i] + ": stacji=" + count + (count > 0 ? " [" + ids + "]" : "") + blok);
+                    tags[i] + ": kasa=" + FactionFunds.Balance(faction) + " kr, stacji=" + count +
+                    (count > 0 ? " [" + ids + "]" : "") + blok);
             }
         }
 

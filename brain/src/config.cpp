@@ -52,6 +52,7 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.storage_dir = (*bridge)["storage_dir"].value_or(cfg.storage_dir);
         cfg.poll_ms = (*bridge)["poll_ms"].value_or(cfg.poll_ms);
         cfg.db_path = (*bridge)["db_path"].value_or(cfg.db_path);
+        cfg.db_per_swiat = (*bridge)["db_per_swiat"].value_or(cfg.db_per_swiat);
         cfg.rotate_bytes = (*bridge)["rotate_bytes"].value_or(cfg.rotate_bytes);
     }
 
@@ -223,6 +224,63 @@ std::string detect_storage_dir() {
     return best.empty() ? std::string{} : best.generic_string();
 }
 
+// Skrót pełnej ścieżki storage. Sama nazwa świata nie wystarczy jako klucz: dwa
+// zapisy o tej samej nazwie (drugi profil Steam, kopia zapasowa świata) dzieliłyby
+// jedną bazę — czyli dokładnie ten błąd, który tu naprawiamy.
+std::string short_hash(const std::string& text) {
+    std::uint64_t h = 1469598103934665603ULL; // FNV-1a 64
+    for (const unsigned char c : text) {
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
+    const auto folded = static_cast<std::uint32_t>(h ^ (h >> 32));
+    std::string out(8, '0');
+    for (int i = 7; i >= 0; --i) {
+        out[static_cast<std::size_t>(i)] = "0123456789abcdef"[(folded >> ((7 - i) * 4)) & 0xFu];
+    }
+    return out;
+}
+
+// Nazwa świata ze ścieżki storage: Saves/<steamid>/<ŚWIAT>/Storage/<mod>. Przy innym
+// układzie (ręczna ścieżka, testy) bierzemy ostatni człon — chodzi tylko o to, żeby
+// człowiek poznał plik po nazwie; unikalność zapewnia hash.
+std::string world_slug(const std::string& storage_dir) {
+    namespace fs = std::filesystem;
+    fs::path p(storage_dir);
+    if (p.filename().empty()) {
+        p = p.parent_path(); // ścieżka z końcowym separatorem
+    }
+    fs::path candidate = p;
+    if (p.has_parent_path() && p.parent_path().filename() == "Storage") {
+        candidate = p.parent_path().parent_path();
+    }
+
+    std::string name = candidate.filename().string();
+    std::string slug;
+    for (const char c : name) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                        c == '-' || c == '_';
+        slug.push_back(ok ? c : '_');
+        if (slug.size() >= 40) {
+            break;
+        }
+    }
+    while (!slug.empty() && slug.back() == '_') {
+        slug.pop_back();
+    }
+    return slug.empty() ? std::string("swiat") : slug;
+}
+
+// "state/zf_state.sqlite3" + storage świata -> "state/zf_state_<świat>_<hash>.sqlite3".
+// Klucz bierzemy ze ścieżki storage, a nie z nazwy świata w session_start, bo bazę
+// trzeba otworzyć zanim przyjdzie pierwsze zdarzenie.
+std::string per_world_db_path(const std::string& db_path, const std::string& storage_dir) {
+    std::filesystem::path p(db_path);
+    const std::string ext = p.extension().string();
+    p.replace_extension();
+    return p.generic_string() + "_" + world_slug(storage_dir) + "_" + short_hash(storage_dir) + ext;
+}
+
 toml::table parse_or_throw(const std::string& path) {
     try {
         return toml::parse_file(path);
@@ -275,6 +333,11 @@ Config load_config(const std::string& path) {
                                  "ani automatycznie w zapisach Space Engineers. Wczytaj raz świat z modem "
                                  "(wtedy powstaje events.jsonl) albo wpisz ścieżkę ręcznie w " + local_path +
                                  " w sekcji [bridge]");
+    }
+
+    cfg.db_path_wspolna = cfg.db_path;
+    if (cfg.db_per_swiat) {
+        cfg.db_path = per_world_db_path(cfg.db_path, cfg.storage_dir);
     }
 
     return cfg;

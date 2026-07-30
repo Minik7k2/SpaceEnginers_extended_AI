@@ -134,7 +134,40 @@ int main() {
         assert(threw && "nieznany typ kontraktu ma wywalić config");
     }
 
-    // 5. Brak jakiegokolwiek storage (pusty korzeń poszukiwań) => czytelny błąd, nie cisza.
+    // 5. Baza per świat: z db_path robi się nazwa związana z konkretnym zapisem.
+    //    Regresja 2026-07-29: jedna wspólna baza wlewała relacje starego świata do
+    //    nowo założonego (i przez hybrydę reputacji — prosto do okna frakcji w grze).
+    write_file(cfg_path, "[bridge]\nstorage_dir = \"\"\ndb_path = \"state/zf_state.sqlite3\"\n");
+    {
+        const zf::Config nowy_cfg = zf::load_config(cfg_path.string());
+        assert(nowy_cfg.db_path != "state/zf_state.sqlite3" && "baza ma być per świat, nie wspólna");
+        assert(nowy_cfg.db_path.find("Nowy_Swiat") != std::string::npos &&
+               "nazwa pliku ma nieść nazwę świata (spacja -> _)");
+        assert(nowy_cfg.db_path.rfind("state/zf_state_", 0) == 0 &&
+               nowy_cfg.db_path.size() > std::string("state/zf_state_").size() + 8 &&
+               "wzorzec: <db_path bez rozszerzenia>_<świat>_<hash>.sqlite3");
+        assert(nowy_cfg.db_path.substr(nowy_cfg.db_path.size() - 8) == ".sqlite3" &&
+               "rozszerzenie ma zostać na końcu");
+        assert(nowy_cfg.db_path_wspolna == "state/zf_state.sqlite3" &&
+               "surowa wartość z configu zostaje do komunikatu o starej bazie");
+
+        // Ten sam świat => ta sama baza (inaczej stan gubiłby się co restart).
+        assert(zf::load_config(cfg_path.string()).db_path == nowy_cfg.db_path);
+
+        // Inny świat => inna baza. Podbijamy mtime „Starego Swiata", żeby wykrywanie
+        // wskazało teraz jego storage.
+        fs::last_write_time(stary, fs::file_time_type::clock::now() + std::chrono::hours(1), ec);
+        const zf::Config stary_cfg = zf::load_config(cfg_path.string());
+        assert(stary_cfg.storage_dir == stary.parent_path().generic_string());
+        assert(stary_cfg.db_path != nowy_cfg.db_path && "każdy świat ma własną bazę");
+
+        // Wyłącznik zostawia zachowanie sprzed poprawki.
+        write_file(cfg_path, "[bridge]\nstorage_dir = \"\"\ndb_per_swiat = false\n");
+        assert(zf::load_config(cfg_path.string()).db_path == "state/zf_state.sqlite3" &&
+               "db_per_swiat = false => jedna wspólna baza");
+    }
+
+    // 6. Brak jakiegokolwiek storage (pusty korzeń poszukiwań) => czytelny błąd, nie cisza.
 #ifdef _WIN32
     _putenv_s("ZF_SAVES_DIR", (tmp / "pusto").string().c_str());
 #else

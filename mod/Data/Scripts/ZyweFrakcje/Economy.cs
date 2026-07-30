@@ -328,6 +328,24 @@ namespace ZyweFrakcje
     }
 
     /// <summary>
+    /// Kasa frakcji NPC — już tylko do podglądu (`/zf stations`).
+    /// UWAGA na pułapkę, która kosztowała nas pół sesji testów: konto FRAKCJI
+    /// (<c>MyBankingSystem</c> pod <c>FactionId</c>, czyli to, co czyta
+    /// <c>IMyFaction.TryGetBalanceInfo</c>) to NIE jest konto, z którego gra opłaca kontrakty.
+    /// Kontrakt sprawdza i obciąża konto WŁAŚCICIELA BLOKU (<c>startBlock.OwnerId</c> —
+    /// tożsamość założyciela). Dosypywanie tutaj nie odblokuje zleceń; robi to
+    /// <see cref="ContractManager.Create"/> tuż przed <c>AddContract</c>.
+    /// </summary>
+    internal static class FactionFunds
+    {
+        public static long Balance(IMyFaction faction)
+        {
+            long balance;
+            return faction != null && faction.TryGetBalanceInfo(out balance) ? balance : -1;
+        }
+    }
+
+    /// <summary>
     /// Wykrywanie handlu gracza z frakcją (Etap 6). ModAPI NIE daje zdarzenia transakcji
     /// (IMyStoreBlock ma tylko Insert/Cancel/GetPlayerStoreItems), więc jedziemy heurystyką:
     /// zmiana salda gracza + sklep frakcji NPC w promieniu 300 m = handel z tą frakcją.

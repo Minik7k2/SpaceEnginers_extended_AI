@@ -19,6 +19,12 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
   Gdy `storage_dir` jest puste albo wskazuje nieistniejący katalog, brain sam
   znajduje storage: szuka najświeższego `events.jsonl` w zapisach SE
   (`%APPDATA%/SpaceEngineers/Saves`, korzeń nadpisywalny przez `ZF_SAVES_DIR`).
+  Baza stanu jest PER ŚWIAT: z `[bridge].db_path` powstaje
+  `state/zf_state_<świat>_<hash storage>.sqlite3` (wyłącznik: `db_per_swiat = false`).
+  Wspólna baza sprawiała, że nowy zapis dziedziczył relacje po poprzednim, a hybryda
+  reputacji wpisywała je od razu do okna frakcji. Kluczem jest ścieżka storage, nie
+  nazwa świata z `session_start` — bazę trzeba otworzyć przed pierwszym zdarzeniem.
+  Starej wspólnej bazy NIE migrujemy automatycznie (to właśnie było źródłem błędu).
 - **Most:** pliki JSONL w storage moda (append-only).
   - `events.jsonl` — mod pisze, brain czyta.
   - `commands.jsonl` — brain pisze, mod czyta co ~60 tików.
@@ -156,6 +162,16 @@ docs/protocol.md                # spec mostka JSONL
   i `eskorta` (typ usunięty z gry w 2026) — kod kompletny, wystarczy wpisać wagę.
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
   nie ma zdarzenia transakcji. Zostało: `price_update` i własne stacje frakcji.
+  **Kontrakt opłaca WŁAŚCICIEL BLOKU** (ustalone 2026-07-29 dekompilacją `Sandbox.Game.dll`):
+  `GenerateCustomContract` sprawdza `MyBankingSystem.GetBalance(startBlock.OwnerId)` i przy
+  tworzeniu ŚCIĄGA z niego nagrodę. To konto tożsamości założyciela, a NIE konto frakcji
+  (`IMyFaction.RequestChangeBalance` idzie pod `FactionId` i nic nie daje). Mod dosypuje
+  właścicielowi bloku dokładnie obiecaną kwotę tuż przed `AddContract`. Tamże: `Duration`
+  jest w MINUTACH, nie sekundach. Diagnostyka: `/zf stations`, `/zf kontrakty`,
+  `/zf kontrakt-test <frakcja>`.
+  **Metoda:** gdy ModAPI odmawia bez powodu, dekompiluj zamiast bisekcji —
+  `dotnet tool install -g ilspycmd --version 8.2.0.7535`, potem
+  `DOTNET_ROLL_FORWARD=LatestMajor ilspycmd -t <TypPelnaNazwa> <dll>` na `Bin64`.
 - **Etap 7 — polish:** Kult, LCD na stacjach, emisariusze (AiEnabled API),
   własne flagowce, A/B Bielik. Dalej: QLoRA fine-tune radia, RL zachowań.
 

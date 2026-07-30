@@ -11,7 +11,17 @@ struct Config {
     // [bridge]
     std::string storage_dir;
     int poll_ms = 500;
+    // Efektywna ścieżka bazy. Przy db_per_swiat (domyślnie) NIE jest to surowa
+    // wartość z configu, tylko wyprowadzona z niej nazwa per świat — patrz niżej.
     std::string db_path = "state/zf_state.sqlite3";
+    // Stan (relacje, pamięć frakcji, kontrakty, sufity) należy do KONKRETNEGO zapisu.
+    // Jedna wspólna baza oznaczała, że nowo założony świat dziedziczył wojny po
+    // poprzednim, a hybryda reputacji od razu wpisywała je do okna frakcji w grze.
+    // false = zachowanie sprzed poprawki (jedna baza na wszystkie światy).
+    bool db_per_swiat = true;
+    // Surowa wartość [bridge].db_path z configu — trzymana tylko po to, by przy
+    // pierwszym starcie w nowym świecie powiedzieć, gdzie leży stara wspólna baza.
+    std::string db_path_wspolna = "state/zf_state.sqlite3";
     std::uint64_t rotate_bytes = 5 * 1024 * 1024;
 
     // [llm] — nieużywane przed Etapem 4, wczytywane już teraz bo config jest hot-reloadowany całościowo.

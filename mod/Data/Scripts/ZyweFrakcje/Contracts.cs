@@ -139,9 +139,47 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Gra na odmowę zwraca samo Success=false — MyAddContractResultWrapper ma tylko
+            // { Success, ContractId, ContractConditionId }, żadnego powodu. Dwa warunki, które
+            // wywracają AddContract najczęściej, sprawdzamy więc sami i mówimy o nich wprost.
+            if (MyAPIGateway.Session.SessionSettings != null && !MyAPIGateway.Session.SessionSettings.EnableEconomy)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "Kontrakt " + faction + " pominięty: w ustawieniach świata WYŁĄCZONA jest ekonomia " +
+                    "— bez niej gra nie przyjmie żadnego zlecenia");
+                return;
+            }
+
+            var block = MyAPIGateway.Entities.GetEntityById(start.BlockId) as IMyFunctionalBlock;
+            if (block != null && !block.IsWorking)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "Kontrakt " + faction + " pominięty: blok \"" + block.CustomName +
+                    "\" nie działa (brak zasilania albo niedokończony)");
+                return;
+            }
+
+            // Wystawca musi mieć czym zapłacić. Kod gry (MySessionComponentContractSystem
+            // .GenerateCustomContract, odczytany dekompilatorem 2026-07-29):
+            //     if (MyBankingSystem.GetBalance(startBlock.OwnerId) < MoneyReward)
+            //         return Fail_NotEnoughFunds;
+            //     ... ChangeBalance(startBlock.OwnerId, -moneyReward);
+            // Liczy się konto WŁAŚCICIELA BLOKU (tożsamość założyciela frakcji), a nie konto
+            // frakcji — to dwa różne konta w MyBankingSystem. Nagroda jest z niego ŚCIĄGANA
+            // przy tworzeniu, więc konto realnie się wyczerpuje: nasze testowe zlecenia zjadły
+            // startowe ~14 tys. i kolejne przestały wchodzić. Dosypujemy więc dokładnie tyle,
+            // ile frakcja właśnie obiecuje, i dokładnie temu, kogo gra pyta o saldo.
+            if (block != null && block.OwnerId != 0)
+            {
+                MyAPIGateway.Players.RequestChangeBalance(block.OwnerId, reward);
+            }
+
             int money = reward > int.MaxValue ? int.MaxValue : (int)reward;
             int collateral = money / 10;
-            int durationSeconds = durationMin * 60; // API bierze sekundy
+            // API bierze MINUTY, nie sekundy: w MyContractGenerator jest
+            // RemainingTimeInS = MyTimeSpan.FromMinutes(contractData.Duration).
+            // Wcześniejsze durationMin * 60 zamawiało 45 GODZIN zamiast 45 minut.
+            int duration = durationMin;
 
             // Typy z rekwizytem: jeśli w świecie nie ma jeszcze celu, frakcja go najpierw
             // STAWIA, a kontrakt powstaje w callbacku spawnu (SpawnPrefab jest asynchroniczny).
@@ -156,7 +194,7 @@ namespace ZyweFrakcje
                 SpawnProp(PropSearchPrefab, faction,
                           OffsetFrom(PlayerPosition(start.Position), PropSearchMeters),
                           () => Finalize(faction, kind, reward, targetFaction, start,
-                                         money, collateral, durationSeconds));
+                                         money, collateral, duration));
                 return;
             }
             if (kind == "naprawa" &&
@@ -164,12 +202,12 @@ namespace ZyweFrakcje
             {
                 SpawnProp(PropWreckPrefab, faction, OffsetFrom(start.Position, PropWreckMeters),
                           () => Finalize(faction, kind, reward, targetFaction, start,
-                                         money, collateral, durationSeconds));
+                                         money, collateral, duration));
                 return;
             }
 
             Finalize(faction, kind, reward, targetFaction, start, money, collateral,
-                     durationSeconds);
+                     duration);
         }
 
         /// <summary>
@@ -516,6 +554,172 @@ namespace ZyweFrakcje
                                        _tracked[index].Kind);
             MyAPIGateway.Utilities.ShowMessage("ZF",
                 "Zlecenie " + _tracked[index].Faction + " przyjęte (" + _tracked[index].Kind + ")");
+        }
+
+        /// <summary>
+        /// Diagnostyka `/zf kontrakty`: co gra NAPRAWDĘ trzyma na bloku frakcji i na jej
+        /// stacjach. Rozstrzyga pytanie „zlecenie powstało, ale nie widać go w terminalu":
+        /// jeśli kontrakt jest w GetAvailableContractsForBlock, to potok tworzenia działa,
+        /// a problem siedzi w powiązaniu ze stacją (AddContract ma drugi, pomijany przez nas
+        /// parametr factionStationId — vanilla UI listuje zlecenia per stacja frakcji).
+        /// </summary>
+        public void Report()
+        {
+            if (MyAPIGateway.ContractSystem == null)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Brak ContractSystem w tej wersji gry");
+                return;
+            }
+
+            MyAPIGateway.Utilities.ShowMessage("ZF", "śledzonych przez mod: " + _tracked.Count);
+            for (int i = 0; i < _tracked.Count; i++)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "  #" + _tracked[i].Id + " " + _tracked[i].Faction + " stan=" +
+                    MyAPIGateway.ContractSystem.GetContractState(_tracked[i].Id));
+            }
+
+            string[] tags = { "HEL", "KRW", "WGR" };
+            for (int t = 0; t < tags.Length; t++)
+            {
+                long blockId;
+                string gridName;
+                if (!FactionEconomy.TryFindContractBlock(tags[t], out blockId, out gridName))
+                {
+                    continue; // brak bloku — to już mówi /zf stations
+                }
+
+                var onBlock = MyAPIGateway.ContractSystem.GetAvailableContractsForBlock(blockId);
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    tags[t] + " blok " + blockId + " (" + (gridName ?? "?") + "): zleceń na bloku = " +
+                    onBlock.Count);
+                foreach (IMyContract contract in onBlock)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "    #" + contract.Id + " nagroda=" + contract.MoneyReward +
+                        " kaucja=" + contract.Collateral + " czas=" + contract.Duration);
+                }
+
+                IMyFaction faction = MyAPIGateway.Session.Factions.TryGetFactionByTag(tags[t]);
+                if (faction == null)
+                {
+                    continue;
+                }
+                foreach (IMyFactionStation station in faction.Stations)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "    stacja " + station.Id + ": zleceń = " +
+                        MyAPIGateway.ContractSystem.GetAvailableContractsForFactionStation(station.Id).Count);
+                }
+            }
+        }
+
+        /// <summary>
+        /// `/zf kontrakt-test <frakcja>` — macierz wariantów AddContract. Gra na odmowę zwraca
+        /// samo Success=false, a każda hipoteza kosztuje przeładowanie świata, więc zamiast
+        /// zgadywać po jednej, przepuszczamy wszystkie i pytamy grę, która przechodzi.
+        /// Udane zlecenia od razu kasujemy (RemoveContract), żeby nie zostawić śmieci.
+        /// </summary>
+        public void SelfTest(string faction)
+        {
+            if (MyAPIGateway.ContractSystem == null)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Brak ContractSystem w tej wersji gry");
+                return;
+            }
+
+            long blockId;
+            string gridName;
+            if (!FactionEconomy.TryFindContractBlock(faction, out blockId, out gridName))
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "test " + faction + ": brak bloku kontraktów");
+                return;
+            }
+
+            // Pierwsza stacja frakcji z Economy — kandydat na brakujący drugi argument
+            // AddContract (vanilla listuje zlecenia per stacja, my zawsze dawaliśmy 0).
+            long stationId = 0;
+            IMyFaction f = MyAPIGateway.Session.Factions.TryGetFactionByTag(faction);
+            if (f != null)
+            {
+                foreach (IMyFactionStation station in f.Stations)
+                {
+                    stationId = station.Id;
+                    break;
+                }
+            }
+
+            MyDefinitionId itemId;
+            int amount;
+            string opis;
+            ItemForFaction(faction, out itemId, out amount, out opis);
+
+            // Właściciel bloku to konto, które gra sprawdza i obciąża przy tworzeniu zlecenia.
+            var blok = MyAPIGateway.Entities.GetEntityById(blockId) as IMyCubeBlock;
+            long ownerId = blok != null ? blok.OwnerId : 0;
+            MyAPIGateway.Utilities.ShowMessage("ZF",
+                "test AddContract " + faction + ": blok=" + blockId + " stacja=" + stationId +
+                " wlasciciel=" + ownerId + " (kasa frakcji=" + FactionFunds.Balance(f) + ")");
+
+            // Sprzątanie PRZED pomiarem: zlecenia z poprzednich przebiegów zostają na bloku
+            // i zaśmiecają terminal. „zostało" > 0 oznacza, że RemoveContract nie zadziałało.
+            var wiszace = MyAPIGateway.ContractSystem.GetAvailableContractsForBlock(blockId);
+            var doUsuniecia = new List<long>();
+            foreach (IMyContract stary in wiszace)
+            {
+                doUsuniecia.Add(stary.Id);
+            }
+            int usunieto = 0;
+            for (int i = 0; i < doUsuniecia.Count; i++)
+            {
+                if (MyAPIGateway.ContractSystem.RemoveContract(doUsuniecia[i]))
+                {
+                    usunieto++;
+                }
+            }
+            int zostalo = MyAPIGateway.ContractSystem.GetAvailableContractsForBlock(blockId).Count;
+            MyAPIGateway.Utilities.ShowMessage("ZF",
+                "sprzątanie bloku: było " + doUsuniecia.Count + ", usunięto " + usunieto +
+                ", zostało " + zostalo);
+
+            // Sprawdzian po naprawie (2026-07-29): przyczyną odmów było konto właściciela bloku
+            // — gra wymaga na nim pełnej nagrody i ściąga ją przy tworzeniu. Każdy wariant
+            // dosypuje więc tyle, ile obiecuje; jeśli któryś padnie mimo tego, przyczyna jest
+            // inna niż kasa i trzeba wrócić do dekompilacji GenerateCustomContract.
+            TryVariant("1. 15000 kr / 45 min", ownerId, blockId, 15000, 1500, 45, blockId, itemId, amount, 0);
+            TryVariant("2. 60000 kr (górne widełki)", ownerId, blockId, 60000, 6000, 45, blockId, itemId, amount, 0);
+            TryVariant("3. 15000 kr + stacja frakcji", ownerId, blockId, 15000, 1500, 45, blockId, itemId, amount, stationId);
+            TryVariant("4. bez dosypania (kontrola)", 0, blockId, 60000, 6000, 45, blockId, itemId, amount, 0);
+        }
+
+        private static void TryVariant(string opis, long ownerId, long startBlock, int money, int collateral,
+                                       int duration, long endBlock, MyDefinitionId itemId, int amount,
+                                       long stationId)
+        {
+            try
+            {
+                if (ownerId != 0)
+                {
+                    MyAPIGateway.Players.RequestChangeBalance(ownerId, money);
+                }
+                var contract = new MyContractAcquisition(startBlock, money, collateral, duration,
+                                                         endBlock, itemId, amount);
+                MyAddContractResultWrapper result = MyAPIGateway.ContractSystem.AddContract(contract, stationId);
+                if (result.Success)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "  OK  " + opis + " -> id=" + result.ContractId);
+                    MyAPIGateway.ContractSystem.RemoveContract(result.ContractId);
+                }
+                else
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "  nie  " + opis);
+                }
+            }
+            catch (Exception e)
+            {
+                // Zły parametr może rzucić zamiast zwrócić false — to też jest wynik testu.
+                MyAPIGateway.Utilities.ShowMessage("ZF", "  WYJĄTEK " + opis + ": " + e.Message);
+            }
         }
 
         /// <summary>Woła sesja co tik: dopytanie o stan kontraktów (droga nr 2, po wczytaniu świata).</summary>

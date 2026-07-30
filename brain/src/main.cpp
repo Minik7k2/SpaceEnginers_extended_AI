@@ -269,7 +269,22 @@ int main(int argc, char** argv) {
             return run_replay(replay_path, watcher.get());
         }
 
-        zf::Db db(watcher.get().db_path);
+        // Stan siedzi w bazie przypisanej do TEGO zapisu (klucz: ścieżka storage), więc
+        // nowy świat startuje z czystymi relacjami. Mówimy wprost, czy baza jest nowa —
+        // „skąd ta wojna w świeżym świecie" było wcześniej nie do odróżnienia od buga.
+        const std::string db_path = watcher.get().db_path;
+        std::error_code db_ec;
+        const bool db_nowa = !std::filesystem::exists(db_path, db_ec);
+
+        zf::Db db(db_path);
+        std::cout << "[brain] baza: " << db_path << (db_nowa ? " (nowa, czyste relacje)" : " (wczytana)")
+                  << "\n";
+        if (db_nowa && watcher.get().db_per_swiat &&
+            std::filesystem::exists(watcher.get().db_path_wspolna, db_ec)) {
+            std::cout << "[brain] stara wspólna baza " << watcher.get().db_path_wspolna
+                      << " istnieje, ale NIE jest używana (stan jest per świat)\n";
+        }
+
         zf::EventReader events(watcher.get().storage_dir, db);
         zf::CommandWriter commands(watcher.get().storage_dir, db, watcher.get().rotate_bytes);
         zf::Fallback fallback(kFallbackPath);

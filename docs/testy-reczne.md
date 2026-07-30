@@ -216,6 +216,31 @@ da się skompilować poza grą — jeśli mod nie wstanie, log SE wskaże plik
 `Contracts.cs` i konkretną linię; najbardziej podejrzane są sygnatura konstruktora
 i jednostka `duration` (zakładamy SEKUNDY: `durationMin * 60`).
 
+**ROZSTRZYGNIĘTE 2026-07-29 (dekompilacja, nie zgadywanie) — czemu zlecenia nie powstawały.**
+`AddContract` zwracał `Success=false` bez powodu (`MyAddContractResultWrapper` niesie tylko
+`Success`/`ContractId`/`ContractConditionId`), więc kod gry odczytano wprost —
+`ilspycmd` na `Sandbox.Game.dll`, `MySessionComponentContractSystem.GenerateCustomContract`:
+
+```csharp
+if (startBlock != null && MyBankingSystem.GetBalance(startBlock.OwnerId) < contractData.MoneyReward)
+    return MyContractCreationResults.Fail_NotEnoughFunds;
+...
+MyBankingSystem.ChangeBalance(startBlock.OwnerId, -moneyReward);   // nagroda ściągana przy tworzeniu
+```
+
+Dwa wnioski: (1) liczy się konto **właściciela bloku** (tożsamość założyciela frakcji), a NIE
+konto frakcji — `IMyFaction.RequestChangeBalance` idzie pod `FactionId` i kontraktów nie
+odblokuje; (2) nagroda jest z tego konta **wydawana**, więc startowe ~14 tys. kr wyczerpuje się
+po kilku zleceniach (stąd mylący objaw „z każdą rundą testu przechodzą coraz mniejsze kwoty").
+Mod dosypuje teraz właścicielowi bloku dokładnie tyle, ile frakcja obiecuje, tuż przed
+`AddContract`. Z tego samego kodu: **`Duration` jest w MINUTACH**
+(`RemainingTimeInS = MyTimeSpan.FromMinutes(Duration)`) — wcześniejsze `durationMin * 60`
+zamawiało 45 godzin. Odrzucone hipotezy (nie marnować na nie czasu): `factionStationId`
+(frakcje MAJĄ stacje — WGR 7, KRW 9 — i podanie id nic nie zmienia), `endBlockId`,
+kaucja, ilość i wartość towaru, saldo gracza, limit slotów na bloku.
+Diagnostyka: `/zf stations` (saldo frakcji + blok), `/zf kontrakty` (co gra trzyma na bloku
+i na stacjach), `/zf kontrakt-test <frakcja>` (macierz wariantów `AddContract`).
+
 - [x] **I0. Mod się ładuje:** świat startuje, w logu SE brak błędów kompilacji
   z `Contracts.cs` / `Economy.cs`. To bramka dla całej sekcji.
 - [x] **I1. Diagnostyka bloków:** `/zf stations` → dla każdej frakcji widać albo
@@ -231,16 +256,18 @@ budowli frakcji NPC, a bez tego I2-I10 nie da się ruszyć. Droga na skróty:
 4. `/zf stations` musi teraz pokazać `blok kontraktów: <nazwa> (id)` zamiast `BRAK`.
 Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowaniem do testów.
 
-- [ ] **I2. Wymuszone zlecenie:** `/zf kontrakt WGR` → konsola braina
+- [x] **I2. Wymuszone zlecenie:** `/zf kontrakt WGR` → konsola braina
   `contract_create [WGR] dostawa za N kr`, a na czacie `[ZF] Nowe zlecenie WGR: …`.
   Jeśli zamiast tego „pominięty: frakcja nie ma bloku…" — patrz I1.
-- [ ] **I3. Zlecenie widać w grze:** w terminalu stacji tej frakcji (zakładka
+- [x] **I3. Zlecenie widać w grze:** w terminalu stacji tej frakcji (zakładka
   kontraktów) jest nowe zlecenie na dostawę, z nagrodą z I2.
-- [ ] **I4. Utrwalenie ID:** konsola braina `kontrakt <ID> (WGR, dostawa) wystawiony
+- [x] **I4. Utrwalenie ID:** konsola braina `kontrakt <ID> (WGR, dostawa) wystawiony
   w grze`; po `/zf rel` frakcja bez zmian (samo wystawienie nie rusza relacji).
-- [ ] **I5. Wykonanie:** przyjmij i wykonaj zlecenie → `[ZF] Zlecenie WGR wykonane`,
+- [x] **I5. Wykonanie:** przyjmij i wykonaj zlecenie → `[ZF] Zlecenie WGR wykonane`,
   konsola: `relacja WGR->gracz +20 za wykonany kontrakt`. To ma być SZYBSZA droga
   do poprawy relacji niż dryf — o to w tym całym etapie chodzi.
+  Zweryfikowane 2026-07-30 na typie `naprawa` (mnożnik 1.2 → `+24` zamiast bazowych
+  `+20`, zgodnie z `[kontrakty.mnoznik]`).
 - [ ] **I6. Porażka:** przyjmij zlecenie i daj mu wygasnąć → `Zlecenie … zawalone`
   i `-10` w konsoli.
 - [ ] **I7. Po wczytaniu świata:** wystaw zlecenie, zapisz i wczytaj świat, dopiero
@@ -299,18 +326,25 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   celuje w NIEGO, nie w stację. Sprawdź w terminalu, że zlecenie da się wykonać:
   dolatujesz, łapiesz podwoziem magnetycznym, wieziesz pod stację frakcji.
   Powtórz komendę → drugi moduł NIE powstaje, jeśli pierwszy wciąż leży dość daleko.
-- [ ] **I19b. Naprawa stawia wrak tylko w razie potrzeby:** przy nieuszkodzonych
+- [x] **I19b. Naprawa stawia wrak tylko w razie potrzeby:** przy nieuszkodzonych
   siatkach WGR `/zf kontrakt WGR naprawa` → 2,5 km od stacji pojawia się „Uszkodzony
   modul frakcji" (beacon AWARIA) z niepełnymi blokami i to on jest celem. Gdy jakaś
   siatka frakcji JEST już uszkodzona (np. po rajdzie) → nic się nie respi, cel to ta
   siatka. Uwaga: rekwizyt należy do frakcji, więc zniszczenie go liczy się jak
   zniszczenie jej mienia.
+  Zweryfikowane 2026-07-30 na świeżym świecie (bez uszkodzonych siatek WGR):
+  brak komunikatu o nieudanym spawnie (na czacie cisza — sukces jest cichy, patrz
+  `SpawnProp` w `Contracts.cs`), w terminalu pojawił się punkt GPS, kontrakt dało
+  się przyjąć i wykonać. Nazwa/beacon rekwizytu nie zweryfikowane wprost na czacie.
 - [ ] **I19c. Rekwizyt przeżywa:** postaw rekwizyt (I19a), odleć >1 km, poczekaj kilka
   minut → grid MA przetrwać sprzątacz śmieci SE (chroni go własność frakcji).
-- [ ] **I20. Przyjęcie zlecenia rusza świat:** przyjmij dowolne zlecenie HEL → na czacie
+- [x] **I20. Przyjęcie zlecenia rusza świat:** przyjmij dowolne zlecenie HEL → na czacie
   `[ZF] Zlecenie HEL przyjęte (<typ>)`, w konsoli braina `przyjęty przez gracza`,
   frakcja potwierdza przez radio, a `/zf rel` pokazuje KRW niżej o 3 punkty (wróg HEL
   nie lubi, gdy pracujesz dla HEL). WGR (neutralny wobec HEL) bez zmian.
+  Zweryfikowane 2026-07-30 (mechanizm identyczny, wystawcą było WGR zamiast HEL):
+  po przyjęciu zlecenia WGR konsola pokazała `relacja KRW->gracz -3 za przyjęcie
+  zlecenia od WGR` (KRW jest wrogiem WGR w polityce, -50).
 - [ ] **I21. Kara raz na kontrakt:** po I20 zapisz i wczytaj świat, potem wykonaj
   zlecenie → NIE MA drugiego `-3` u KRW (status `taken` w bazie braina).
 - [ ] **I22. Zlecenie w trakcie blokuje kolejne:** po przyjęciu zlecenia HEL odczekaj
@@ -318,26 +352,32 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   także zlecenia przyjęte).
 ## J. Trwałość i wygoda (nowe)
 
-- [ ] **J1. Auto-ścieżka storage:** usuń (albo zostaw pusty) `storage_dir`
+- [x] **J1. Auto-ścieżka storage:** usuń (albo zostaw pusty) `storage_dir`
   w `rules.local.toml`, odpal brain przy działającym świecie → konsola
   `storage wykryty automatycznie: …` ze ścieżką TEGO świata. Ręczna, istniejąca
   ścieżka nadal ma pierwszeństwo.
 - [ ] **J2. Rajd przeżywa restart braina:** `/zf raid KRW`, ubij `zf_brain.exe`
   (Ctrl+C), odpal ponownie, potem `/zf okup KRW` → rajd zostaje odwołany
   (`stand_down`), statki odlatują. Wcześniej brain odpowiadał „nie prowadzi rajdu".
-- [ ] **J3. Polityka frakcji:** `/zf rel` → po `||` widać `polityka: HEL/KRW -70 |
+- [x] **J3. Polityka frakcji:** `/zf rel` → po `||` widać `polityka: HEL/KRW -70 |
   HEL/WGR +10 | KRW/WGR -50`.
 - [ ] **J4. Wróg mojego wroga:** ostrzelaj statek KRW → w konsoli obok kary dla KRW
   jest `relacja HEL->gracz +5 (wróg KRW ostrzelany)`.
 - [ ] **J5. Koniec echa:** napisz zwykłą wiadomość na czacie (bez `@`) → **NIE MA**
   już `[RADIO | TEST] Echo: …` (test A1 jest tym samym unieważniony).
+- [ ] **J6. Nowy świat = czysty stan (regresja 2026-07-29):** załóż NOWY świat z modem
+  i odpal brain → konsola `baza: state/zf_state_<świat>_<hash>.sqlite3 (nowa, czyste
+  relacje)`, a `[brain] relacje:` pokazuje `HEL +0 | KRW +0 | WGR +0` i okno frakcji
+  w grze jest neutralne. Wróć do starego świata → jego relacje wracają (osobny plik).
+  Wcześniej: jedna baza `state/zf_state.sqlite3` na wszystkie światy, więc nowy zapis
+  dziedziczył wojny po poprzednim i hybryda reputacji od razu wpisywała je do gry.
 
 ## K. Okup w surowcach — B+ (nowe)
 
 Żeby było czym płacić: `/zf daj <surowiec> [ilość]` wrzuca towar prosto do inwentarza
 postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
 
-- [ ] **K1. Towar do ręki:** `/zf daj nikiel 700` → `ZF: dodano 700x
+- [x] **K1. Towar do ręki:** `/zf daj nikiel 700` → `ZF: dodano 700x
   MyObjectBuilder_Ingot/Nickel (w inwentarzu: 700)`, sztabki widać w plecaku.
   Warianty: `/zf daj Ore/Ice 100`, `/zf daj Component/SteelPlate 50`, samo
   `/zf daj` → podpowiedź składni, `/zf daj bzdura 5` → „nic nie weszło".
@@ -393,22 +433,22 @@ terminal → Frakcje), a nie tylko w `/zf rel`. Nowa komenda: `/zf rep` pokazuje
 wartość, którą gra ma naprawdę, i cel przysłany przez brain (przy rozjeździe krzyczy
 `ROZJAZD`). Świat testowy musi być NOWY (frakcje `IsDefault` powstają przy generowaniu).
 
-- [ ] **M1. Start świata:** wejdź do świata z działającym brainem → konsola braina
+- [x] **M1. Start świata:** wejdź do świata z działającym brainem → konsola braina
   wypisuje `reputation_sync [HEL->gracz] …`, `[KRW->gracz] …`, `[WGR->gracz] …` oraz
   pary polityki. `/zf rep` pokazuje 6 linii bez słowa `ROZJAZD`.
-- [ ] **M2. Zgodność z oknem frakcji:** otwórz listę frakcji w grze → HEL/WGR neutralni,
+- [x] **M2. Zgodność z oknem frakcji:** otwórz listę frakcji w grze → HEL/WGR neutralni,
   KRW wrogo (polityka HEL/KRW -70 i KRW/WGR -50 są przepisane na skalę gry).
-- [ ] **M3. Strzelanina zmienia liczbę w grze:** ostrzelaj statek HEL do relacji poniżej
+- [x] **M3. Strzelanina zmienia liczbę w grze:** ostrzelaj statek HEL do relacji poniżej
   -30 (`/zf rel`) → w oknie frakcji HEL robi się WRÓG, `/zf rep` pokazuje ≤ -500.
   To jest sedno zmiany: wcześniej brain ogłaszał wojnę, a gra dalej miała neutralność.
 - [ ] **M4. Powrót:** wykonaj kontrakt tej frakcji (albo `/zf event` z `contract_done`)
   → relacja rośnie, reputacja w grze rośnie razem z nią.
-- [ ] **M5. Brak podwójnego liczenia:** po nagrodzie reputacyjnej z kontraktu vanilla
+- [x] **M5. Brak podwójnego liczenia:** po nagrodzie reputacyjnej z kontraktu vanilla
   `/zf rep` w ciągu ~5 s wraca do wartości z brainu (mod przywraca cel). Krótki
   `ROZJAZD` zaraz po rozliczeniu kontraktu jest OK, utrzymujący się — nie.
-- [ ] **M6. Wyłącznik:** `sync = false` w `[reputacja]` (hot-reload) → brain przestaje
+- [x] **M6. Wyłącznik:** `sync = false` w `[reputacja]` (hot-reload) → brain przestaje
   wysyłać, gra zostaje na ostatniej wartości; po `sync = true` leci pełny resync.
-- [ ] **M7. Nic nie psuje ekonomii:** reputacja frakcji vanilla (RTSL/UNIV itd.) w oknie
+- [x] **M7. Nic nie psuje ekonomii:** reputacja frakcji vanilla (RTSL/UNIV itd.) w oknie
   frakcji nie zmienia się przez nasz mod — synchronizujemy tylko HEL/KRW/WGR.
 
 ## Znane zachowania (to nie błędy)
