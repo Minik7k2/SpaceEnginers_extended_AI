@@ -259,15 +259,20 @@ namespace ZyweFrakcje
             if (messageText.StartsWith(kontraktPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                string tag = messageText.Substring(kontraktPrefix.Length).Trim().ToUpperInvariant();
-                if (tag.Length == 0)
+                // "/zf kontrakt KRW nagroda" — drugi argument (opcjonalny) wymusza TYP
+                // zlecenia; bez niego brain losuje wagami z [kontrakty.typy].
+                string[] czesci = messageText.Substring(kontraktPrefix.Length)
+                    .Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (czesci.Length == 0)
                 {
-                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf kontrakt <frakcja> (wymusza zlecenie, omija cooldown)");
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "Użycie: /zf kontrakt <frakcja> [typ] (typy: dostawa, nagroda, transport, naprawa, poszukiwania, eskorta, wlasne)");
                 }
                 else
                 {
                     // Cały potok: mod -> brain -> contract_create -> ContractSystem -> contract_created.
-                    _events.WriteDebugKontrakt(tag);
+                    _events.WriteDebugKontrakt(czesci[0].ToUpperInvariant(),
+                                               czesci.Length > 1 ? czesci[1].ToLowerInvariant() : null);
                 }
                 return;
             }
@@ -301,7 +306,7 @@ namespace ZyweFrakcje
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja>, /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja> [typ], /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -444,6 +449,11 @@ namespace ZyweFrakcje
             data.TryGetValue("kind", out kindObj);
             string kind = kindObj as string ?? "dostawa";
 
+            // Cel nagrody za głowę (typ "nagroda") — dla pozostałych typów pole jest puste.
+            object targetObj;
+            data.TryGetValue("target_faction", out targetObj);
+            string targetFaction = targetObj as string;
+
             long reward = 0;
             object rewardObj;
             if (data.TryGetValue("reward", out rewardObj) && rewardObj is double)
@@ -458,7 +468,7 @@ namespace ZyweFrakcje
                 durationMin = (int)(double)durationObj;
             }
 
-            _contracts.Create(faction, kind, reward, durationMin);
+            _contracts.Create(faction, kind, reward, durationMin, targetFaction);
         }
 
         /// <summary>

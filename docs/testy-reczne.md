@@ -260,6 +260,62 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   `/zf rel` pokazuje `sufit +20`. Potem nawet wykonane kontrakty nie podniosą
   relacji powyżej sufitu — to celowe (świat mściwy).
 
+- [ ] **I13. Typy zleceń — losowanie:** `/zf kontrakt WGR` kilka razy pod rząd →
+  w konsoli braina `kontrakt: WGR wystawia zlecenie (<typ>)` z RÓŻNYMI typami
+  (wagi z `[kontrakty.typy.WGR]`: najczęściej `naprawa`, potem `dostawa`/`poszukiwania`).
+  Na czacie `[ZF] Nowe zlecenie WGR (<typ>): …`.
+- [ ] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
+  (polityka KRW/HEL -70), mod tworzy `MyContractBounty`, a w terminalu stacji widać
+  zlecenie na głowę pilota HEL. Analogicznie `transport`, `naprawa`, `poszukiwania`,
+  `eskorta`, `wlasne`, `dostawa`.
+- [ ] **I15. Zejście na dostawę:** wymuś typ, dla którego w świecie NIE MA celu
+  (np. `/zf kontrakt HEL naprawa`, gdy żadna siatka HEL nie jest uszkodzona) → na czacie
+  `Zlecenie HEL typu "naprawa" niemożliwe (frakcja nie ma uszkodzonej siatki do naprawy)
+  — wystawiam dostawę`, a `contract_created` w konsoli braina ma `dostawa`, NIE `naprawa`.
+  To najważniejszy test całej rozbudowy: żadne zlecenie nie może przepaść po cichu.
+- [ ] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
+  `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
+  Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
+  → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
+- [ ] **I17. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
+  (waga 0 w configu, więc tylko wymuszona) → kontrakt powstaje, ale w konsoli braina
+  NIE MA jeszcze `spawn_request`. Dopiero gdy przyjmiesz zlecenie w terminalu →
+  `kontrakt <ID> (HEL, eskorta) przyjęty przez gracza` i `spawn_request [HEL] kind=convoy`.
+- [ ] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
+  jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
+  `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
+  Sprawdź log SE: jeśli narzeka na `ContractTypes.sbc`, kontener/pola definicji trzeba
+  poprawić wg vanilla `Content/Data/ContractTypes.sbc`. Do czasu potwierdzenia można
+  ustawić `wlasne = 0` w `[kontrakty.typy]`.
+  UWAGA: gdy zlecenie POWSTANIE, ale nie da się go wykonać (gra nie wie, kiedy je
+  zamknąć), po `czas_min` wygaśnie jako ZAWALONE i zabierze relację (`-kontrakt_min ×
+  mnożnik`). Dlatego I18 rób na świecie testowym, a nie na tym, w którym się grasz.
+  To samo dotyczy `eskorta` — jeśli okaże się, że gra nie potrafi jej rozliczyć.
+- [ ] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
+  `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
+  niż +20 z dostawy. Kwota nagrody też jest przemnożona.
+- [ ] **I19a. Poszukiwania stawiają rekwizyt:** `/zf kontrakt WGR poszukiwania` →
+  ~8 km od gracza powstaje mały grid „Zgubiony modul" (beacon ZGUBA na HUD), a kontrakt
+  celuje w NIEGO, nie w stację. Sprawdź w terminalu, że zlecenie da się wykonać:
+  dolatujesz, łapiesz podwoziem magnetycznym, wieziesz pod stację frakcji.
+  Powtórz komendę → drugi moduł NIE powstaje, jeśli pierwszy wciąż leży dość daleko.
+- [ ] **I19b. Naprawa stawia wrak tylko w razie potrzeby:** przy nieuszkodzonych
+  siatkach WGR `/zf kontrakt WGR naprawa` → 2,5 km od stacji pojawia się „Uszkodzony
+  modul frakcji" (beacon AWARIA) z niepełnymi blokami i to on jest celem. Gdy jakaś
+  siatka frakcji JEST już uszkodzona (np. po rajdzie) → nic się nie respi, cel to ta
+  siatka. Uwaga: rekwizyt należy do frakcji, więc zniszczenie go liczy się jak
+  zniszczenie jej mienia.
+- [ ] **I19c. Rekwizyt przeżywa:** postaw rekwizyt (I19a), odleć >1 km, poczekaj kilka
+  minut → grid MA przetrwać sprzątacz śmieci SE (chroni go własność frakcji).
+- [ ] **I20. Przyjęcie zlecenia rusza świat:** przyjmij dowolne zlecenie HEL → na czacie
+  `[ZF] Zlecenie HEL przyjęte (<typ>)`, w konsoli braina `przyjęty przez gracza`,
+  frakcja potwierdza przez radio, a `/zf rel` pokazuje KRW niżej o 3 punkty (wróg HEL
+  nie lubi, gdy pracujesz dla HEL). WGR (neutralny wobec HEL) bez zmian.
+- [ ] **I21. Kara raz na kontrakt:** po I20 zapisz i wczytaj świat, potem wykonaj
+  zlecenie → NIE MA drugiego `-3` u KRW (status `taken` w bazie braina).
+- [ ] **I22. Zlecenie w trakcie blokuje kolejne:** po przyjęciu zlecenia HEL odczekaj
+  cooldown (20 min) i wymuś tick → HEL nie wystawia drugiego (`max_otwartych` liczy
+  także zlecenia przyjęte).
 ## J. Trwałość i wygoda (nowe)
 
 - [ ] **J1. Auto-ścieżka storage:** usuń (albo zostaw pusty) `storage_dir`

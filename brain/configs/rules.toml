@@ -31,6 +31,10 @@ handel_min = 1
 handel_max = 3
 kontrakt_min = 10
 kontrakt_max = 20
+# Przyjęcie zlecenia to opowiedzenie się po czyjejś stronie: KAŻDA frakcja wroga
+# wystawcy (relacja <= prog_wrogi) traci tyle zaufania do gracza. Kara jest jednorazowa
+# na kontrakt. 0 = wyłącz (przyjmowanie zleceń nikogo nie obchodzi).
+kontrakt_przyjety_u_wroga = -3
 atak_na_wroga_bonus = 5
 # Bonus "wróg mojego wroga" ma być nagrodą za potyczkę, nie dojną krową: mod zgłasza
 # combat_hit co 3 s, więc bez cooldownu minuta ostrzału jednego statku robiła z gracza
@@ -84,6 +88,77 @@ max_otwartych = 1
 nagroda_min = 15000
 nagroda_max = 60000
 czas_min = 45
+# Frakcja w napięciu/wojnie chce, żeby ktoś zrobił za nią brudną robotę: waga typu
+# "nagroda" (za głowę) jest wtedy mnożona przez tę wartość. Nie włącza typu z wagą 0.
+mnoznik_nagrody_w_napieciu = 3
+
+# Rodzaje zleceń. Każdy ma inną klasę w Sandbox.ModAPI.Contracts, więc mod musi
+# znaleźć w świecie CEL — i gdy go nie ma, wystawia dostawę (patrz docs/protocol.md):
+#   dostawa      MyContractAcquisition  zdobądź towar i dostarcz na blok frakcji
+#   nagroda      MyContractBounty       głowa pilota wrogiej frakcji (cel z polityki)
+#   transport    MyContractHauling      ładunek z bloku frakcji na inny blok
+#   naprawa      MyContractRepair       napraw uszkodzoną siatkę frakcji
+#   poszukiwania MyContractSearch       znajdź siatkę w promieniu (zaginione/wrak)
+#   eskorta      MyContractEscort       odprowadź konwój (brain dokłada spawn MES)
+#   wlasne       MyContractCustom       zlecenie z własną nazwą i opisem PL (SBC)
+#
+# UWAGA co do `wlasne`: to JEDYNY typ nieprzewidziany wprost w dokumentacji API —
+# wymaga definicji MyObjectBuilder_ContractTypeDefinition (mod/Data/ContractTypes.sbc),
+# a zgłoszone bugi Keena mówią, że kontrakty custom nie ruszają reputacji vanilla
+# (u nas nieszkodliwe — reputację prowadzi brain) i mogą źle pokazywać nazwę typu.
+# Jeśli w grze okaże się kłopotliwy: ustaw tu `wlasne = 0`.
+
+[kontrakty.typy]
+# Wagi losowania (0 = typ wyłączony). Wartości domyślne dla wszystkich frakcji.
+#
+# nagroda i eskorta stoją na 0 do czasu weryfikacji W GRZE (I14/I17 w docs/testy-reczne.md):
+#  - vanillowa nagroda za głowę jest mechaniką PvP (cel to inny GRACZ, dobicie bronią
+#    ręczną), więc zlecenie na tożsamość NPC może nie mieć jak się zaliczyć;
+#  - eskorty zostały z gry usunięte (zastąpione nagrodą PvE), więc AddContract
+#    prawdopodobnie je odrzuci i i tak dostaniemy dostawę.
+# Kod obu typów jest kompletny — po potwierdzeniu w grze wystarczy wpisać tu wagę
+# (proponowane: nagroda 1, eskorta 1, a u KRW nagroda 4).
+dostawa = 3
+nagroda = 0
+transport = 2
+naprawa = 1
+poszukiwania = 1
+eskorta = 0
+wlasne = 1
+
+[kontrakty.typy.HEL]
+# Korporacja żyje logistyką: dostawy i transport, brudną robotę zleca rzadko.
+dostawa = 4
+transport = 3
+poszukiwania = 1
+naprawa = 1
+
+[kontrakty.typy.KRW]
+# Piraci: kruszec i szperanie po wrakach. Nie naprawiają cudzych wraków i nikogo nie
+# eskortują. (Nagroda za głowę — ich naturalny typ — czeka na weryfikację, patrz wyżej.)
+dostawa = 3
+poszukiwania = 2
+transport = 1
+wlasne = 2
+naprawa = 0
+
+[kontrakty.typy.WGR]
+# Górnicy: szyby się psują, koparki gubią, ruda musi dojechać.
+naprawa = 4
+dostawa = 3
+poszukiwania = 3
+transport = 2
+
+[kontrakty.mnoznik]
+# Trudność typu — mnoży NAGRODĘ w kredytach i zmianę relacji za wykonanie/zawalenie
+# (kontrakt_min/kontrakt_max z [zmiany]). Trudniejsza robota szybciej odkupuje winy.
+dostawa = 1.0
+nagroda = 1.6
+transport = 1.1
+naprawa = 1.2
+poszukiwania = 0.9
+eskorta = 1.4
+wlasne = 1.1
 
 [spawn]
 # Spawny statków frakcji sterowane maszyną stanów: przejście w napięcie -> patrol,

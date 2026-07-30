@@ -87,6 +87,53 @@ int main() {
         assert(cfg.storage_dir == reczny.generic_string());
     }
 
+    // 4b. Typy kontraktów: wagi domyślne, nadpisania per frakcja, mnożniki trudności
+    //     i nakładka lokalna przestawiająca JEDNĄ wagę (bez przepisywania tabeli).
+    write_file(cfg_path, "[bridge]\nstorage_dir = \"" + reczny.generic_string() + "\"\n" +
+                             "[kontrakty]\nmnoznik_nagrody_w_napieciu = 4\n"
+                             "[kontrakty.typy]\ndostawa = 2\nnagroda = 1\neskorta = 0\n"
+                             "[kontrakty.typy.KRW]\nnagroda = 5\nnaprawa = 0\n"
+                             "[kontrakty.mnoznik]\nnagroda = 1.5\n");
+    {
+        const zf::Config cfg = zf::load_config(cfg_path.string());
+        assert(zf::contract_kind_weight(cfg, "WGR", "dostawa", "spokoj") == 2 &&
+               "waga domyślna z [kontrakty.typy]");
+        assert(zf::contract_kind_weight(cfg, "KRW", "nagroda", "spokoj") == 5 &&
+               "[kontrakty.typy.KRW] bije wartość domyślną");
+        assert(zf::contract_kind_weight(cfg, "WGR", "nagroda", "spokoj") == 1 &&
+               "nadpisanie KRW nie dotyczy WGR");
+        assert(zf::contract_kind_weight(cfg, "WGR", "nagroda", "wojna") == 4 &&
+               "wojna podbija wagę nagrody o mnoznik_nagrody_w_napieciu");
+        assert(zf::contract_kind_weight(cfg, "WGR", "eskorta", "wojna") == 0 &&
+               "waga 0 wyłącza typ na dobre");
+        assert(zf::contract_kind_weight(cfg, "KRW", "naprawa", "spokoj") == 0);
+        assert(zf::contract_kind_weight(cfg, "WGR", "transport", "spokoj") == 2 &&
+               "typ nieobecny w configu ma wagę wbudowaną");
+        assert(zf::contract_kind_multiplier(cfg, "nagroda") == 1.5);
+        assert(zf::contract_kind_multiplier(cfg, "dostawa") == 1.0 && "brak wpisu => 1.0");
+
+        write_file(tmp / "rules.local.toml", "[kontrakty.typy]\neskorta = 3\n");
+        const zf::Config lokalny = zf::load_config(cfg_path.string());
+        assert(zf::contract_kind_weight(lokalny, "WGR", "eskorta", "spokoj") == 3 &&
+               "rules.local.toml ma przestawiać pojedynczą wagę");
+        assert(zf::contract_kind_weight(lokalny, "KRW", "nagroda", "spokoj") == 5 &&
+               "nakładka nie może gubić nadpisań frakcji z pliku głównego");
+        fs::remove(tmp / "rules.local.toml", ec);
+    }
+
+    // 4c. Literówka w nazwie typu = błąd configu, nie cicho ignorowany klucz.
+    write_file(cfg_path, "[bridge]\nstorage_dir = \"" + reczny.generic_string() + "\"\n" +
+                             "[kontrakty.typy]\ndostwa = 2\n");
+    {
+        bool threw = false;
+        try {
+            zf::load_config(cfg_path.string());
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        assert(threw && "nieznany typ kontraktu ma wywalić config");
+    }
+
     // 5. Brak jakiegokolwiek storage (pusty korzeń poszukiwań) => czytelny błąd, nie cisza.
 #ifdef _WIN32
     _putenv_s("ZF_SAVES_DIR", (tmp / "pusto").string().c_str());

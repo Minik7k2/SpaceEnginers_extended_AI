@@ -3,6 +3,7 @@
 [HEL]
 grozba = "Szanowny kontrahencie, odnotowano incydent. Wdrażamy korektę warunków współpracy."
 oferta = "Korporacja Helion przedstawia ofertę: {oferta}. Oczekujemy decyzji."
+zlecenie_przyjete = "Zlecenie przypisane do pańskiego rachunku. Termin biegnie."
 odmowa = "Wniosek odrzucony. Warunki nie spełniają progu akceptacji Korporacji."
 okup = "Proponujemy jednorazową rekompensatę: {kwota} kredytów. Prosimy o potwierdzenie."
 kpina = "Odnotowano deklarację. Poziom zagrożenia oceniono jako nieistotny."
@@ -12,6 +13,7 @@ neutral = "Helion potwierdza odbiór transmisji."
 [KRW]
 grozba = "Znowu ty?! Masz {sekundy} sekund, żeby spierdalać z naszego sektora."
 oferta = "Mam dla ciebie robotę: {oferta}. Nie spartol, to zarobisz."
+zlecenie_przyjete = "No proszę, wziąłeś. Teraz już nie ma odwrotu."
 odmowa = "Pieprzę twoją ofertę. Wracaj, jak będziesz mieć coś konkretnego."
 okup = "Dobra, słuchaj. {kwota} kredytów i zapominamy. Na razie."
 kpina = "Ha! Widziałem lepszych pilotów w kostnicy."
@@ -21,6 +23,7 @@ neutral = "[SZUM] ...Krwawa Ręka słyszy wszystko..."
 [WGR]
 grozba = "Nie prowokuj, dobra? Mamy kilofy i nie boimy się ich użyć."
 oferta = "Mamy robotę na boku: {oferta}. Uczciwa dola, jak zawsze."
+zlecenie_przyjete = "Dobra, liczymy na ciebie. Odezwij się, jak będzie zrobione."
 odmowa = "Nie, dziękujemy. Taki układ nam nie pasuje."
 prosba = "Ej, słuchaj... piraci łażą koło naszego konwoju. Pomożesz? Nie zapomnimy."
 okup = "Nie mamy fortuny, ale zrzucimy się na {kwota} kredytów. Tylko dajcie nam spokój."

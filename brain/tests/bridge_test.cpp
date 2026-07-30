@@ -72,6 +72,10 @@ int main() {
         // brain odpisuje echem — symulacja tego co robi main.cpp dla chat_message
         writer.write_radio_message("TEST", "Echo: " + events[1].data.at("text").get<std::string>(), "white", 0);
 
+        // Zlecenie kontraktu: mod czyta z tej linii TYP i CEL, więc oba pola muszą
+        // wyjechać w JSON (bez target_faction nagroda za głowę nie ma na kogo iść).
+        writer.write_contract_create("KRW", "nagroda", 24000, 45, "HEL");
+
         // drugi poll bez nowych danych — offset z SQLite musi zapobiec ponownemu przetworzeniu
         assert(reader.poll().empty());
     }
@@ -82,6 +86,18 @@ int main() {
     assert(cmd_line.at("type") == "radio_message");
     assert(cmd_line.at("data").at("faction") == "TEST");
     assert(cmd_line.at("data").at("text") == "Echo: halo brain");
+
+    {
+        const std::size_t first_end = commands.find('\n');
+        const std::string second = commands.substr(first_end + 1,
+                                                   commands.find('\n', first_end + 1) - first_end - 1);
+        const nlohmann::json contract = nlohmann::json::parse(second);
+        assert(contract.at("type") == "contract_create");
+        assert(contract.at("data").at("kind") == "nagroda" && "typ zlecenia jedzie do moda");
+        assert(contract.at("data").at("target_faction") == "HEL" && "cel nagrody jedzie do moda");
+        assert(contract.at("data").at("reward") == 24000);
+        assert(contract.at("data").at("duration_min") == 45);
+    }
 
     // dopisanie niedokończonej linii i restart procesu (nowy Db/reader) — offset musi przetrwać
     {

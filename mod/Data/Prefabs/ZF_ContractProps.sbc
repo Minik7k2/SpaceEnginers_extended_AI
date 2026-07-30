@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rekwizyty zleceń (Etap 6): obiekty, które frakcja stawia w świecie PO TO, żeby było
+  na czym wystawić kontrakt. Bez nich zlecenia typu „poszukiwania" i „naprawa" mogły
+  powstać tylko wtedy, gdy w świecie przypadkiem stało coś nadającego się na cel.
+
+  ZF_Zgubka — cel POSZUKIWAŃ (MyContractSearch). Vanillowe zlecenie poszukiwań każe
+  odnaleźć mały grid i przywieźć go pod stację, więc ten MUSI być NIESTATYCZNY (żeby
+  dało się go złapać podwoziem magnetycznym). Beacon daje mu się w ogóle odnaleźć.
+  Sprzątacz śmieci SE zjada gridy niestatyczne o małej liczbie bloków daleko od gracza,
+  ale tylko BEZPAŃSKIE — dlatego mod po spawnie nadaje go frakcji wystawiającej zlecenie
+  (ChangeGridOwnership). To jednocześnie fabularnie zgodne: to JEJ zgubiony moduł.
+
+  ZF_Wrak — cel NAPRAWY (MyContractRepair), gdy w świecie nie ma nic uszkodzonego.
+  Bloki mają obniżoną integralność (IntegrityPercent/BuildPercent), więc grid od razu
+  jest legalnym celem naprawy — nie trzeba go psuć w locie żadnym API. Statyczny:
+  gracz do niego przylatuje ze spawarką, nie wozi go nigdzie, a IsStatic chroni przed
+  sprzątaczem (patrz ZF_DropCrate.sbc, gdzie ta lekcja jest opisana szerzej).
+
+  Nazwy wyświetlane NIE MOGĄ zaczynać się od „Skrzynka zrzutu" — po tym prefiksie
+  RansomManager rozpoznaje osierocone skrzynki okupu i je kasuje.
+-->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Prefabs>
+
+    <Prefab>
+      <Id Type="MyObjectBuilder_PrefabDefinition" Subtype="ZF_Zgubka" />
+      <CubeGrids>
+        <CubeGrid>
+          <SubtypeName />
+          <DisplayName>Zgubiony modul</DisplayName>
+          <GridSizeEnum>Small</GridSizeEnum>
+          <IsStatic>false</IsStatic>
+          <PersistentFlags>CastShadows InScene</PersistentFlags>
+          <PositionAndOrientation>
+            <Position x="0" y="0" z="0" />
+            <Forward x="0" y="0" z="-1" />
+            <Up x="0" y="1" z="0" />
+          </PositionAndOrientation>
+          <CubeBlocks>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_CargoContainer">
+              <SubtypeName>SmallBlockSmallContainer</SubtypeName>
+              <Min x="0" y="0" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>Zgubiony modul</CustomName>
+            </MyObjectBuilder_CubeBlock>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_Beacon">
+              <SubtypeName>SmallBlockBeacon</SubtypeName>
+              <Min x="0" y="1" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>ZGUBA</CustomName>
+              <BroadcastRadius>5000</BroadcastRadius>
+            </MyObjectBuilder_CubeBlock>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_BatteryBlock">
+              <SubtypeName>SmallBlockBatteryBlock</SubtypeName>
+              <Min x="0" y="2" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>Zasilanie modulu</CustomName>
+              <Enabled>true</Enabled>
+              <CurrentStoredPower>1</CurrentStoredPower>
+              <MaxStoredPower>1</MaxStoredPower>
+              <ProducerEnabled>true</ProducerEnabled>
+              <SemiautoEnabled>false</SemiautoEnabled>
+            </MyObjectBuilder_CubeBlock>
+          </CubeBlocks>
+        </CubeGrid>
+      </CubeGrids>
+    </Prefab>
+
+    <Prefab>
+      <Id Type="MyObjectBuilder_PrefabDefinition" Subtype="ZF_Wrak" />
+      <CubeGrids>
+        <CubeGrid>
+          <SubtypeName />
+          <DisplayName>Uszkodzony modul frakcji</DisplayName>
+          <GridSizeEnum>Large</GridSizeEnum>
+          <IsStatic>true</IsStatic>
+          <PersistentFlags>CastShadows InScene</PersistentFlags>
+          <PositionAndOrientation>
+            <Position x="0" y="0" z="0" />
+            <Forward x="0" y="0" z="-1" />
+            <Up x="0" y="1" z="0" />
+          </PositionAndOrientation>
+          <CubeBlocks>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_CargoContainer">
+              <SubtypeName>LargeBlockSmallContainer</SubtypeName>
+              <Min x="0" y="0" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>Uszkodzony magazyn</CustomName>
+              <IntegrityPercent>0.35</IntegrityPercent>
+              <BuildPercent>0.35</BuildPercent>
+            </MyObjectBuilder_CubeBlock>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_Beacon">
+              <SubtypeName>LargeBlockBeacon</SubtypeName>
+              <Min x="0" y="1" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>AWARIA</CustomName>
+              <BroadcastRadius>5000</BroadcastRadius>
+              <IntegrityPercent>0.4</IntegrityPercent>
+              <BuildPercent>0.4</BuildPercent>
+            </MyObjectBuilder_CubeBlock>
+            <MyObjectBuilder_CubeBlock xsi:type="MyObjectBuilder_BatteryBlock">
+              <SubtypeName>LargeBlockBatteryBlock</SubtypeName>
+              <Min x="0" y="3" z="0" />
+              <BlockOrientation Forward="Forward" Up="Up" />
+              <CustomName>Zasilanie awaryjne</CustomName>
+              <Enabled>true</Enabled>
+              <CurrentStoredPower>3</CurrentStoredPower>
+              <MaxStoredPower>3</MaxStoredPower>
+              <ProducerEnabled>true</ProducerEnabled>
+              <SemiautoEnabled>false</SemiautoEnabled>
+            </MyObjectBuilder_CubeBlock>
+          </CubeBlocks>
+        </CubeGrid>
+      </CubeGrids>
+    </Prefab>
+
+  </Prefabs>
+</Definitions>

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <vector>
 
 namespace zf {
 
@@ -36,6 +38,10 @@ struct Config {
     double handel_max = 3;
     double kontrakt_min = 10;
     double kontrakt_max = 20;
+    // Przyjęcie zlecenia to deklaracja po czyjejś stronie: każda frakcja WROGA
+    // wystawcy (relacja <= prog_wrogi) traci do gracza tyle zaufania. Delta wprost,
+    // więc ujemna. 0 = wyłącz (przyjmowanie zleceń nikogo nie obchodzi).
+    double kontrakt_przyjety_u_wroga = -3;
     double atak_na_wroga_bonus = 5;
     // Bonus "wróg mojego wroga" leciał przy KAŻDYM combat_hit, a mod agreguje trafienia co
     // 3 s — jedna strzelanina dawała +15 i więcej u wszystkich wrogów ostrzelanej frakcji.
@@ -93,7 +99,30 @@ struct Config {
     int kontrakty_nagroda_min = 15000;    // widełki nagrody w kredytach (skalowane relacją)
     int kontrakty_nagroda_max = 60000;
     int kontrakty_czas_min = 45;          // czas na wykonanie (minuty)
+
+    // [kontrakty.typy] — wagi losowania RODZAJU zlecenia; 0 = typ wyłączony. Klucz mapy
+    // zewnętrznej: "" = wagi domyślne, "KRW" = nadpisanie dla tej frakcji (charakter
+    // frakcji: piraci wolą nagrody za głowę, górnicy naprawy). Nieznany typ = błąd configu.
+    std::map<std::string, std::map<std::string, double>> kontrakty_wagi;
+    // [kontrakty.mnoznik] — TRUDNOŚĆ typu: mnoży zarówno nagrodę w kredytach, jak i
+    // zmianę relacji za wykonanie/zawalenie. Jedna liczba na typ, żeby trudniejsza
+    // robota opłacała się w obie strony (kredyty i odkupienie).
+    std::map<std::string, double> kontrakty_mnoznik;
+    // Napięcie/wojna przestawia frakcję na myślenie bojowe: waga "nagroda" ×N.
+    double kontrakty_mnoznik_nagrody_w_napieciu = 3;
+
+    // Kanoniczna lista typów (dostawa, nagroda, transport, naprawa, poszukiwania,
+    // eskorta, wlasne) — waliduje config i komendę /zf kontrakt <frakcja> [typ].
+    static const std::vector<std::string>& contract_kinds();
 };
+
+// Waga losowania typu dla frakcji: nadpisanie frakcji > wartość domyślna > 0.
+// state ("spokoj"/"napiecie"/"wojna") podbija wagę nagrody za głowę w napięciu i wojnie.
+double contract_kind_weight(const Config& cfg, const std::string& faction,
+                            const std::string& kind, const std::string& state);
+
+// Mnożnik trudności typu (nagroda i relacja). Brak wpisu = 1.0.
+double contract_kind_multiplier(const Config& cfg, const std::string& kind);
 
 // Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola
 // [bridge].storage_dir. Po wczytaniu pliku głównego nakłada wartości z pliku

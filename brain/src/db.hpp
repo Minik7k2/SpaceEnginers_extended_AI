@@ -76,6 +76,14 @@ public:
     int count_open_contracts(const std::string& faction) const;
     // Frakcja kontraktu ("" = nieznany id).
     std::string get_contract_faction(const std::string& id) const;
+    // Typ kontraktu ("" = nieznany id). Przy contract_done stąd bierzemy mnożnik
+    // trudności — mod przysyła tylko ID i wynik, nie pamięta rodzaju zlecenia.
+    std::string get_contract_kind(const std::string& id) const;
+    // 'open' (wystawiony) | 'taken' (gracz przyjął) | 'done' | 'failed'. Służy też za
+    // bezpiecznik idempotencji: contract_taken ma zadziałać dokładnie raz na kontrakt.
+    std::string get_contract_status(const std::string& id) const;
+    // Surowe dane zdarzenia contract_created (m.in. cel nagrody za głowę).
+    std::string get_contract_payload(const std::string& id) const;
 
     // Małe wartości int64 (np. znacznik ostatniego ticku) — współdzieli tabelę bridge_state,
     // klucze zaczynają się od "__" żeby nie kolidowały ze ścieżkami plików.

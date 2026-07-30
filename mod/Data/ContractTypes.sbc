@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<!-- Własny typ zlecenia dla kontraktów tworzonych klasą MyContractCustom (typ "wlasne"
+     w brainie). Dzięki definicji frakcja może wystawić zlecenie z WŁASNĄ nazwą i opisem
+     po polsku, a nie tylko generyczne "Acquisition" z vanilli.
+
+     UWAGA — to jedyny kawałek kontraktów, którego nie potwierdza dokumentacja ModAPI:
+     kontener <ContractTypes> i pola poniżej odtworzone są z opisu MyObjectBuilder_
+     ContractTypeDefinition (wiki modding) oraz z konstruktora MyContractCustom.
+     Jeśli gra tej definicji nie wczyta, MyDefinitionId.Parse w Contracts.cs zawiedzie
+     albo AddContract zwróci Success=false — i mod wystawi zwykłą DOSTAWĘ zamiast tego
+     zlecenia (patrz TryAddOfKind). Nic się nie psuje, po prostu typ "wlasne" nie działa;
+     wtedy w brain/configs/rules.toml ustaw [kontrakty.typy] wlasne = 0.
+
+     StrategyType = Hauling, bo konstruktor MyContractCustom przyjmuje endBlockId
+     (start + cel) — te same parametry, co zlecenie transportowe.
+
+     MinimumReputation / FailReputationPrice = 0 CELOWO: reputacją rządzi nasz silnik
+     relacji (hybryda, patrz Reputation.cs). Gdyby gra dodawała swoją, to samo zdarzenie
+     liczyłoby się dwa razy. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <ContractTypes>
+
+    <ContractType xsi:type="MyObjectBuilder_ContractTypeDefinition">
+      <Id>
+        <TypeId>MyObjectBuilder_ContractTypeDefinition</TypeId>
+        <SubtypeId>ZF_Zlecenie</SubtypeId>
+      </Id>
+      <DisplayName>Zlecenie frakcji</DisplayName>
+      <Description>Zlecenie wystawione przez żywą frakcję NPC. Nazwę i treść podaje frakcja.</Description>
+      <StrategyType>Hauling</StrategyType>
+      <!-- Zlecenia stawia mod przez ContractSystem, nie gracz na swoim bloku, i nie mają
+           się losować same na stacjach vanilla — stąd false i brak ChancesPerFactionType. -->
+      <EnableForPlayerBlock>false</EnableForPlayerBlock>
+      <AvailableInSurvival>true</AvailableInSurvival>
+      <Public>true</Public>
+      <Enabled>true</Enabled>
+      <MinReputationRequirement>-1500</MinReputationRequirement>
+      <DurationMultiplier>1</DurationMultiplier>
+      <MinimumMoney>1000</MinimumMoney>
+      <MinimumReputation>0</MinimumReputation>
+      <FailReputationPrice>0</FailReputationPrice>
+    </ContractType>
+
+  </ContractTypes>
+</Definitions>

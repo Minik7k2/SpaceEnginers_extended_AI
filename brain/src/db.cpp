@@ -246,13 +246,34 @@ void Db::set_contract_status(const std::string& id, const std::string& status) {
 }
 
 int Db::count_open_contracts(const std::string& faction) const {
-    Stmt s(handle_, "SELECT COUNT(*) FROM contracts WHERE faction = ? AND status = 'open';");
+    // 'taken' liczy się jak 'open': zlecenie przyjęte przez gracza wciąż jest
+    // niezakończone, więc frakcja nie może w tym czasie wystawić następnego.
+    Stmt s(handle_,
+           "SELECT COUNT(*) FROM contracts WHERE faction = ? AND status IN ('open', 'taken');");
     s.text(1, faction);
     return s.row() ? s.col_int(0) : 0;
 }
 
 std::string Db::get_contract_faction(const std::string& id) const {
     Stmt s(handle_, "SELECT faction FROM contracts WHERE contract_id = ?;");
+    s.text(1, id);
+    return s.row() ? s.col_text(0) : std::string{};
+}
+
+std::string Db::get_contract_kind(const std::string& id) const {
+    Stmt s(handle_, "SELECT kind FROM contracts WHERE contract_id = ?;");
+    s.text(1, id);
+    return s.row() ? s.col_text(0) : std::string{};
+}
+
+std::string Db::get_contract_status(const std::string& id) const {
+    Stmt s(handle_, "SELECT status FROM contracts WHERE contract_id = ?;");
+    s.text(1, id);
+    return s.row() ? s.col_text(0) : std::string{};
+}
+
+std::string Db::get_contract_payload(const std::string& id) const {
+    Stmt s(handle_, "SELECT payload FROM contracts WHERE contract_id = ?;");
     s.text(1, id);
     return s.row() ? s.col_text(0) : std::string{};
 }
