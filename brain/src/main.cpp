@@ -179,7 +179,8 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
         }
         for (const zf::ContractOut& c : engine.take_contracts()) {
             std::cout << "  [KONTRAKT | " << c.faction << "] " << c.kind << " za " << c.reward
-                      << " kr (" << c.duration_min << " min)\n";
+                      << " kr (" << c.duration_min << " min"
+                      << (c.target_faction.empty() ? "" : ", cel " + c.target_faction) << ")\n";
         }
         for (const zf::ReputationOut& r : engine.take_reputations()) {
             std::cout << "  [REPUTACJA | " << r.faction
@@ -307,9 +308,11 @@ int main(int argc, char** argv) {
         // Zlecenia kontraktów (Etap 6) — osobny kanał, tak jak spawny.
         const auto flush_contracts = [&commands, &engine]() {
             for (const zf::ContractOut& c : engine.take_contracts()) {
-                commands.write_contract_create(c.faction, c.kind, c.reward, c.duration_min);
+                commands.write_contract_create(c.faction, c.kind, c.reward, c.duration_min,
+                                               c.target_faction);
                 std::cout << "[brain] contract_create [" << c.faction << "] " << c.kind << " za "
-                          << c.reward << " kr, " << c.duration_min << " min\n";
+                          << c.reward << " kr, " << c.duration_min << " min"
+                          << (c.target_faction.empty() ? "" : ", cel " + c.target_faction) << "\n";
             }
         };
 

@@ -67,9 +67,17 @@ struct ReputationOut {
 // odsyła contract_created z prawdziwym ID (dopiero wtedy trafia do SQLite).
 struct ContractOut {
     std::string faction;
-    std::string kind;      // dostawa (na razie jedyny rodzaj: MyContractAcquisition)
-    std::int64_t reward = 0;   // kredyty
+    // dostawa | nagroda | transport | naprawa | poszukiwania | eskorta | wlasne
+    // (Config::contract_kinds(); każdy ma swoją klasę w Sandbox.ModAPI.Contracts).
+    // Silnik wybiera typ wagami z [kontrakty.typy], ale OSTATNIE słowo ma mod: jeśli
+    // nie znajdzie w świecie celu (wrogiego pilota, drugiego bloku, uszkodzonej
+    // siatki...), wystawia dostawę i to ona wraca w contract_created.
+    std::string kind;
+    std::int64_t reward = 0;   // kredyty (po mnożniku trudności typu)
     int duration_min = 45;
+    // Tylko dla "nagroda": frakcja, na której głowę idzie zlecenie (najgorsza relacja
+    // wystawcy wg polityki). Mod tłumaczy tag na identity właściciela jej siatki.
+    std::string target_faction;
 };
 
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
@@ -230,6 +238,17 @@ private:
     // Tick: czy frakcja wystawia teraz zlecenie (relacja, cooldown, limit otwartych).
     void maybe_offer_contract(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                               std::vector<RadioOut>& out);
+    // Losowanie typu zlecenia wagami z [kontrakty.typy] (nadpisania per frakcja, podbicie
+    // "nagrody" w napięciu/wojnie). Typy bez sensownego celu są odsiewane: nagroda wymaga
+    // frakcji, z którą wystawca jest na bakier. "" = brak choćby jednego typu z wagą > 0.
+    std::string pick_contract_kind(const std::string& faction, const Config& cfg);
+    // Wystawia zlecenie do bufora: nagroda po mnożniku trudności, cel dla nagrody,
+    // a dla eskorty dorzuca konwój przez MES (nie ma czego eskortować bez statku).
+    void queue_contract(const std::string& faction, const std::string& kind, double relation,
+                        const Config& cfg, std::int64_t now_ms);
+    // Frakcja, na której głowę wystawca może dać nagrodę: najgorsza relacja w polityce
+    // i musi być poniżej prog_wrogi. "" = wystawca z nikim nie jest na wojennej stopie.
+    std::string worst_enemy_of(const std::string& faction, const Config& cfg) const;
 };
 
 // Kolor czatu frakcji (CLAUDE.md): HEL niebieski, KRW czerwony, WGR żółty.

@@ -77,6 +77,16 @@ bool is_own_faction(const std::string& tag) {
     return tag == "HEL" || tag == "KRW" || tag == "WGR";
 }
 
+// Typ kontraktu z brakującego/nieznanego pola. Stare zapisy (przed rozbudową typów)
+// i mod bez naszej wersji Contracts.cs przysyłają puste pole — to była dostawa.
+std::string kontrakt_kind_or_default(const std::string& kind) {
+    if (kind.empty()) {
+        return "dostawa";
+    }
+    const auto& kinds = Config::contract_kinds();
+    return std::find(kinds.begin(), kinds.end(), kind) != kinds.end() ? kind : "dostawa";
+}
+
 // Rozbija listę surowców "Iron,Nickel,Silicon" z configu na wektor kluczy;
 // białe znaki i puste pozycje pomija.
 std::vector<std::string> split_items(const std::string& csv) {
@@ -664,11 +674,12 @@ void Engine::handle_contract_created(const Event& ev, const Config& cfg, std::in
 
     // Utrwalenie: ID z gry musi przeżyć restart świata (CLAUDE.md), a przy
     // contract_done to stąd bierzemy frakcję — mod nie musi jej pamiętać.
-    const std::string kind = data_str(ev, "kind");
-    db_.upsert_contract(contract_id, faction, kind.empty() ? "dostawa" : kind, "open",
-                        ev.data.dump());
-    std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", "
-              << (kind.empty() ? "dostawa" : kind) << ") wystawiony w grze\n";
+    // Mod mógł zamienić typ na dostawę (brak celu w świecie) — utrwalamy TO, co
+    // naprawdę powstało w grze, bo od tego zależy mnożnik przy rozliczeniu.
+    const std::string kind = kontrakt_kind_or_default(data_str(ev, "kind"));
+    db_.upsert_contract(contract_id, faction, kind, "open", ev.data.dump());
+    std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", " << kind
+              << ") wystawiony w grze\n";
 
     // Głos frakcji: ogłoszenie zlecenia. {oferta} podstawia opis z moda (co i za ile).
     const std::string opis = data_str(ev, "opis");
@@ -704,11 +715,15 @@ void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64
         db_.set_contract_status(contract_id, success ? "done" : "failed");
     }
 
-    const double delta = success ? cfg.kontrakt_max : -cfg.kontrakt_min;
+    // Trudniejszy typ = większe odkupienie i większa kara. Typ bierzemy z bazy: mod
+    // przysyła tylko ID i wynik, a po wczytaniu świata nie pamięta nawet frakcji.
+    const std::string kind = kontrakt_kind_or_default(db_.get_contract_kind(contract_id));
+    const double mult = contract_kind_multiplier(cfg, kind);
+    const double delta = (success ? cfg.kontrakt_max : -cfg.kontrakt_min) * mult;
     const double rel = db_.adjust_relation(faction, kPlayer, delta);
     std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta)
-              << (success ? " za wykonany kontrakt" : " za zawalony kontrakt") << " => "
-              << format_value(rel) << "\n";
+              << (success ? " za wykonany kontrakt (" : " za zawalony kontrakt (") << kind
+              << ", mnożnik " << mult << ") => " << format_value(rel) << "\n";
     db_.add_memory(now_ms, faction, success ? "kontrakt_ok" : "kontrakt_fail", 0,
                    success ? "Gracz wykonał kontrakt dla " + faction + "."
                            : "Gracz zawalił kontrakt dla " + faction + ".");
@@ -745,16 +760,99 @@ void Engine::maybe_offer_contract(const std::string& faction, const Config& cfg,
     }
     db_.set_kv(contract_key(faction), now_ms);
 
+    const std::string kind = pick_contract_kind(faction, cfg);
+    if (kind.empty()) {
+        std::cerr << "[brain] kontrakt: " << faction
+                  << " nie ma ani jednego typu zlecenia z wagą > 0 ([kontrakty.typy])\n";
+        return;
+    }
+    queue_contract(faction, kind, value, cfg, now_ms);
+}
+
+std::string Engine::worst_enemy_of(const std::string& faction, const Config& cfg) const {
+    std::string worst;
+    double worst_value = 0;
+    for (const FactionRow& other : db_.list_factions()) {
+        if (other.tag == faction || other.tag == kPlayer) {
+            continue;
+        }
+        const double value = db_.get_relation(faction, other.tag).value;
+        if (value < worst_value) {
+            worst_value = value;
+            worst = other.tag;
+        }
+    }
+    // Nagroda za głowę kogoś, z kim jesteśmy tylko chłodno, nie ma sensu — a bez tej
+    // bramki HEL zlecałby zabijanie WGR (polityka +10) przy pierwszym losowaniu.
+    return worst_value <= cfg.prog_wrogi ? worst : std::string{};
+}
+
+std::string Engine::pick_contract_kind(const std::string& faction, const Config& cfg) {
+    std::string state = "spokoj";
+    for (const FactionRow& row : db_.list_factions()) {
+        if (row.tag == faction) {
+            state = row.state;
+            break;
+        }
+    }
+    // Nagroda za głowę wymaga celu; bez wroga w polityce typ w ogóle nie wchodzi do
+    // losowania (inaczej mod dostawałby zlecenie, które i tak musi zamienić na dostawę).
+    const bool bounty_possible = !worst_enemy_of(faction, cfg).empty();
+
+    std::vector<std::pair<std::string, double>> pool;
+    double total = 0;
+    for (const std::string& kind : Config::contract_kinds()) {
+        if (kind == "nagroda" && !bounty_possible) {
+            continue;
+        }
+        const double weight = contract_kind_weight(cfg, faction, kind, state);
+        if (weight <= 0) {
+            continue;
+        }
+        total += weight;
+        pool.emplace_back(kind, weight);
+    }
+    if (pool.empty()) {
+        return {};
+    }
+
+    std::uniform_real_distribution<double> dist(0.0, total);
+    double roll = dist(rng_);
+    for (const auto& [kind, weight] : pool) {
+        roll -= weight;
+        if (roll <= 0) {
+            return kind;
+        }
+    }
+    return pool.back().first;  // zaokrąglenia double — ostatni z puli
+}
+
+void Engine::queue_contract(const std::string& faction, const std::string& kind, double relation,
+                            const Config& cfg, std::int64_t now_ms) {
     // Nagroda skalowana relacją: im lepiej was widzą, tym lepiej płatna robota.
     const double span = 100.0 - cfg.kontrakty_prog_relacji;
-    const double t = span > 0 ? std::clamp((value - cfg.kontrakty_prog_relacji) / span, 0.0, 1.0) : 0.0;
+    const double t = span > 0 ? std::clamp((relation - cfg.kontrakty_prog_relacji) / span, 0.0, 1.0)
+                              : 0.0;
+    const double mult = contract_kind_multiplier(cfg, kind);
     const auto reward = static_cast<std::int64_t>(
-        cfg.kontrakty_nagroda_min +
-        (cfg.kontrakty_nagroda_max - cfg.kontrakty_nagroda_min) * t);
+        (cfg.kontrakty_nagroda_min + (cfg.kontrakty_nagroda_max - cfg.kontrakty_nagroda_min) * t) *
+        mult);
 
-    std::cout << "[brain] kontrakt: " << faction << " wystawia zlecenie za " << reward
-              << " kr (relacja " << format_value(value) << ")\n";
-    pending_contracts_.push_back({faction, "dostawa", reward, cfg.kontrakty_czas_min});
+    const std::string target = kind == "nagroda" ? worst_enemy_of(faction, cfg) : std::string{};
+
+    std::cout << "[brain] kontrakt: " << faction << " wystawia zlecenie (" << kind << ") za "
+              << reward << " kr (relacja " << format_value(relation) << ", mnożnik " << mult
+              << (target.empty() ? "" : ", cel " + target) << ")\n";
+    pending_contracts_.push_back({faction, kind, reward, cfg.kontrakty_czas_min, target});
+
+    // Eskorta bez czego eskortować to zlecenie-widmo: dorzucamy konwój tej frakcji
+    // przez MES. force=true omija cooldown spawnu (kontrakt już poszedł), ale globalny
+    // wyłącznik [spawn].wlaczone szanujemy — kto wyłączył spawny, nie chce statków.
+    if (kind == "eskorta" && cfg.spawn_wlaczone) {
+        request_spawn(faction, "convoy", cfg, now_ms,
+                      "Konwój do eskorty — zlecenie eskorty frakcji " + faction + ".",
+                      /*force=*/true);
+    }
 }
 
 bool Engine::chat_expects_decision(const std::string& faction, std::int64_t now_ms) const {
@@ -946,10 +1044,40 @@ void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_m
                            "white", 0, {}, {}});
             return;
         }
-        const auto reward = static_cast<std::int64_t>(cfg.kontrakty_nagroda_min);
-        pending_contracts_.push_back({faction, "dostawa", reward, cfg.kontrakty_czas_min});
+        // Opcjonalny typ: "/zf kontrakt KRW nagroda" testuje konkretną klasę kontraktu
+        // bez czekania na losowanie. Bez typu — normalne losowanie wagami.
+        const std::string wanted = data_str(ev, "kind");
+        std::string kind = wanted;
+        if (!kind.empty()) {
+            const auto& kinds = Config::contract_kinds();
+            if (std::find(kinds.begin(), kinds.end(), kind) == kinds.end()) {
+                std::string known;
+                for (const std::string& k : kinds) {
+                    known += (known.empty() ? "" : ", ") + k;
+                }
+                out.push_back({"SYSTEM", "Nieznany typ zlecenia \"" + kind + "\". Znane: " + known + ".",
+                               "white", 0, {}, {}});
+                return;
+            }
+            if (kind == "nagroda" && worst_enemy_of(faction, cfg).empty()) {
+                out.push_back({"SYSTEM", "Frakcja " + faction +
+                                             " nie ma wroga w polityce — nagroda za głowę nie ma celu.",
+                               "white", 0, {}, {}});
+                return;
+            }
+        } else {
+            kind = pick_contract_kind(faction, cfg);
+            if (kind.empty()) {
+                out.push_back({"SYSTEM", "Żaden typ zlecenia nie ma wagi > 0 ([kontrakty.typy]).",
+                               "white", 0, {}, {}});
+                return;
+            }
+        }
+        // Relacja = próg: wymuszone zlecenie jest najtańsze z widełek, żeby test nie
+        // zależał od stanu relacji (a mnożnik typu i tak jest widoczny w kwocie).
+        queue_contract(faction, kind, cfg.kontrakty_prog_relacji, cfg, now_ms);
         db_.set_kv(contract_key(faction), now_ms);
-        out.push_back({"SYSTEM", "Zlecenie " + faction + " za " + std::to_string(reward) + " kr — wystawiam.",
+        out.push_back({"SYSTEM", "Zlecenie " + faction + " (" + kind + ") — wystawiam.",
                        "white", 0, {}, {}});
     } else if (cmd == "okup") {
         // /zf okup <frakcja>: deterministyczny wyzwalacz de-eskalacji — niezależny od

@@ -57,9 +57,11 @@ public:
 
     // Etap 6: zlecenie kontraktu do moda. Mod tworzy go przez MyAPIGateway.ContractSystem
     // na bloku kontraktów/sklepu tej frakcji i odsyła contract_created z prawdziwym ID
-    // (dopiero wtedy kontrakt trafia do SQLite).
+    // (dopiero wtedy kontrakt trafia do SQLite). kind wybiera klasę kontraktu w modzie,
+    // target_faction ma znaczenie tylko dla "nagroda" (na czyją głowę).
     void write_contract_create(const std::string& faction, const std::string& kind,
-                               std::int64_t reward, int duration_min);
+                               std::int64_t reward, int duration_min,
+                               const std::string& target_faction = {});
 
     // reputation_sync: przepisanie naszej relacji na natywną reputację SE. other pusty =
     // relacja frakcja→gracz, niepusty = druga frakcja (polityka). value idzie tylko dla

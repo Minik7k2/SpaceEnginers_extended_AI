@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -11,6 +12,35 @@
 namespace zf {
 
 namespace {
+
+// Typo w nazwie typu kontraktu jest ciche i kosztowne: waga wyląduje w mapie, ale
+// nigdy nie zostanie użyta, a frakcja bez ostrzeżenia wystawia same dostawy. Stąd
+// twardy błąd configu zamiast ignorowania nieznanego klucza.
+void require_contract_kind(const std::string& kind, const std::string& where) {
+    const auto& kinds = Config::contract_kinds();
+    if (std::find(kinds.begin(), kinds.end(), kind) != kinds.end()) {
+        return;
+    }
+    std::string known;
+    for (const std::string& k : kinds) {
+        known += (known.empty() ? "" : ", ") + k;
+    }
+    throw std::runtime_error("nieznany typ kontraktu w " + where + ": \"" + kind +
+                             "\" (znane: " + known + ")");
+}
+
+// Wagi używane, gdy config w ogóle nie wspomina o danym typie: dostawa i transport
+// są chlebem powszednim, reszta rzadsza. Bez tego brak [kontrakty.typy] oznaczałby
+// zerowe wagi wszędzie i ani jednego kontraktu.
+double builtin_weight(const std::string& kind) {
+    if (kind == "dostawa") {
+        return 3;
+    }
+    if (kind == "transport") {
+        return 2;
+    }
+    return 1;
+}
 
 // Nakłada wartości z tabeli na config — tylko klucze obecne w pliku nadpisują
 // dotychczasowe wartości, dzięki czemu rules.local.toml może zawierać sam
@@ -100,6 +130,35 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.kontrakty_nagroda_min = (*kon)["nagroda_min"].value_or(cfg.kontrakty_nagroda_min);
         cfg.kontrakty_nagroda_max = (*kon)["nagroda_max"].value_or(cfg.kontrakty_nagroda_max);
         cfg.kontrakty_czas_min = (*kon)["czas_min"].value_or(cfg.kontrakty_czas_min);
+        cfg.kontrakty_mnoznik_nagrody_w_napieciu =
+            (*kon)["mnoznik_nagrody_w_napieciu"].value_or(cfg.kontrakty_mnoznik_nagrody_w_napieciu);
+
+        // [kontrakty.typy]: liczby = wagi domyślne, podtabele = nadpisania per frakcja
+        // ([kontrakty.typy.KRW]). Scalamy klucz po kluczu, żeby rules.local.toml mógł
+        // przestawić jedną wagę bez przepisywania całej tabeli.
+        if (const auto* typy = (*kon)["typy"].as_table()) {
+            for (const auto& [key, node] : *typy) {
+                const std::string name(key.str());
+                if (const auto* per_faction = node.as_table()) {
+                    for (const auto& [kind_key, weight] : *per_faction) {
+                        const std::string kind(kind_key.str());
+                        require_contract_kind(kind, "[kontrakty.typy." + name + "]");
+                        cfg.kontrakty_wagi[name][kind] = weight.value_or(0.0);
+                    }
+                    continue;
+                }
+                require_contract_kind(name, "[kontrakty.typy]");
+                cfg.kontrakty_wagi[""][name] = node.value_or(0.0);
+            }
+        }
+
+        if (const auto* mn = (*kon)["mnoznik"].as_table()) {
+            for (const auto& [key, node] : *mn) {
+                const std::string kind(key.str());
+                require_contract_kind(kind, "[kontrakty.mnoznik]");
+                cfg.kontrakty_mnoznik[kind] = node.value_or(1.0);
+            }
+        }
     }
 
     if (const auto* rep = tbl["reputacja"].as_table()) {
@@ -233,6 +292,55 @@ void ConfigWatcher::read_mtimes(std::int64_t& main_out, std::int64_t& local_out)
     };
     main_out = mtime(path_);
     local_out = mtime(local_config_path(path_));
+}
+
+const std::vector<std::string>& Config::contract_kinds() {
+    // Kolejność = kolejność w dokumentacji i w /zf kontrakt. Każdy typ ma swoją klasę
+    // w Sandbox.ModAPI.Contracts (patrz docs/protocol.md i mod/.../Contracts.cs).
+    static const std::vector<std::string> kinds{
+        "dostawa",       // MyContractAcquisition
+        "nagroda",       // MyContractBounty
+        "transport",     // MyContractHauling
+        "naprawa",       // MyContractRepair
+        "poszukiwania",  // MyContractSearch
+        "eskorta",       // MyContractEscort
+        "wlasne",        // MyContractCustom
+    };
+    return kinds;
+}
+
+double contract_kind_weight(const Config& cfg, const std::string& faction,
+                            const std::string& kind, const std::string& state) {
+    double weight = builtin_weight(kind);
+    const auto defaults = cfg.kontrakty_wagi.find("");
+    if (defaults != cfg.kontrakty_wagi.end()) {
+        const auto it = defaults->second.find(kind);
+        if (it != defaults->second.end()) {
+            weight = it->second;
+        }
+    }
+    const auto per_faction = cfg.kontrakty_wagi.find(faction);
+    if (per_faction != cfg.kontrakty_wagi.end()) {
+        const auto it = per_faction->second.find(kind);
+        if (it != per_faction->second.end()) {
+            weight = it->second;
+        }
+    }
+    // Frakcja w napięciu albo wojnie chce, żeby ktoś zrobił za nią brudną robotę —
+    // ale mnożnik nie WŁĄCZA typu wyłączonego wagą 0 (0 × N = 0, i tak ma być).
+    if (kind == "nagroda" && (state == "napiecie" || state == "wojna")) {
+        weight *= cfg.kontrakty_mnoznik_nagrody_w_napieciu;
+    }
+    return weight > 0 ? weight : 0;
+}
+
+double contract_kind_multiplier(const Config& cfg, const std::string& kind) {
+    const auto it = cfg.kontrakty_mnoznik.find(kind);
+    if (it == cfg.kontrakty_mnoznik.end()) {
+        return 1.0;
+    }
+    // Mnożnik ≤ 0 zerowałby nagrodę i relację — traktujemy jak brak wpisu.
+    return it->second > 0 ? it->second : 1.0;
 }
 
 bool ConfigWatcher::poll() {

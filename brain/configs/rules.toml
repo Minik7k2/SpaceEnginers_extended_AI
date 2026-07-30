@@ -84,6 +84,74 @@ max_otwartych = 1
 nagroda_min = 15000
 nagroda_max = 60000
 czas_min = 45
+# Frakcja w napięciu/wojnie chce, żeby ktoś zrobił za nią brudną robotę: waga typu
+# "nagroda" (za głowę) jest wtedy mnożona przez tę wartość. Nie włącza typu z wagą 0.
+mnoznik_nagrody_w_napieciu = 3
+
+# Rodzaje zleceń. Każdy ma inną klasę w Sandbox.ModAPI.Contracts, więc mod musi
+# znaleźć w świecie CEL — i gdy go nie ma, wystawia dostawę (patrz docs/protocol.md):
+#   dostawa      MyContractAcquisition  zdobądź towar i dostarcz na blok frakcji
+#   nagroda      MyContractBounty       głowa pilota wrogiej frakcji (cel z polityki)
+#   transport    MyContractHauling      ładunek z bloku frakcji na inny blok
+#   naprawa      MyContractRepair       napraw uszkodzoną siatkę frakcji
+#   poszukiwania MyContractSearch       znajdź siatkę w promieniu (zaginione/wrak)
+#   eskorta      MyContractEscort       odprowadź konwój (brain dokłada spawn MES)
+#   wlasne       MyContractCustom       zlecenie z własną nazwą i opisem PL (SBC)
+#
+# UWAGA co do `wlasne`: to JEDYNY typ nieprzewidziany wprost w dokumentacji API —
+# wymaga definicji MyObjectBuilder_ContractTypeDefinition (mod/Data/ContractTypes.sbc),
+# a zgłoszone bugi Keena mówią, że kontrakty custom nie ruszają reputacji vanilla
+# (u nas nieszkodliwe — reputację prowadzi brain) i mogą źle pokazywać nazwę typu.
+# Jeśli w grze okaże się kłopotliwy: ustaw tu `wlasne = 0`.
+
+[kontrakty.typy]
+# Wagi losowania (0 = typ wyłączony). Wartości domyślne dla wszystkich frakcji.
+dostawa = 3
+nagroda = 1
+transport = 2
+naprawa = 1
+poszukiwania = 1
+eskorta = 1
+wlasne = 1
+
+[kontrakty.typy.HEL]
+# Korporacja żyje logistyką: dostawy i transport, brudną robotę zleca rzadko.
+dostawa = 4
+transport = 3
+eskorta = 2
+nagroda = 1
+poszukiwania = 1
+naprawa = 1
+
+[kontrakty.typy.KRW]
+# Piraci: głowa wroga i kruszec. Nie naprawiają cudzych wraków i nikogo nie eskortują.
+nagroda = 4
+dostawa = 3
+poszukiwania = 2
+transport = 1
+wlasne = 2
+naprawa = 0
+eskorta = 0
+
+[kontrakty.typy.WGR]
+# Górnicy: szyby się psują, koparki gubią, ruda musi dojechać.
+naprawa = 4
+dostawa = 3
+poszukiwania = 3
+transport = 2
+eskorta = 2
+nagroda = 1
+
+[kontrakty.mnoznik]
+# Trudność typu — mnoży NAGRODĘ w kredytach i zmianę relacji za wykonanie/zawalenie
+# (kontrakt_min/kontrakt_max z [zmiany]). Trudniejsza robota szybciej odkupuje winy.
+dostawa = 1.0
+nagroda = 1.6
+transport = 1.1
+naprawa = 1.2
+poszukiwania = 0.9
+eskorta = 1.4
+wlasne = 1.1
 
 [spawn]
 # Spawny statków frakcji sterowane maszyną stanów: przejście w napięcie -> patrol,

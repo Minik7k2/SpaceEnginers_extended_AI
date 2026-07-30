@@ -257,4 +257,10 @@ std::string Db::get_contract_faction(const std::string& id) const {
     return s.row() ? s.col_text(0) : std::string{};
 }
 
+std::string Db::get_contract_kind(const std::string& id) const {
+    Stmt s(handle_, "SELECT kind FROM contracts WHERE contract_id = ?;");
+    s.text(1, id);
+    return s.row() ? s.col_text(0) : std::string{};
+}
+
 } // namespace zf

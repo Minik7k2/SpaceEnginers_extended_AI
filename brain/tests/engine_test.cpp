@@ -529,6 +529,100 @@ int main() {
         assert(bad.size() == 1 && bad[0].faction == "SYSTEM");
     }
 
+    // --- Typy kontraktów: losowanie wagami, cel nagrody, mnożnik trudności ---
+    {
+        zf::Db tdb(":memory:");
+        zf::Engine te(tdb, fallback, /*rng_seed=*/7);
+        zf::Config tcfg;
+        tcfg.spawn_wlaczone = false; // izolacja od kanału spawnów (eskorta dokłada konwój)
+        std::int64_t t = 20000000;
+        te.on_event(make_event("session_start", {{"world", "T"}}), tcfg, t);
+
+        // Waga 0 wyłącza typ: same dostawy, nic innego.
+        for (const std::string& kind : zf::Config::contract_kinds()) {
+            tcfg.kontrakty_wagi[""][kind] = kind == "dostawa" ? 1.0 : 0.0;
+        }
+        for (int i = 0; i < 20; i++) {
+            auto out = te.on_event(
+                make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "WGR"}}), tcfg, t);
+            (void)out;
+            auto offers = te.take_contracts();
+            assert(offers.size() == 1 && offers[0].kind == "dostawa" &&
+                   "waga 0 ma wyłączyć wszystkie typy poza dostawą");
+        }
+
+        // Nadpisanie per frakcja bije wartość domyślną.
+        tcfg.kontrakty_wagi["KRW"]["naprawa"] = 5.0;
+        tcfg.kontrakty_wagi["KRW"]["dostawa"] = 0.0;
+        for (int i = 0; i < 20; i++) {
+            te.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "KRW"}}), tcfg, t);
+            auto offers = te.take_contracts();
+            assert(offers.size() == 1 && offers[0].kind == "naprawa" &&
+                   "[kontrakty.typy.KRW] ma nadpisywać wagi domyślne");
+        }
+        // ...ale tylko dla swojej frakcji.
+        te.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "WGR"}}), tcfg, t);
+        assert(te.take_contracts()[0].kind == "dostawa" && "nadpisanie KRW nie dotyczy WGR");
+
+        // Nagroda za głowę: cel to frakcja, z którą wystawca jest poniżej prog_wrogi
+        // (polityka z session_start: HEL/KRW -70). Bez wroga typ w ogóle nie wchodzi.
+        auto bounty = te.on_event(
+            make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "KRW"}, {"kind", "nagroda"}}),
+            tcfg, t);
+        auto offers = te.take_contracts();
+        assert(offers.size() == 1 && offers[0].kind == "nagroda");
+        assert(offers[0].target_faction == "HEL" && "cel nagrody = najgorsza relacja w polityce");
+        assert(bounty.size() == 1 && bounty[0].faction == "SYSTEM");
+
+        // Mnożnik trudności podnosi nagrodę w kredytach...
+        tcfg.kontrakty_mnoznik["nagroda"] = 2.0;
+        te.on_event(
+            make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "KRW"}, {"kind", "nagroda"}}),
+            tcfg, t);
+        const std::int64_t drozej = te.take_contracts()[0].reward;
+        assert(drozej == offers[0].reward * 2 && "mnożnik typu ma skalować nagrodę");
+
+        // ...i zmianę relacji przy rozliczeniu (odkupienie proporcjonalne do trudności).
+        te.on_event(make_event("contract_created", {{"contract_id", "n1"}, {"faction", "KRW"},
+                                                    {"kind", "nagroda"}}),
+                    tcfg, t);
+        const double przed = tdb.get_relation("KRW", "PLAYER").value;
+        t += kMinuteMs;
+        te.on_event(make_event("contract_done", {{"contract_id", "n1"}, {"success", true}}), tcfg, t);
+        const double po = tdb.get_relation("KRW", "PLAYER").value;
+        assert(po > przed + 2 * tcfg.kontrakt_max - 0.001 &&
+               "wykonana nagroda ma dać kontrakt_max × mnożnik");
+
+        // Typ, którego mod nie zdołał wystawić, wraca w contract_created jako dostawa —
+        // i to on decyduje o mnożniku (nie ten, o który prosił brain).
+        te.on_event(make_event("contract_created", {{"contract_id", "n2"}, {"faction", "WGR"},
+                                                    {"kind", "dostawa"}}),
+                    tcfg, t);
+        const double przed_w = tdb.get_relation("WGR", "PLAYER").value;
+        t += kMinuteMs;
+        te.on_event(make_event("contract_done", {{"contract_id", "n2"}, {"success", true}}), tcfg, t);
+        const double po_w = tdb.get_relation("WGR", "PLAYER").value;
+        assert(po_w < przed_w + 2 * tcfg.kontrakt_max - 0.001 &&
+               "dostawa nie dostaje mnożnika nagrody");
+
+        // Nieznany typ w /zf kontrakt: komunikat, ale ŻADNEGO zlecenia.
+        auto zly = te.on_event(make_event("debug_command", {{"cmd", "kontrakt"},
+                                                            {"faction", "WGR"}, {"kind", "bzdura"}}),
+                               tcfg, t);
+        assert(te.take_contracts().empty() && "nieznany typ nie ma tworzyć zlecenia");
+        assert(zly.size() == 1 && zly[0].faction == "SYSTEM");
+
+        // Eskorta dokłada konwój MES — inaczej nie ma czego eskortować.
+        tcfg.spawn_wlaczone = true;
+        te.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "HEL"},
+                                                 {"kind", "eskorta"}}),
+                    tcfg, t);
+        assert(te.take_contracts()[0].kind == "eskorta");
+        auto spawns = te.take_spawns();
+        assert(spawns.size() == 1 && spawns[0].faction == "HEL" && spawns[0].kind == "convoy" &&
+               "zlecenie eskorty ma zamówić konwój");
+    }
+
     // --- Reputacja: rzutowanie naszej skali na natywną SE (hybryda) ---
     {
         zf::Config rcfg; // zakres 1500, prog 500, prog_wrogi -30, prog_sojusznik +40

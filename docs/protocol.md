@@ -15,11 +15,11 @@ proximity      {"faction":"WGR","state":"enter"|"exit","dist":2900}         ente
 combat_hit     {"attacker":123|null,"faction":"KRW","damage":450.5,"hits":37,"weapon":"gatling"}  agregat 3 s
 grid_destroyed {"faction":"KRW","grid":"nazwa","by_player":true}
 trade          {"faction":"HEL","kind":"buy"|"sell","value":1500}           heurystyka: zmiana salda + sklep frakcji <300 m
-contract_created {"contract_id":"123","faction":"WGR","kind":"dostawa","reward":50000,"reward_str":"50000","opis":"dostawa 600 płyt stalowych"}  kontrakt naprawdę powstał w grze; ID -> SQLite
+contract_created {"contract_id":"123","faction":"WGR","kind":"dostawa","reward":50000,"reward_str":"50000","opis":"dostawa 600 płyt stalowych"}  kontrakt naprawdę powstał w grze; ID -> SQLite. `kind` = typ, który POWSTAŁ (mod mógł zejść na dostawę — patrz „Typy kontraktów")
 contract_done  {"contract_id":"...","faction":"WGR","success":true}        faction opcjonalne — brain zna je z ID
 ransom_paid    {"faction":"KRW","item":"Iron","amount":500}                  B+ gracz dostarczył trybut do skrzynki zrzutu w oknie — pokój + relacja
 ransom_expired {"faction":"KRW","reason":"deadline"|"brak_skrzynki"}         B+ koniec żądania bez dostawy. deadline = gracz nie zdążył (kara + trwała nieufność); brak_skrzynki = skrzynka przepadła (sprzątacz śmieci SE) i brain kasuje żądanie BEZ kary
-debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn"|"okup"|"okup-surowce"|"kontrakt","faction":"KRW"}   /zf rel, /zf tick, /zf raid, /zf okup, /zf okup-surowce, /zf kontrakt
+debug_command  {"cmd":"rel"|"tick"} | {"cmd":"spawn"|"okup"|"okup-surowce"|"kontrakt","faction":"KRW"}   /zf rel, /zf tick, /zf raid, /zf okup, /zf okup-surowce, /zf kontrakt. Dla `kontrakt` dodatkowo opcjonalne `"kind":"nagroda"` (/zf kontrakt KRW nagroda) — bez niego brain losuje typ wagami
 
 ## commands.jsonl (brain → mod)
 
@@ -29,7 +29,38 @@ stand_down      {"faction":"KRW","ransom":4000}   frakcja odpuściła — statki
 ransom_demand   {"faction":"KRW","item":"Iron","amount":500,"deadline_s":900}   B+ frakcja żąda trybutu: mod stawia skrzynkę zrzutu (owner=0, GPS), wstrzymuje ogień, pilnuje deadline; dostawa→ransom_paid, brak→ransom_expired
 reputation_sync {"faction":"KRW","other":"","value":-72.0,"vanilla":-1050}   HYBRYDA: nasza relacja przepisana na natywną reputację SE. other="" = relacja frakcja→gracz (SetReputationBetweenPlayerAndFaction), other="WGR" = polityka frakcja↔frakcja (SetReputation, symetryczna). Do zapisu służy `vanilla`; `value` (nasza skala) jest tylko do logów/`/zf rep`
 price_update    {"faction":"HEL","modifier":1.5}                            Etap 6 (jeszcze nieobsługiwane)
-contract_create {"faction":"WGR","kind":"dostawa","reward":50000,"duration_min":45}  mod stawia kontrakt na bloku frakcji i odsyła contract_created
+contract_create {"faction":"WGR","kind":"dostawa","reward":50000,"duration_min":45,"target_faction":""}  mod stawia kontrakt na bloku frakcji i odsyła contract_created. `target_faction` ma znaczenie TYLKO dla kind="nagroda"
+
+## Typy kontraktów — brain proponuje, gra rozstrzyga
+
+Każdy typ to inna klasa z `Sandbox.ModAPI.Contracts` z własnym konstruktorem i własnym
+CELEM, którego mod musi poszukać w świecie:
+
+| `kind` | klasa ModAPI | cel, którego szuka mod |
+|---|---|---|
+| `dostawa` | `MyContractAcquisition` | towar + blok frakcji (zawsze wykonalne) |
+| `nagroda` | `MyContractBounty` | `identity` właściciela siatki frakcji z `target_faction` |
+| `transport` | `MyContractHauling` | drugi blok kontraktów/sklepu, na innej siatce |
+| `naprawa` | `MyContractRepair` | siatka frakcji z niepełnymi blokami |
+| `poszukiwania` | `MyContractSearch` | siatka frakcji dalej niż 5 km od gracza |
+| `eskorta` | `MyContractEscort` | trasa (dwa punkty) + tożsamość właściciela konwoju |
+| `wlasne` | `MyContractCustom` | definicja `ZF_Zlecenie` z `mod/Data/ContractTypes.sbc` |
+
+- Typ wybiera brain wagami z `[kontrakty.typy]` (nadpisania per frakcja), ale **mod ma
+  ostatnie słowo**: gdy celu nie ma w świecie albo `AddContract` zwróci `Success=false`,
+  wystawia DOSTAWĘ i to ona wraca w `contract_created`. Brain utrwala typ, który
+  naprawdę powstał — od niego zależy mnożnik nagrody i relacji (`[kontrakty.mnoznik]`).
+  Powód zejścia na dostawę leci na czat, żeby nie trzeba było zgadywać.
+- `nagroda` nie wchodzi nawet do losowania, gdy wystawca z nikim nie jest poniżej
+  `prog_wrogi` — nagroda za głowę bez wroga nie ma celu.
+- `eskorta` pociąga za sobą `spawn_request` z `kind=convoy` (nie ma czego eskortować
+  bez statku); szanuje `[spawn].wlaczone`, omija tylko cooldown spawnu.
+- `wlasne` to jedyny typ nieprzewidziany wprost w dokumentacji API: wymaga definicji
+  `MyObjectBuilder_ContractTypeDefinition`, a zgłoszone bugi Keena mówią, że kontrakty
+  custom nie ruszają reputacji vanilla (u nas nieszkodliwe — reputację prowadzi brain)
+  i mogą źle pokazywać nazwę typu w UI. Wyłącznik: `wlasne = 0` w `[kontrakty.typy]`.
+- `reputationReward`/`failReputationPrice` dla `wlasne` są ZEROWE celowo — reputacją
+  rządzi nasz silnik relacji (patrz „Reputacja — kto tu rządzi" niżej).
 
 ## Reputacja — kto tu rządzi
 

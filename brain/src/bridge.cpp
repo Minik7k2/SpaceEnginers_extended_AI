@@ -200,7 +200,8 @@ void CommandWriter::write_spawn_request(const std::string& faction, const std::s
 }
 
 void CommandWriter::write_contract_create(const std::string& faction, const std::string& kind,
-                                          std::int64_t reward, int duration_min) {
+                                          std::int64_t reward, int duration_min,
+                                          const std::string& target_faction) {
     const nlohmann::json line = {
         {"v", 1},
         {"seq", db_.next_commands_seq()},
@@ -211,6 +212,8 @@ void CommandWriter::write_contract_create(const std::string& faction, const std:
             {"kind", kind},
             {"reward", reward},
             {"duration_min", duration_min},
+            // Puste dla wszystkiego poza "nagroda" — mod czyta to pole tylko tam.
+            {"target_faction", target_faction},
         }},
     };
     write_line(line);

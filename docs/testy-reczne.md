@@ -260,6 +260,39 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   `/zf rel` pokazuje `sufit +20`. Potem nawet wykonane kontrakty nie podniosą
   relacji powyżej sufitu — to celowe (świat mściwy).
 
+- [ ] **I13. Typy zleceń — losowanie:** `/zf kontrakt WGR` kilka razy pod rząd →
+  w konsoli braina `kontrakt: WGR wystawia zlecenie (<typ>)` z RÓŻNYMI typami
+  (wagi z `[kontrakty.typy.WGR]`: najczęściej `naprawa`, potem `dostawa`/`poszukiwania`).
+  Na czacie `[ZF] Nowe zlecenie WGR (<typ>): …`.
+- [ ] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
+  (polityka KRW/HEL -70), mod tworzy `MyContractBounty`, a w terminalu stacji widać
+  zlecenie na głowę pilota HEL. Analogicznie `transport`, `naprawa`, `poszukiwania`,
+  `eskorta`, `wlasne`, `dostawa`.
+- [ ] **I15. Zejście na dostawę:** wymuś typ, dla którego w świecie NIE MA celu
+  (np. `/zf kontrakt HEL naprawa`, gdy żadna siatka HEL nie jest uszkodzona) → na czacie
+  `Zlecenie HEL typu "naprawa" niemożliwe (frakcja nie ma uszkodzonej siatki do naprawy)
+  — wystawiam dostawę`, a `contract_created` w konsoli braina ma `dostawa`, NIE `naprawa`.
+  To najważniejszy test całej rozbudowy: żadne zlecenie nie może przepaść po cichu.
+- [ ] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
+  `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
+  Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
+  → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
+- [ ] **I17. Eskorta zamawia konwój:** `/zf kontrakt HEL eskorta` → oprócz kontraktu
+  w konsoli braina leci `spawn_request [HEL] kind=convoy`, a MES spawnuje konwój.
+  Przy `[spawn] wlaczone = false` kontrakt ma powstać BEZ spawnu.
+- [ ] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
+  jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
+  `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
+  Sprawdź log SE: jeśli narzeka na `ContractTypes.sbc`, kontener/pola definicji trzeba
+  poprawić wg vanilla `Content/Data/ContractTypes.sbc`. Do czasu potwierdzenia można
+  ustawić `wlasne = 0` w `[kontrakty.typy]`.
+  UWAGA: gdy zlecenie POWSTANIE, ale nie da się go wykonać (gra nie wie, kiedy je
+  zamknąć), po `czas_min` wygaśnie jako ZAWALONE i zabierze relację (`-kontrakt_min ×
+  mnożnik`). Dlatego I18 rób na świecie testowym, a nie na tym, w którym się grasz.
+  To samo dotyczy `eskorta` — jeśli okaże się, że gra nie potrafi jej rozliczyć.
+- [ ] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
+  `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
+  niż +20 z dostawy. Kwota nagrody też jest przemnożona.
 ## J. Trwałość i wygoda (nowe)
 
 - [ ] **J1. Auto-ścieżka storage:** usuń (albo zostaw pusty) `storage_dir`

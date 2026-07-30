@@ -221,13 +221,20 @@ namespace ZyweFrakcje
             WriteLine("debug_command", data);
         }
 
-        /// <summary>"/zf kontrakt &lt;frakcja&gt;" — wymusza w brainie wystawienie zlecenia (Etap 6).</summary>
-        public void WriteDebugKontrakt(string faction)
+        /// <summary>
+        /// "/zf kontrakt &lt;frakcja&gt; [typ]" — wymusza w brainie wystawienie zlecenia (Etap 6).
+        /// kind == null => brain losuje typ wagami z [kontrakty.typy].
+        /// </summary>
+        public void WriteDebugKontrakt(string faction, string kind)
         {
-            string data = new Json.Builder()
+            var builder = new Json.Builder()
                 .Add("cmd", "kontrakt")
-                .Add("faction", faction)
-                .Build();
+                .Add("faction", faction);
+            if (!string.IsNullOrEmpty(kind))
+            {
+                builder = builder.Add("kind", kind);
+            }
+            string data = builder.Build();
             WriteLine("debug_command", data);
         }
 

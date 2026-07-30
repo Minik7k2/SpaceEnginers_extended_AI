@@ -79,6 +79,7 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
 
 ```
 mod/Data/Scripts/ZyweFrakcje/   # C# ModAPI (sesja, mostek, zdarzenia, radio, MES)
+mod/Data/ContractTypes.sbc      # definicja własnego typu zlecenia (MyContractCustom)
 brain/src/                      # C++ (pętla, most, silnik, llm, sqlite)
 brain/configs/rules.toml        # progi i reguły (hot-reload)
 brain/personas/*.md             # karty osobowości frakcji (prompty)
@@ -127,9 +128,20 @@ docs/protocol.md                # spec mostka JSONL
   adresowanie czatu (@frakcja / zasięg / szum), de-eskalacja z realnym okupem.
 - **Etap 6 — kontrakty i ceny:** kod gotowy, DO WERYFIKACJI W GRZE (sekcja I
   w docs/testy-reczne.md). Frakcja wystawia zlecenie w ticku (`[kontrakty]`
-  w rules.toml) → mod tworzy je przez `MyAPIGateway.ContractSystem`
-  (`MyContractAcquisition`) na bloku kontraktów/sklepu frakcji → `contract_created`
-  z prawdziwym ID ląduje w SQLite → wykonanie/porażka wraca jako `contract_done`.
+  w rules.toml) → mod tworzy je przez `MyAPIGateway.ContractSystem` na bloku
+  kontraktów/sklepu frakcji → `contract_created` z prawdziwym ID ląduje w SQLite →
+  wykonanie/porażka wraca jako `contract_done`.
+  **Siedem typów zleceń** (2026-07-30), po jednej klasie z `Sandbox.ModAPI.Contracts`:
+  `dostawa` (Acquisition), `nagroda` (Bounty), `transport` (Hauling), `naprawa`
+  (Repair), `poszukiwania` (Search), `eskorta` (Escort), `wlasne` (Custom +
+  `mod/Data/ContractTypes.sbc`). Typ losuje brain wagami z `[kontrakty.typy]`
+  (nadpisania per frakcja: piraci wolą nagrody za głowę, górnicy naprawy), a
+  `[kontrakty.mnoznik]` skaluje nagrodę I zmianę relacji wg trudności typu.
+  KLUCZOWE: mod ma ostatnie słowo — gdy nie znajdzie w świecie celu (wrogiej
+  tożsamości, drugiego bloku, uszkodzonej siatki…) albo gra odrzuci kontrakt,
+  wystawia DOSTAWĘ i to ona wraca w `contract_created` (brain utrwala typ, który
+  naprawdę powstał). `eskorta` dokłada konwój przez MES. `wlasne` to jedyny typ
+  nieopisany w dokumentacji API — jeśli w grze zawiedzie, `wlasne = 0` w configu.
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
   nie ma zdarzenia transakcji. Zostało: `price_update` i własne stacje frakcji.
 - **Etap 7 — polish:** Kult, LCD na stacjach, emisariusze (AiEnabled API),
@@ -141,15 +153,17 @@ docs/protocol.md                # spec mostka JSONL
   (natywna reputacja w grze vs cel z brainu — kontrola hybrydy), `/zf tick`
   (wymuś tick), `/zf spawn <frakcja>` (vanilla prefab), `/zf raid <frakcja>`
   (potok MES), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
-  <frakcja>` (wymuszone zlecenie), `/zf stations` (stacje i blok kontraktów),
+  <frakcja> [typ]` (wymuszone zlecenie; typ opcjonalny — dostawa, nagroda, transport,
+  naprawa, poszukiwania, eskorta, wlasne), `/zf stations` (stacje i blok kontraktów),
   `/zf daj <surowiec> [ilość]` (towar do inwentarza — do testu trybutu bez trybu
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
-- `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/polityka),
-  sanityzacja wyjścia LLM, config z auto-wykrywaniem storage. Testy wymuszają
+- `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy
+  zleceń/polityka), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
+  i wagami typów kontraktów. Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
   i smoke test `--replay`. Wariant bez LLM łatwo psuje się niezauważenie.
