@@ -83,6 +83,8 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.handel_max = (*zm)["handel_max"].value_or(cfg.handel_max);
         cfg.kontrakt_min = (*zm)["kontrakt_min"].value_or(cfg.kontrakt_min);
         cfg.kontrakt_max = (*zm)["kontrakt_max"].value_or(cfg.kontrakt_max);
+        cfg.kontrakt_przyjety_u_wroga =
+            (*zm)["kontrakt_przyjety_u_wroga"].value_or(cfg.kontrakt_przyjety_u_wroga);
         cfg.atak_na_wroga_bonus = (*zm)["atak_na_wroga_bonus"].value_or(cfg.atak_na_wroga_bonus);
         cfg.atak_na_wroga_cooldown_min =
             (*zm)["atak_na_wroga_cooldown_min"].value_or(cfg.atak_na_wroga_cooldown_min);

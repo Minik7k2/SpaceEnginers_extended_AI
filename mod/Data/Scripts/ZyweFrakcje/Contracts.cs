@@ -47,6 +47,18 @@ namespace ZyweFrakcje
         // w tym promieniu od celu.
         private const double SearchMinMeters = 5000;
         private const double SearchRadiusMeters = 2000;
+
+        // Rekwizyty zleceń (mod/Data/Prefabs/ZF_ContractProps.sbc). Frakcja sama
+        // przygotowuje sobie robotę: gubi moduł albo zostawia uszkodzony wrak. Dzięki temu
+        // „poszukiwania" i „naprawa" nie zależą od tego, czy w świecie przypadkiem stoi
+        // coś nadającego się na cel. Celem poszukiwań jest WYŁĄCZNIE nasz moduł — stacji
+        // (którą wcześniej mógł wskazać wyszukiwacz) nie da się przywieźć pod stację.
+        private const string PropSearchPrefab = "ZF_Zgubka";
+        private const string PropSearchName = "Zgubiony modul"; // DisplayName z prefabu
+        private const string PropWreckPrefab = "ZF_Wrak";
+        private const double PropSearchMeters = 8000;  // gdzie frakcja gubi moduł (od gracza)
+        private const double PropWreckMeters = 2500;   // wrak zostawiamy przy stacji frakcji
+        private const float PropFreeRadius = 50;
         // Eskorta bez drugiej stacji w świecie: trasa prowadzi tyle metrów w stronę gracza.
         private const double EscortMeters = 20000;
         // Definicja własnego typu zlecenia (mod/Data/ContractTypes.sbc). Trzymana jako TEKST
@@ -131,6 +143,42 @@ namespace ZyweFrakcje
             int collateral = money / 10;
             int durationSeconds = durationMin * 60; // API bierze sekundy
 
+            // Typy z rekwizytem: jeśli w świecie nie ma jeszcze celu, frakcja go najpierw
+            // STAWIA, a kontrakt powstaje w callbacku spawnu (SpawnPrefab jest asynchroniczny).
+            // Po spawnie cel znajdą te same wyszukiwarki co zwykle — rekwizyt należy do
+            // frakcji, więc jest jej uszkodzoną/zgubioną własnością.
+            long ignoredId;
+            string ignoredName;
+            if (kind == "poszukiwania" &&
+                !FactionEconomy.TryFindProp(PropSearchName, PlayerPosition(start.Position),
+                                            SearchMinMeters, out ignoredId, out ignoredName))
+            {
+                SpawnProp(PropSearchPrefab, faction,
+                          OffsetFrom(PlayerPosition(start.Position), PropSearchMeters),
+                          () => Finalize(faction, kind, reward, targetFaction, start,
+                                         money, collateral, durationSeconds));
+                return;
+            }
+            if (kind == "naprawa" &&
+                !FactionEconomy.TryFindDamagedGrid(faction, out ignoredId, out ignoredName))
+            {
+                SpawnProp(PropWreckPrefab, faction, OffsetFrom(start.Position, PropWreckMeters),
+                          () => Finalize(faction, kind, reward, targetFaction, start,
+                                         money, collateral, durationSeconds));
+                return;
+            }
+
+            Finalize(faction, kind, reward, targetFaction, start, money, collateral,
+                     durationSeconds);
+        }
+
+        /// <summary>
+        /// Wystawienie kontraktu, gdy cel już jest w świecie (albo właśnie go postawiliśmy).
+        /// Stąd idzie łańcuch fallbacku: typ bez celu → dostawa.
+        /// </summary>
+        private void Finalize(string faction, string kind, long reward, string targetFaction,
+                              EconomyBlock start, int money, int collateral, int durationSeconds)
+        {
             // ID kontraktu znamy dopiero PO AddContract, a callbacki trzeba ustawić WCZEŚNIEJ —
             // stąd jednoelementowa tablica jako uchwyt domknięcia.
             long[] idBox = new long[1];
@@ -167,7 +215,8 @@ namespace ZyweFrakcje
             _tracked.Add(tracked);
             SaveState();
 
-            _events.WriteContractCreated(contractId.ToString(), faction, actualKind, reward, opis);
+            _events.WriteContractCreated(contractId.ToString(), faction, actualKind, reward, opis,
+                                         actualKind == "nagroda" ? targetFaction : null);
             MyAPIGateway.Utilities.ShowMessage("ZF",
                 "Nowe zlecenie " + faction + " (" + actualKind + "): " + opis + " za " + reward +
                 " kr (" + (start.GridName ?? "stacja") + ")");
@@ -190,6 +239,8 @@ namespace ZyweFrakcje
             powod = null;
             Action onSuccess = () => Finish(idBox[0], true);
             Action onFail = () => Finish(idBox[0], false);
+            // Moment przyjęcia zlecenia przez gracza — stąd rusza reakcja świata (Taken).
+            Action<long> onTaken = identity => Taken(idBox[0]);
 
             switch (kind)
             {
@@ -210,6 +261,7 @@ namespace ZyweFrakcje
                     var c = new MyContractBounty(start.BlockId, money, collateral, durationSeconds, identity);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = "nagroda za głowę pilota " + targetFaction +
                            (targetGrid == null ? "" : " (" + targetGrid + ")");
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
@@ -227,6 +279,7 @@ namespace ZyweFrakcje
                                                   target.BlockId);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = "transport ładunku do " + (target.GridName ?? "innej stacji");
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
@@ -243,25 +296,29 @@ namespace ZyweFrakcje
                     var c = new MyContractRepair(start.BlockId, money, collateral, durationSeconds, gridId);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = "naprawa " + (gridName ?? "siatki frakcji");
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
 
                 case "poszukiwania":
                 {
+                    // Celem jest WYŁĄCZNIE nasz zgubiony moduł — vanillowe poszukiwania każą
+                    // przywieźć znaleziony grid pod stację, a stacji nikt nie przywiezie.
                     long gridId;
                     string gridName;
-                    if (!FactionEconomy.TryFindDistantGrid(faction, PlayerPosition(start.Position),
-                                                           SearchMinMeters, start.GridId,
-                                                           out gridId, out gridName))
+                    if (!FactionEconomy.TryFindProp(PropSearchName, PlayerPosition(start.Position),
+                                                    SearchMinMeters, out gridId, out gridName))
                     {
-                        powod = "frakcja nie ma siatki dalej niż " + (int)(SearchMinMeters / 1000) + " km od gracza";
+                        powod = "nie ma zgubionego modułu dalej niż " + (int)(SearchMinMeters / 1000) +
+                                " km od gracza";
                         return false;
                     }
                     var c = new MyContractSearch(start.BlockId, money, collateral, durationSeconds,
                                                  gridId, SearchRadiusMeters);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = "odnalezienie " + (gridName ?? "zaginionej siatki");
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
@@ -297,6 +354,7 @@ namespace ZyweFrakcje
                                                  start.Position, end, owner);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = "eskorta konwoju do " + gdzie;
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
@@ -320,6 +378,7 @@ namespace ZyweFrakcje
                                                  target == null ? (long?)null : target.BlockId);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = nazwa;
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
@@ -334,6 +393,7 @@ namespace ZyweFrakcje
                                                       start.BlockId, itemId, amount);
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
+                    c.OnContractAcquired = onTaken;
                     opis = itemOpis;
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
@@ -380,6 +440,82 @@ namespace ZyweFrakcje
         {
             IMyPlayer player = MyAPIGateway.Session == null ? null : MyAPIGateway.Session.Player;
             return player == null ? fallback : player.GetPosition();
+        }
+
+        /// <summary>
+        /// Punkt oddalony o <paramref name="meters"/> w pseudolosowym kierunku, z korektą na
+        /// wolne miejsce. Bez System.Random (pewność whitelisty ModAPI, tak jak w Garble) —
+        /// kierunek bierzemy z zegara, więc kolejne zlecenia nie lądują w tym samym miejscu.
+        /// </summary>
+        private static Vector3D OffsetFrom(Vector3D origin, double meters)
+        {
+            long ticks = DateTime.UtcNow.Ticks;
+            var dir = new Vector3D(((ticks >> 3) & 255) - 127.5,
+                                   ((ticks >> 11) & 255) - 127.5,
+                                   ((ticks >> 19) & 255) - 127.5);
+            dir = dir.LengthSquared() > 1 ? Vector3D.Normalize(dir) : Vector3D.Forward;
+            Vector3D wanted = origin + dir * meters;
+            Vector3D? free = MyAPIGateway.Entities.FindFreePlace(wanted, PropFreeRadius);
+            return free.HasValue ? free.Value : wanted;
+        }
+
+        /// <summary>
+        /// Stawia rekwizyt zlecenia i dopiero potem (callback SpawnPrefab jest asynchroniczny)
+        /// tworzy kontrakt. Rekwizyt dostaje właściciela = frakcja wystawiająca: to jej
+        /// zgubiony moduł / jej awaria, a przy okazji własność chroni grid przed sprzątaczem
+        /// śmieci SE. Gdy spawn się nie uda, i tak wołamy dalej — wyszukiwarka nie znajdzie
+        /// celu, więc zadziała normalny fallback na dostawę z czytelnym powodem.
+        /// </summary>
+        private void SpawnProp(string prefab, string faction, Vector3D pos, Action onDone)
+        {
+            string ignored;
+            long owner = FactionEconomy.FindTargetIdentity(faction, out ignored);
+            MatrixD m = MatrixD.CreateWorld(pos, Vector3D.Forward, Vector3D.Up);
+            var result = new List<IMyCubeGrid>();
+            MyAPIGateway.PrefabManager.SpawnPrefab(
+                result,
+                prefab,
+                pos,
+                (Vector3)m.Forward,
+                (Vector3)m.Up,
+                Vector3.Zero,
+                Vector3.Zero,
+                null,
+                SpawningOptions.None,
+                owner,
+                true,
+                () =>
+                {
+                    if (result.Count == 0)
+                    {
+                        MyAPIGateway.Utilities.ShowMessage("ZF",
+                            "Rekwizyt zlecenia " + faction + " nie powstał (prefab " + prefab + "?)");
+                    }
+                    else if (owner != 0)
+                    {
+                        // Bezpiecznik: prefab mógł przyjść bez właściciela mimo ownerId.
+                        result[0].ChangeGridOwnership(owner, MyOwnershipShareModeEnum.Faction);
+                    }
+                    onDone();
+                });
+        }
+
+        /// <summary>
+        /// Gracz PRZYJĄŁ zlecenie w terminalu (OnContractAcquired). To moment, w którym świat
+        /// ma zareagować: brain wysyła konwój do eskorty, ochronę dla celu nagrody i odejmuje
+        /// zaufanie u wrogów wystawcy. Bez tego kontrakt był martwym wpisem w terminalu.
+        /// </summary>
+        private void Taken(long contractId)
+        {
+            int index = IndexOf(contractId);
+            if (index < 0)
+            {
+                return; // nie nasze zlecenie albo już rozliczone
+            }
+            _events.WriteContractTaken(contractId.ToString(), _tracked[index].Faction,
+                                       _tracked[index].Kind);
+            MyAPIGateway.Utilities.ShowMessage("ZF",
+                "Zlecenie " + _tracked[index].Faction + " przyjęte (" + _tracked[index].Kind + ")");
         }
 
         /// <summary>Woła sesja co tik: dopytanie o stan kontraktów (droga nr 2, po wczytaniu świata).</summary>

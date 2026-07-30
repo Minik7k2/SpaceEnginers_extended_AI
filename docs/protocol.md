@@ -15,7 +15,8 @@ proximity      {"faction":"WGR","state":"enter"|"exit","dist":2900}         ente
 combat_hit     {"attacker":123|null,"faction":"KRW","damage":450.5,"hits":37,"weapon":"gatling"}  agregat 3 s
 grid_destroyed {"faction":"KRW","grid":"nazwa","by_player":true}
 trade          {"faction":"HEL","kind":"buy"|"sell","value":1500}           heurystyka: zmiana salda + sklep frakcji <300 m
-contract_created {"contract_id":"123","faction":"WGR","kind":"dostawa","reward":50000,"reward_str":"50000","opis":"dostawa 600 płyt stalowych"}  kontrakt naprawdę powstał w grze; ID -> SQLite. `kind` = typ, który POWSTAŁ (mod mógł zejść na dostawę — patrz „Typy kontraktów")
+contract_created {"contract_id":"123","faction":"WGR","kind":"dostawa","reward":50000,"reward_str":"50000","opis":"dostawa 600 płyt stalowych","target":""}  kontrakt naprawdę powstał w grze; ID -> SQLite. `kind` = typ, który POWSTAŁ (mod mógł zejść na dostawę — patrz „Typy kontraktów"). `target` niepuste tylko dla nagrody za głowę
+contract_taken {"contract_id":"123","faction":"WGR","kind":"naprawa"}          gracz PRZYJĄŁ zlecenie w terminalu (OnContractAcquired) — moment reakcji świata, patrz niżej
 contract_done  {"contract_id":"...","faction":"WGR","success":true}        faction opcjonalne — brain zna je z ID
 ransom_paid    {"faction":"KRW","item":"Iron","amount":500}                  B+ gracz dostarczył trybut do skrzynki zrzutu w oknie — pokój + relacja
 ransom_expired {"faction":"KRW","reason":"deadline"|"brak_skrzynki"}         B+ koniec żądania bez dostawy. deadline = gracz nie zdążył (kara + trwała nieufność); brak_skrzynki = skrzynka przepadła (sprzątacz śmieci SE) i brain kasuje żądanie BEZ kary
@@ -41,8 +42,8 @@ CELEM, którego mod musi poszukać w świecie:
 | `dostawa` | `MyContractAcquisition` | towar + blok frakcji (zawsze wykonalne) |
 | `nagroda` | `MyContractBounty` | `identity` właściciela siatki frakcji z `target_faction` |
 | `transport` | `MyContractHauling` | drugi blok kontraktów/sklepu, na innej siatce |
-| `naprawa` | `MyContractRepair` | siatka frakcji z niepełnymi blokami |
-| `poszukiwania` | `MyContractSearch` | siatka frakcji dalej niż 5 km od gracza |
+| `naprawa` | `MyContractRepair` | siatka frakcji z niepełnymi blokami, a gdy brak — postawiony wrak |
+| `poszukiwania` | `MyContractSearch` | zgubiony moduł frakcji dalej niż 5 km od gracza (stawiany, patrz „Rekwizyty") |
 | `eskorta` | `MyContractEscort` | trasa (dwa punkty) + tożsamość właściciela konwoju |
 | `wlasne` | `MyContractCustom` | definicja `ZF_Zlecenie` z `mod/Data/ContractTypes.sbc` |
 
@@ -54,13 +55,46 @@ CELEM, którego mod musi poszukać w świecie:
 - `nagroda` nie wchodzi nawet do losowania, gdy wystawca z nikim nie jest poniżej
   `prog_wrogi` — nagroda za głowę bez wroga nie ma celu.
 - `eskorta` pociąga za sobą `spawn_request` z `kind=convoy` (nie ma czego eskortować
-  bez statku); szanuje `[spawn].wlaczone`, omija tylko cooldown spawnu.
+  bez statku) — ale dopiero po `contract_taken`, nie przy wystawieniu zlecenia.
 - `wlasne` to jedyny typ nieprzewidziany wprost w dokumentacji API: wymaga definicji
   `MyObjectBuilder_ContractTypeDefinition`, a zgłoszone bugi Keena mówią, że kontrakty
   custom nie ruszają reputacji vanilla (u nas nieszkodliwe — reputację prowadzi brain)
   i mogą źle pokazywać nazwę typu w UI. Wyłącznik: `wlasne = 0` w `[kontrakty.typy]`.
 - `reputationReward`/`failReputationPrice` dla `wlasne` są ZEROWE celowo — reputacją
   rządzi nasz silnik relacji (patrz „Reputacja — kto tu rządzi" niżej).
+
+### Rekwizyty: frakcja przygotowuje sobie robotę
+
+`poszukiwania` i `naprawa` nie czekają już, aż w świecie przypadkiem stanie coś
+nadającego się na cel — mod STAWIA rekwizyt z `mod/Data/Prefabs/ZF_ContractProps.sbc`
+i dopiero wtedy tworzy kontrakt (SpawnPrefab jest asynchroniczny, więc kontrakt
+powstaje w jego callbacku):
+
+- `ZF_Zgubka` — „Zgubiony modul", NIESTATYCZNY (vanillowe poszukiwania każą przywieźć
+  znaleziony grid pod stację, więc musi dać się złapać podwoziem), z beaconem. Stawiany
+  8 km od gracza. Celem poszukiwań jest wyłącznie taki moduł: stacji nikt nie przywiezie.
+  Kolejne zlecenia REUŻYWAJĄ modułu zgubionego wcześniej, jeśli leży dość daleko.
+- `ZF_Wrak` — „Uszkodzony modul frakcji", statyczny, z blokami o obniżonej integralności
+  (prosto z prefabu — nie psujemy niczego w locie). Stawiany 2,5 km od stacji frakcji
+  TYLKO wtedy, gdy frakcja nie ma już czego naprawiać.
+
+Rekwizyt dostaje właściciela = frakcja wystawiająca. To i fabuła (jej zguba, jej awaria),
+i ochrona przed sprzątaczem śmieci SE, który zjada bezpańskie małe gridy z dala od gracza.
+
+### Przyjęcie zlecenia: kiedy świat reaguje
+
+`contract_taken` to jedyny moment, w którym wiadomo, że gracz naprawdę wziął robotę:
+
+- konwój do `eskorty` wyrusza DOPIERO teraz (wcześniej statki krążyły przy każdym
+  zleceniu, którego gracz nawet nie zobaczył),
+- cel nagrody za głowę dostaje patrol ochronny (`target` z payloadu kontraktu),
+- każda frakcja WROGA wystawcy (relacja <= `prog_wrogi`) traci do gracza
+  `kontrakt_przyjety_u_wroga` punktów — przyjęcie zlecenia to opowiedzenie się po
+  czyjejś stronie. Kara jest jednorazowa: status kontraktu w SQLite przechodzi na
+  `taken`, a powtórzony callback jest ignorowany.
+
+Status `taken` liczy się do `max_otwartych` tak samo jak `open` — zlecenie w trakcie
+wciąż blokuje frakcji wystawienie następnego.
 
 ## Reputacja — kto tu rządzi
 

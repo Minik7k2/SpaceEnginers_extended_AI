@@ -277,9 +277,10 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
   Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
   → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
-- [ ] **I17. Eskorta zamawia konwój:** `/zf kontrakt HEL eskorta` → oprócz kontraktu
-  w konsoli braina leci `spawn_request [HEL] kind=convoy`, a MES spawnuje konwój.
-  Przy `[spawn] wlaczone = false` kontrakt ma powstać BEZ spawnu.
+- [ ] **I17. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
+  (waga 0 w configu, więc tylko wymuszona) → kontrakt powstaje, ale w konsoli braina
+  NIE MA jeszcze `spawn_request`. Dopiero gdy przyjmiesz zlecenie w terminalu →
+  `kontrakt <ID> (HEL, eskorta) przyjęty przez gracza` i `spawn_request [HEL] kind=convoy`.
 - [ ] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
   jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
   `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
@@ -293,6 +294,28 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
 - [ ] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
   `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
   niż +20 z dostawy. Kwota nagrody też jest przemnożona.
+- [ ] **I19a. Poszukiwania stawiają rekwizyt:** `/zf kontrakt WGR poszukiwania` →
+  ~8 km od gracza powstaje mały grid „Zgubiony modul" (beacon ZGUBA na HUD), a kontrakt
+  celuje w NIEGO, nie w stację. Sprawdź w terminalu, że zlecenie da się wykonać:
+  dolatujesz, łapiesz podwoziem magnetycznym, wieziesz pod stację frakcji.
+  Powtórz komendę → drugi moduł NIE powstaje, jeśli pierwszy wciąż leży dość daleko.
+- [ ] **I19b. Naprawa stawia wrak tylko w razie potrzeby:** przy nieuszkodzonych
+  siatkach WGR `/zf kontrakt WGR naprawa` → 2,5 km od stacji pojawia się „Uszkodzony
+  modul frakcji" (beacon AWARIA) z niepełnymi blokami i to on jest celem. Gdy jakaś
+  siatka frakcji JEST już uszkodzona (np. po rajdzie) → nic się nie respi, cel to ta
+  siatka. Uwaga: rekwizyt należy do frakcji, więc zniszczenie go liczy się jak
+  zniszczenie jej mienia.
+- [ ] **I19c. Rekwizyt przeżywa:** postaw rekwizyt (I19a), odleć >1 km, poczekaj kilka
+  minut → grid MA przetrwać sprzątacz śmieci SE (chroni go własność frakcji).
+- [ ] **I20. Przyjęcie zlecenia rusza świat:** przyjmij dowolne zlecenie HEL → na czacie
+  `[ZF] Zlecenie HEL przyjęte (<typ>)`, w konsoli braina `przyjęty przez gracza`,
+  frakcja potwierdza przez radio, a `/zf rel` pokazuje KRW niżej o 3 punkty (wróg HEL
+  nie lubi, gdy pracujesz dla HEL). WGR (neutralny wobec HEL) bez zmian.
+- [ ] **I21. Kara raz na kontrakt:** po I20 zapisz i wczytaj świat, potem wykonaj
+  zlecenie → NIE MA drugiego `-3` u KRW (status `taken` w bazie braina).
+- [ ] **I22. Zlecenie w trakcie blokuje kolejne:** po przyjęciu zlecenia HEL odczekaj
+  cooldown (20 min) i wymuś tick → HEL nie wystawia drugiego (`max_otwartych` liczy
+  także zlecenia przyjęte).
 ## J. Trwałość i wygoda (nowe)
 
 - [ ] **J1. Auto-ścieżka storage:** usuń (albo zostaw pusty) `storage_dir`

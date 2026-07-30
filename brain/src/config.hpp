@@ -38,6 +38,10 @@ struct Config {
     double handel_max = 3;
     double kontrakt_min = 10;
     double kontrakt_max = 20;
+    // Przyjęcie zlecenia to deklaracja po czyjejś stronie: każda frakcja WROGA
+    // wystawcy (relacja <= prog_wrogi) traci do gracza tyle zaufania. Delta wprost,
+    // więc ujemna. 0 = wyłącz (przyjmowanie zleceń nikogo nie obchodzi).
+    double kontrakt_przyjety_u_wroga = -3;
     double atak_na_wroga_bonus = 5;
     // Bonus "wróg mojego wroga" leciał przy KAŻDYM combat_hit, a mod agreguje trafienia co
     // 3 s — jedna strzelanina dawała +15 i więcej u wszystkich wrogów ostrzelanej frakcji.

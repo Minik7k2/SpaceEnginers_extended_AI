@@ -374,6 +374,8 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
         handle_trade(ev, cfg, now_ms, out);
     } else if (ev.type == "contract_created") {
         handle_contract_created(ev, cfg, now_ms, out);
+    } else if (ev.type == "contract_taken") {
+        handle_contract_taken(ev, cfg, now_ms, out);
     } else if (ev.type == "contract_done") {
         handle_contract_done(ev, cfg, now_ms, out);
     } else if (ev.type == "ransom_paid") {
@@ -692,6 +694,87 @@ void Engine::handle_contract_created(const Event& ev, const Config& cfg, std::in
              " Ogłoś to krótko przez radio po swojemu.");
 }
 
+void Engine::handle_contract_taken(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                   std::vector<RadioOut>& out) {
+    const std::string contract_id = data_str(ev, "contract_id");
+    std::string faction = data_str(ev, "faction");
+    if (faction.empty() && !contract_id.empty()) {
+        faction = db_.get_contract_faction(contract_id);
+    }
+    if (faction.empty()) {
+        std::cerr << "[brain] contract_taken bez frakcji i bez znanego ID (" << contract_id
+                  << ") — pomijam\n";
+        return;
+    }
+    // Callback przyjęcia potrafi przyjść dwa razy (np. mod odtwarza stan po wczytaniu
+    // świata) — a kary u wrogów mają zaboleć raz. Status w bazie jest tu bezpiecznikiem.
+    if (!contract_id.empty() && db_.get_contract_status(contract_id) == "taken") {
+        return;
+    }
+    ensure_known_faction(faction);
+    if (!contract_id.empty()) {
+        db_.set_contract_status(contract_id, "taken");
+    }
+
+    const std::string kind = kontrakt_kind_or_default(
+        contract_id.empty() ? data_str(ev, "kind") : db_.get_contract_kind(contract_id));
+    std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", " << kind
+              << ") przyjęty przez gracza\n";
+
+    // Eskorta: konwój rusza DOPIERO teraz. Wcześniej spawnowaliśmy go przy wystawieniu
+    // zlecenia, więc statki kręciły się bez celu, nawet gdy gracz nigdy nie podszedł
+    // do terminala. Teraz konwój pojawia się, bo ktoś podjął się go pilnować.
+    if (kind == "eskorta") {
+        request_spawn(faction, "convoy", cfg, now_ms,
+                      "Konwój wyrusza — gracz przyjął zlecenie eskorty frakcji " + faction + ".",
+                      /*force=*/true);
+    }
+
+    // Cel nagrody za głowę dowiaduje się, że ktoś na niego poluje, i wysyła ochronę.
+    std::string target;
+    if (kind == "nagroda" && !contract_id.empty()) {
+        const std::string payload = db_.get_contract_payload(contract_id);
+        if (!payload.empty()) {
+            const auto parsed = nlohmann::json::parse(payload, nullptr, /*allow_exceptions=*/false);
+            if (parsed.is_object() && parsed.contains("target") && parsed["target"].is_string()) {
+                target = parsed["target"].get<std::string>();
+            }
+        }
+        if (!target.empty()) {
+            request_spawn(target, "patrol", cfg, now_ms,
+                          "Ochrona frakcji " + target + " — ktoś przyjął nagrodę za jej głowy.");
+        }
+    }
+
+    // Świat mściwy nie zapomina, po czyjej stronie stanąłeś: każdy WRÓG wystawcy
+    // traci do gracza zaufanie. To jedyna kara — sam fakt przyjęcia roboty.
+    if (cfg.kontrakt_przyjety_u_wroga != 0) {
+        for (const FactionRow& other : db_.list_factions()) {
+            if (other.tag == faction || other.tag == kPlayer) {
+                continue;
+            }
+            if (db_.get_relation(faction, other.tag).value > cfg.prog_wrogi) {
+                continue; // nie są wrogami wystawcy — nic im do tego
+            }
+            const double rel =
+                db_.adjust_relation(other.tag, kPlayer, cfg.kontrakt_przyjety_u_wroga);
+            std::cout << "[brain] relacja " << other.tag << "->gracz "
+                      << format_value(cfg.kontrakt_przyjety_u_wroga) << " za przyjęcie zlecenia od "
+                      << faction << " => " << format_value(rel) << "\n";
+            db_.add_memory(now_ms, other.tag, "zlecenie_wroga", 0,
+                           "Gracz przyjął zlecenie od " + faction + ", z którym jesteśmy na wojennej stopie.");
+            update_state(other.tag, cfg, now_ms, out);
+        }
+    }
+
+    db_.add_memory(now_ms, faction, "zlecenie_przyjete", 0,
+                   "Gracz przyjął nasze zlecenie (" + kind + ").");
+    emit(out, faction, render_first(faction, {"zlecenie_przyjete", "neutral"}), 0, cfg, now_ms,
+         "zlecenie_przyjete",
+         "Gracz właśnie przyjął wasze zlecenie (" + kind +
+             "). Potwierdź to krótko przez radio po swojemu — bez dziękowania z góry.");
+}
+
 void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                   std::vector<RadioOut>& out) {
     const std::string contract_id = data_str(ev, "contract_id");
@@ -843,16 +926,11 @@ void Engine::queue_contract(const std::string& faction, const std::string& kind,
     std::cout << "[brain] kontrakt: " << faction << " wystawia zlecenie (" << kind << ") za "
               << reward << " kr (relacja " << format_value(relation) << ", mnożnik " << mult
               << (target.empty() ? "" : ", cel " + target) << ")\n";
+    (void)now_ms;
     pending_contracts_.push_back({faction, kind, reward, cfg.kontrakty_czas_min, target});
-
-    // Eskorta bez czego eskortować to zlecenie-widmo: dorzucamy konwój tej frakcji
-    // przez MES. force=true omija cooldown spawnu (kontrakt już poszedł), ale globalny
-    // wyłącznik [spawn].wlaczone szanujemy — kto wyłączył spawny, nie chce statków.
-    if (kind == "eskorta" && cfg.spawn_wlaczone) {
-        request_spawn(faction, "convoy", cfg, now_ms,
-                      "Konwój do eskorty — zlecenie eskorty frakcji " + faction + ".",
-                      /*force=*/true);
-    }
+    // Konwój do eskorty NIE powstaje tutaj — dopiero gdy gracz przyjmie zlecenie
+    // (handle_contract_taken). Inaczej statki krążyły bez celu przy każdym zleceniu,
+    // którego gracz nawet nie zobaczył.
 }
 
 bool Engine::chat_expects_decision(const std::string& faction, std::int64_t now_ms) const {

@@ -31,6 +31,10 @@ handel_min = 1
 handel_max = 3
 kontrakt_min = 10
 kontrakt_max = 20
+# Przyjęcie zlecenia to opowiedzenie się po czyjejś stronie: KAŻDA frakcja wroga
+# wystawcy (relacja <= prog_wrogi) traci tyle zaufania do gracza. Kara jest jednorazowa
+# na kontrakt. 0 = wyłącz (przyjmowanie zleceń nikogo nie obchodzi).
+kontrakt_przyjety_u_wroga = -3
 atak_na_wroga_bonus = 5
 # Bonus "wróg mojego wroga" ma być nagrodą za potyczkę, nie dojną krową: mod zgłasza
 # combat_hit co 3 s, więc bez cooldownu minuta ostrzału jednego statku robiła z gracza
@@ -106,32 +110,37 @@ mnoznik_nagrody_w_napieciu = 3
 
 [kontrakty.typy]
 # Wagi losowania (0 = typ wyłączony). Wartości domyślne dla wszystkich frakcji.
+#
+# nagroda i eskorta stoją na 0 do czasu weryfikacji W GRZE (I14/I17 w docs/testy-reczne.md):
+#  - vanillowa nagroda za głowę jest mechaniką PvP (cel to inny GRACZ, dobicie bronią
+#    ręczną), więc zlecenie na tożsamość NPC może nie mieć jak się zaliczyć;
+#  - eskorty zostały z gry usunięte (zastąpione nagrodą PvE), więc AddContract
+#    prawdopodobnie je odrzuci i i tak dostaniemy dostawę.
+# Kod obu typów jest kompletny — po potwierdzeniu w grze wystarczy wpisać tu wagę
+# (proponowane: nagroda 1, eskorta 1, a u KRW nagroda 4).
 dostawa = 3
-nagroda = 1
+nagroda = 0
 transport = 2
 naprawa = 1
 poszukiwania = 1
-eskorta = 1
+eskorta = 0
 wlasne = 1
 
 [kontrakty.typy.HEL]
 # Korporacja żyje logistyką: dostawy i transport, brudną robotę zleca rzadko.
 dostawa = 4
 transport = 3
-eskorta = 2
-nagroda = 1
 poszukiwania = 1
 naprawa = 1
 
 [kontrakty.typy.KRW]
-# Piraci: głowa wroga i kruszec. Nie naprawiają cudzych wraków i nikogo nie eskortują.
-nagroda = 4
+# Piraci: kruszec i szperanie po wrakach. Nie naprawiają cudzych wraków i nikogo nie
+# eskortują. (Nagroda za głowę — ich naturalny typ — czeka na weryfikację, patrz wyżej.)
 dostawa = 3
 poszukiwania = 2
 transport = 1
 wlasne = 2
 naprawa = 0
-eskorta = 0
 
 [kontrakty.typy.WGR]
 # Górnicy: szyby się psują, koparki gubią, ruda musi dojechać.
@@ -139,8 +148,6 @@ naprawa = 4
 dostawa = 3
 poszukiwania = 3
 transport = 2
-eskorta = 2
-nagroda = 1
 
 [kontrakty.mnoznik]
 # Trudność typu — mnoży NAGRODĘ w kredytach i zmianę relacji za wykonanie/zawalenie

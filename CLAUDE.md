@@ -80,6 +80,7 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
 ```
 mod/Data/Scripts/ZyweFrakcje/   # C# ModAPI (sesja, mostek, zdarzenia, radio, MES)
 mod/Data/ContractTypes.sbc      # definicja własnego typu zlecenia (MyContractCustom)
+mod/Data/Prefabs/               # rekwizyty: skrzynka okupu, zgubka i wrak do zleceń
 brain/src/                      # C++ (pętla, most, silnik, llm, sqlite)
 brain/configs/rules.toml        # progi i reguły (hot-reload)
 brain/personas/*.md             # karty osobowości frakcji (prompty)
@@ -140,8 +141,19 @@ docs/protocol.md                # spec mostka JSONL
   KLUCZOWE: mod ma ostatnie słowo — gdy nie znajdzie w świecie celu (wrogiej
   tożsamości, drugiego bloku, uszkodzonej siatki…) albo gra odrzuci kontrakt,
   wystawia DOSTAWĘ i to ona wraca w `contract_created` (brain utrwala typ, który
-  naprawdę powstał). `eskorta` dokłada konwój przez MES. `wlasne` to jedyny typ
-  nieopisany w dokumentacji API — jeśli w grze zawiedzie, `wlasne = 0` w configu.
+  naprawdę powstał). `wlasne` to jedyny typ nieopisany w dokumentacji API — jeśli
+  w grze zawiedzie, `wlasne = 0` w configu.
+  **Rekwizyty (2026-07-30):** frakcja sama przygotowuje robotę — `poszukiwania`
+  i `naprawa` stawiają prefab z `mod/Data/Prefabs/ZF_ContractProps.sbc` (zgubiony
+  moduł / uszkodzony wrak, właściciel = frakcja) i dopiero w callbacku spawnu tworzą
+  kontrakt. Cel poszukiwań to WYŁĄCZNIE nasz moduł: vanillowe zlecenie każe przywieźć
+  znaleziony grid pod stację, a stacji nikt nie przywiezie.
+  **Przyjęcie zlecenia (`contract_taken`):** gracz bierze robotę → konwój do eskorty
+  dopiero teraz wyrusza, cel nagrody dostaje ochronę, a każdy WRÓG wystawcy traci do
+  gracza `kontrakt_przyjety_u_wroga` (-3). Kara raz na kontrakt (status `taken`
+  w SQLite, liczy się do `max_otwartych` jak `open`).
+  **Wagi 0 do czasu testów w grze:** `nagroda` (vanilla liczy zabicia GRACZY, nie NPC)
+  i `eskorta` (typ usunięty z gry w 2026) — kod kompletny, wystarczy wpisać wagę.
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
   nie ma zdarzenia transakcji. Zostało: `price_update` i własne stacje frakcji.
 - **Etap 7 — polish:** Kult, LCD na stacjach, emisariusze (AiEnabled API),

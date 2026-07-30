@@ -178,7 +178,7 @@ namespace ZyweFrakcje
         /// w SQLite brainu (contract_id z gry musi przeżyć wczytanie świata).
         /// </summary>
         public void WriteContractCreated(string contractId, string faction, string kind, long reward,
-                                         string opis)
+                                         string opis, string target)
         {
             string data = new Json.Builder()
                 .Add("contract_id", contractId)
@@ -187,8 +187,26 @@ namespace ZyweFrakcje
                 .Add("reward", reward)
                 .Add("reward_str", reward.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 .Add("opis", opis)
+                // Cel nagrody za głowę: brain utrwala go w payloadzie kontraktu, żeby po
+                // przyjęciu zlecenia wiedzieć, kogo ostrzec (ochrona celu).
+                .Add("target", target ?? string.Empty)
                 .Build();
             WriteLine("contract_created", data);
+        }
+
+        /// <summary>
+        /// Etap 6 — gracz PRZYJĄŁ zlecenie w terminalu (OnContractAcquired). Osobne zdarzenie,
+        /// bo to moment reakcji świata: konwój do eskorty, ochrona celu nagrody, utrata
+        /// zaufania u wrogów wystawcy.
+        /// </summary>
+        public void WriteContractTaken(string contractId, string faction, string kind)
+        {
+            string data = new Json.Builder()
+                .Add("contract_id", contractId)
+                .Add("faction", faction)
+                .Add("kind", kind)
+                .Build();
+            WriteLine("contract_taken", data);
         }
 
         /// <summary>Etap 6 — kontrakt rozliczony (wykonany albo zawalony).</summary>

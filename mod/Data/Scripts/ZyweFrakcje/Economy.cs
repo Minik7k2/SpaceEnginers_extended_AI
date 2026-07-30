@@ -250,25 +250,31 @@ namespace ZyweFrakcje
         }
 
         /// <summary>
-        /// Cel poszukiwań (MyContractSearch): siatka frakcji dalej niż minMeters od gracza —
-        /// zlecenie „znajdź" ma sens tylko wtedy, gdy gracz jeszcze tam nie stoi. Bierzemy
-        /// NAJDALSZĄ i pomijamy siatkę ze zleceniem (szukanie własnej stacji to żart).
+        /// Cel poszukiwań (MyContractSearch): REKWIZYT postawiony przez frakcję, rozpoznawany
+        /// po nazwie z prefabu, dalej niż minMeters od gracza. Szukamy NAJBLIŻSZEGO takiego
+        /// (poza progiem), żeby recyklingować moduły zgubione przy wcześniejszych zleceniach,
+        /// zamiast zaśmiecać świat nowymi. Zwykłe siatki frakcji celowo NIE wchodzą w grę:
+        /// zlecenie „znajdź" każe przywieźć grid pod stację, a stacji nikt nie przywiezie.
         /// </summary>
-        public static bool TryFindDistantGrid(string factionTag, Vector3D from, double minMeters,
-                                              long excludeGridId, out long gridId, out string gridName)
+        public static bool TryFindProp(string namePrefix, Vector3D from, double minMeters,
+                                       out long gridId, out string gridName)
         {
             gridId = 0;
             gridName = null;
-            double bestDist = minMeters;
+            double bestDist = double.MaxValue;
 
-            foreach (IMyCubeGrid grid in FactionGrids(factionTag))
+            var entities = new HashSet<IMyEntity>();
+            MyAPIGateway.Entities.GetEntities(entities, e => e is IMyCubeGrid);
+            foreach (IMyEntity entity in entities)
             {
-                if (grid.EntityId == excludeGridId)
+                var grid = entity as IMyCubeGrid;
+                if (grid == null || grid.MarkedForClose || grid.DisplayName == null ||
+                    !grid.DisplayName.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
                 double dist = Vector3D.Distance(from, grid.GetPosition());
-                if (dist > bestDist)
+                if (dist >= minMeters && dist < bestDist)
                 {
                     bestDist = dist;
                     gridId = grid.EntityId;

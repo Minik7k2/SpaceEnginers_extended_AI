@@ -235,6 +235,12 @@ private:
     // dopiero teraz zapisujemy go w SQLite (wymóg: przeżyć wczytanie świata).
     void handle_contract_created(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                  std::vector<RadioOut>& out);
+    // Gracz PRZYJĄŁ zlecenie w terminalu. To moment, w którym świat ma zareagować:
+    // frakcja potwierdza przez radio, wrogowie wystawcy tracą zaufanie, a przy
+    // eskorcie dopiero teraz rusza konwój (wcześniej nie było czego eskortować).
+    // Idempotentne — status 'taken' w SQLite pilnuje, by zadziałało raz na kontrakt.
+    void handle_contract_taken(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                               std::vector<RadioOut>& out);
     // Tick: czy frakcja wystawia teraz zlecenie (relacja, cooldown, limit otwartych).
     void maybe_offer_contract(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                               std::vector<RadioOut>& out);
