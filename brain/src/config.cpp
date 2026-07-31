@@ -170,6 +170,15 @@ void apply_table(const toml::table& tbl, Config& cfg) {
         cfg.reputacja_prog = (*rep)["prog"].value_or(cfg.reputacja_prog);
         cfg.reputacja_polityka = (*rep)["polityka"].value_or(cfg.reputacja_polityka);
     }
+
+    if (const auto* ceny = tbl["ceny"].as_table()) {
+        cfg.ceny_sync = (*ceny)["sync"].value_or(cfg.ceny_sync);
+        cfg.ceny_mnoznik_wrog = (*ceny)["mnoznik_wrog"].value_or(cfg.ceny_mnoznik_wrog);
+        cfg.ceny_mnoznik_sojusznik =
+            (*ceny)["mnoznik_sojusznik"].value_or(cfg.ceny_mnoznik_sojusznik);
+        cfg.ceny_prog_zmiany = (*ceny)["prog_zmiany"].value_or(cfg.ceny_prog_zmiany);
+        cfg.ceny_prog_embarga = (*ceny)["prog_embarga"].value_or(cfg.ceny_prog_embarga);
+    }
 }
 
 // Automatyczne znalezienie katalogu storage moda. Ścieżka wygląda tak:

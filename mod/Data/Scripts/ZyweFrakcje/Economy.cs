@@ -111,8 +111,10 @@ namespace ZyweFrakcje
         /// Szuka po CAŁYM świecie, bo stacja frakcji nie musi być przy graczu — wołane rzadko
         /// (tylko przy tworzeniu kontraktu), więc pełny skan jest akceptowalny.
         /// factionTag == null => siatki DOWOLNEJ frakcji NPC (cel transportu, eskorty).
+        /// Publiczne, bo cennik (<see cref="PriceManager"/>) też chodzi po stacjach frakcji —
+        /// tyle że szuka na nich bloków sklepu, a nie celów kontraktów.
         /// </summary>
-        private static List<IMyCubeGrid> FactionGrids(string factionTag)
+        public static List<IMyCubeGrid> FactionGrids(string factionTag)
         {
             var result = new List<IMyCubeGrid>();
             var entities = new HashSet<IMyEntity>();

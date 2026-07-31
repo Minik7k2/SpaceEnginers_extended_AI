@@ -451,6 +451,47 @@ wartość, którą gra ma naprawdę, i cel przysłany przez brain (przy rozjeźd
 - [x] **M7. Nic nie psuje ekonomii:** reputacja frakcji vanilla (RTSL/UNIV itd.) w oknie
   frakcji nie zmienia się przez nasz mod — synchronizujemy tylko HEL/KRW/WGR.
 
+## N. Cennik sklepów — price_update (2026-07-31) — DO WERYFIKACJI
+
+Cała sekcja jest nowa i **nic nie jest odhaczone**. Potrzebna stacja ze sklepem należąca
+do naszej frakcji — najprościej `/zf stacja <frakcja>` na siatce z blokiem sklepu
+(patrz sekcja I). Kontrola przez `/zf ceny` i przez terminal sklepu.
+
+Kod opiera się na MODOWYM `Sandbox.ModAPI.IMyStoreBlock.GetStoreItems` i zapisywalnym
+`VRage.Game.ModAPI.IMyStoreItem.PricePerUnit`/`Amount`. Sygnatury wzięte z dokumentacji
+ModAPI, ale — w odróżnieniu od kontraktów — NIE zostały potwierdzone dekompilacją, więc
+pierwszy test rozstrzyga, czy w ogóle mamy dostęp do ofert.
+
+- [ ] **N1. Sklep w zasięgu:** `/zf ceny` → dla frakcji ze stacją ma być `ofert: N` (N>0).
+  `BRAK bloku sklepu frakcji` = mod nie widzi sklepu; sprawdź `/zf stations`.
+- [ ] **N2. Neutralna relacja nie rusza cen:** na świeżym świecie (relacja 0) spisz kilka
+  cen w terminalu sklepu → `/zf ceny` pokazuje `x1.00`, ceny w terminalu BEZ ZMIAN.
+  To jest sedno węzła w zerze — bez tego nie ma z czym porównać zniżki ani kary.
+- [ ] **N3. Wrogość podnosi ceny:** ostrzelaj statek tej frakcji do relacji ok. -50
+  (`/zf rel`) → w konsoli braina `price_update [TAG] relacja -50 => ceny x1.3`,
+  a ceny w terminalu rosną mniej więcej o tyle.
+- [ ] **N4. Sojusz obniża:** wykonaj kilka zleceń tej frakcji do relacji dodatniej →
+  mnożnik poniżej 1.00 i tańszy towar w terminalu.
+- [ ] **N5. Mnożniki się NIE składają:** przy relacji -50 spisz cenę, zapisz i wczytaj
+  świat, poczekaj ~30 s → cena ma być TA SAMA. Jeśli urosła drugi raz, baza cen nie
+  wróciła ze storage (`prices_mod_state.txt`) — to najgroźniejszy błąd tej mechaniki.
+- [ ] **N6. Powrót do bazy:** doprowadź relację z powrotem do ~0 → ceny wracają do
+  wartości spisanych w N2 (a nie „gdzieś w pobliżu").
+- [ ] **N7. Embargo:** zejdź poniżej `prog_embarga` (-70) → na czacie `… wstrzymuje handel`,
+  `/zf ceny` pokazuje `EMBARGO`, a w terminalu sklepu nie da się nic kupić (ilości 0).
+- [ ] **N8. Embargo się cofa:** odbuduj relację powyżej progu → `… znów z tobą handluje`
+  i towar wraca w TEJ SAMEJ ilości, jaka była w chwili embarga (nie w bazowej).
+- [ ] **N9. Embargo przeżywa wczytanie świata:** przy wiszącym embargu zapisz i wczytaj
+  świat → sklep dalej pusty, a po odbudowaniu relacji ilości wracają poprawnie.
+- [ ] **N10. Odnowiony asortyment:** poczekaj, aż stacja NPC odświeży oferty (albo wymuś
+  to grą) → po ≤30 s nowe oferty też mają nasz mnożnik, nie ceny z gry.
+- [ ] **N11. Wyłącznik:** `sync = false` w `[ceny]` (hot-reload) → brain przestaje wysyłać,
+  ceny zostają na ostatniej wartości; po `sync = true` leci pełny resync.
+- [ ] **N12. Nie ruszamy cudzego:** ceny na stacjach vanilla/MES (RTSL, SPRT…) bez zmian —
+  synchronizujemy wyłącznie sklepy HEL/KRW/WGR.
+- [ ] **N13. Handel dalej się liczy:** kup coś w sklepie frakcji po zmianie cen →
+  `trade` w konsoli braina i relacja rośnie (cennik nie może psuć heurystyki handlu).
+
 ## Znane zachowania (to nie błędy)
 
 - Po pierwszym starcie braina mogą przyjść zaległe echa wiadomości z

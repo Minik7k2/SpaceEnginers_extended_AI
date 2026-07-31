@@ -161,7 +161,19 @@ docs/protocol.md                # spec mostka JSONL
   **Wagi 0 do czasu testów w grze:** `nagroda` (vanilla liczy zabicia GRACZY, nie NPC)
   i `eskorta` (typ usunięty z gry w 2026) — kod kompletny, wystarczy wpisać wagę.
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
-  nie ma zdarzenia transakcji. Zostało: `price_update` i własne stacje frakcji.
+  nie ma zdarzenia transakcji. Zostało: własne stacje frakcji.
+  **Cennik (`price_update`, 2026-07-31):** relacja rusza nie tylko liczbę w oknie frakcji,
+  ale i to, ile płacisz przy ladzie. Brain liczy mnożnik (`[ceny]` w rules.toml, odcinkowo
+  liniowo: -100 → `mnoznik_wrog`, 0 → dokładnie 1.0, +100 → `mnoznik_sojusznik`), mod
+  przepisuje `PricePerUnit` ofertom na blokach sklepu frakcji. Klucz: MODOWY
+  `Sandbox.ModAPI.IMyStoreBlock` ma `GetStoreItems` (wszystkie oferty bloku), a
+  `VRage.Game.ModAPI.IMyStoreItem.PricePerUnit`/`Amount` są ZAPISYWALNE — ten z `Ingame`
+  daje tylko Insert/Cancel/GetPlayerStoreItems i to on stał za wcześniejszą oceną, że
+  cennika „nie da się ruszyć". Mnożnik liczony ZAWSZE od ceny bazowej (baza w
+  `prices_mod_state.txt`), inaczej składałby się przy każdym wczytaniu świata. Poniżej
+  `prog_embarga` frakcja nie handluje wcale: mod zeruje `Amount`, pamiętając stan magazynu
+  z chwili embarga (odtwarzanie ilości bazowej byłoby darmową dostawą dla gracza, który
+  wykupi stację tuż przed). Diagnostyka: `/zf ceny`.
   **Kontrakt opłaca WŁAŚCICIEL BLOKU** (ustalone 2026-07-29 dekompilacją `Sandbox.Game.dll`):
   `GenerateCustomContract` sprawdza `MyBankingSystem.GetBalance(startBlock.OwnerId)` i przy
   tworzeniu ŚCIĄGA z niego nagrodę. To konto tożsamości założyciela, a NIE konto frakcji
@@ -178,7 +190,8 @@ docs/protocol.md                # spec mostka JSONL
 ## Testowanie
 
 - Komendy czatu w modzie: `/zf rel` (relacje + polityka frakcji), `/zf rep`
-  (natywna reputacja w grze vs cel z brainu — kontrola hybrydy), `/zf tick`
+  (natywna reputacja w grze vs cel z brainu — kontrola hybrydy), `/zf ceny`
+  (mnożnik cen per frakcja + ile ofert objął), `/zf tick`
   (wymuś tick), `/zf spawn <frakcja>` (vanilla prefab), `/zf raid <frakcja>`
   (potok MES), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
   <frakcja> [typ]` (wymuszone zlecenie; typ opcjonalny — dostawa, nagroda, transport,
@@ -190,7 +203,7 @@ docs/protocol.md                # spec mostka JSONL
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
 - `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy
-  zleceń/polityka), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
+  zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
   i wagami typów kontraktów. Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest

@@ -81,6 +81,22 @@ zakres = 1500     # |reputacja| w vanilli odpowiadająca naszemu ±100
 prog = 500        # próg wroga/sojusznika w vanilli (dokumentacja SE: ±500)
 polityka = true   # synchronizuj też relacje frakcja↔frakcja (SetReputation)
 
+[ceny]
+# Druga strona hybrydy reputacji. Tamta zmienia LICZBĘ w oknie frakcji, ta zmienia to,
+# ile płacisz przy ladzie: sojusznik kupuje taniej, wróg płaci karę za to, że w ogóle
+# go obsłużyli. Mod przechodzi po ofertach na bloku sklepu frakcji i przelicza im
+# PricePerUnit z ceny BAZOWEJ (bazę pamięta u siebie, więc mnożniki się nie składają).
+# Synchronizujemy tylko sklepy HEL/KRW/WGR — cennik stacji vanilla/MES należy do gry.
+sync = true
+mnoznik_wrog = 1.6         # ceny przy relacji -100 (o 60% drożej)
+mnoznik_sojusznik = 0.8    # ceny przy relacji +100 (20% zniżki); relacja 0 => zawsze x1.0
+# Cennik przestawia się skokowo, więc nie ma sensu gonić każdego drgnięcia relacji.
+prog_zmiany = 0.02
+# Świat mściwy: poniżej tej relacji frakcja nie handluje z tobą WCALE — mod zdejmuje
+# oferty ze sklepu i odkłada je z powrotem dopiero, gdy relacja wróci powyżej progu.
+# Wartość -101 wyłącza embargo (relacja nigdy tam nie zejdzie).
+prog_embarga = -70
+
 [kontrakty]
 # Etap 6: frakcja sama wystawia zlecenia na swojej stacji (mod tworzy je przez
 # MyAPIGateway.ContractSystem). To główna droga ODKUPIENIA — dryf leczy 1 pkt / 2 h,

@@ -187,6 +187,10 @@ int run_replay(const std::string& file, const zf::Config& cfg) {
                       << (r.other.empty() ? "->gracz" : "->" + r.other) << "] " << r.value
                       << " => " << r.vanilla << " (skala gry)\n";
         }
+        for (const zf::PriceOut& p : engine.take_prices()) {
+            std::cout << "  [CENY | " << p.faction << "] relacja " << p.value << " => x"
+                      << p.modifier << (p.embargo ? " (EMBARGO)" : "") << "\n";
+        }
     };
     const auto print_ransoms = [&engine]() {
         for (const zf::RansomDemandOut& rd : engine.take_ransom_demands()) {
@@ -320,6 +324,17 @@ int main(int argc, char** argv) {
             }
         };
 
+        // Cennik sklepów (Etap 6): relacja przepisana na mnożnik cen. Mod przechodzi po
+        // ofertach bloku sklepu frakcji i przelicza je z ceny bazowej.
+        const auto flush_prices = [&commands, &engine]() {
+            for (const zf::PriceOut& p : engine.take_prices()) {
+                commands.write_price_update(p.faction, p.modifier, p.embargo, p.value);
+                std::cout << "[brain] price_update [" << p.faction << "] relacja " << p.value
+                          << " => ceny x" << p.modifier
+                          << (p.embargo ? " (EMBARGO — frakcja nie handluje)" : "") << "\n";
+            }
+        };
+
         // Zlecenia kontraktów (Etap 6) — osobny kanał, tak jak spawny.
         const auto flush_contracts = [&commands, &engine]() {
             for (const zf::ContractOut& c : engine.take_contracts()) {
@@ -386,6 +401,7 @@ int main(int argc, char** argv) {
             flush_spawns();   // spawny z on_event (w tym /zf raid) i z ticka
             flush_contracts(); // zlecenia z ticka i z /zf kontrakt
             flush_reputations(); // zmiany relacji -> natywna reputacja w grze
+            flush_prices();      // zmiany relacji -> cennik w sklepie frakcji
 
             // Gotowe wypowiedzi z wątku LLM (albo fallbacki po nieudanej generacji).
             for (const zf::LlmResult& res : llm.poll_results()) {

@@ -69,6 +69,12 @@ public:
     void write_reputation_sync(const std::string& faction, const std::string& other, double value,
                                int vanilla);
 
+    // price_update: cennik sklepu frakcji przepisany z relacji. Mod mnoży CENY BAZOWE ofert
+    // przez modifier (bazę pamięta u siebie, żeby mnożniki się nie składały), a przy
+    // embargo zdejmuje oferty ze sklepu. value idzie tylko do logów. Patrz docs/protocol.md.
+    void write_price_update(const std::string& faction, double modifier, bool embargo,
+                            double value);
+
 private:
     void write_line(const nlohmann::json& line);
     void rotate_if_needed();

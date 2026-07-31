@@ -162,6 +162,18 @@ int vanilla_reputation(double value, const Config& cfg) {
     return static_cast<int>(std::llround(clamped));
 }
 
+double price_modifier(double value, const Config& cfg) {
+    const double v = std::clamp(value, -100.0, 100.0);
+    // Węzeł w zerze jest twardy: przy neutralnej relacji cennik ma zostać DOKŁADNIE taki,
+    // jaki wygenerowała gra. Inaczej sam start świata przestawiałby ceny na wszystkich
+    // stacjach, a gracz nie miałby z czym porównać późniejszej zniżki czy kary.
+    const double out = v <= 0 ? map_segment(v, -100.0, 0.0, cfg.ceny_mnoznik_wrog, 1.0)
+                              : map_segment(v, 0.0, 100.0, 1.0, cfg.ceny_mnoznik_sojusznik);
+    // Pasmo bezpieczeństwa: cena to int w grze, więc mnożnik 0 robi towar za darmo,
+    // a wielkie wartości przepełniają cennik. Config ma prawo być odważny, nie absurdalny.
+    return std::clamp(out, 0.1, 10.0);
+}
+
 Engine::Engine(Db& db, Fallback& fallback, std::uint32_t rng_seed)
     : db_(db), fallback_(fallback), rng_(rng_seed) {
     // Nasze frakcje istnieją od startu; obce tagi (np. SPRT z vanilla/MES)
@@ -386,6 +398,9 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
     // Świeżo wczytany świat ma reputację z zapisu (albo z DefaultRelation w SBC), a nie
     // z naszej bazy — po session_start przepisujemy WSZYSTKO, bez czekania na zmianę.
     sync_reputations(cfg, /*force=*/ev.type == "session_start");
+    // Cennik tak samo: świeżo wczytany świat ma w sklepach ceny z zapisu, a mod nie wie,
+    // od jakiego mnożnika je odtworzyć, dopóki mu go nie podamy.
+    sync_prices(cfg, /*force=*/ev.type == "session_start");
     return out;
 }
 
@@ -443,6 +458,42 @@ void Engine::sync_reputations(const Config& cfg, bool force) {
         for (std::size_t j = i + 1; j < own.size(); ++j) {
             push(own[i], own[j], db_.get_relation(own[i], own[j]).value);
         }
+    }
+}
+
+std::vector<PriceOut> Engine::take_prices() {
+    std::vector<PriceOut> taken;
+    taken.swap(pending_prices_);
+    return taken;
+}
+
+void Engine::sync_prices(const Config& cfg, bool force) {
+    if (!cfg.ceny_sync) {
+        ceny_byly_wlaczone_ = false;
+        return;
+    }
+    if (!ceny_byly_wlaczone_) {
+        force = true; // włączone dopiero co (hot-reload) — mod nie zna jeszcze cennika
+        ceny_byly_wlaczone_ = true;
+    }
+
+    // Tylko NASZE frakcje: cennik stacji vanilla/MES należy do gry, tak samo jak ich
+    // reputacja. Nadpisywanie go psułoby ekonomię, której nie prowadzimy.
+    for (const FactionRow& row : db_.list_factions()) {
+        if (!is_own_faction(row.tag)) {
+            continue;
+        }
+        const double value = db_.get_relation(row.tag, kPlayer).value;
+        const double modifier = price_modifier(value, cfg);
+        const bool embargo = value <= cfg.ceny_prog_embarga;
+
+        const auto it = last_price_.find(row.tag);
+        if (!force && it != last_price_.end() && it->second.embargo == embargo &&
+            std::fabs(it->second.modifier - modifier) < cfg.ceny_prog_zmiany) {
+            continue; // drgnięcie poniżej progu i embargo bez zmian — nie ruszamy sklepu
+        }
+        last_price_[row.tag] = LastPrice{modifier, embargo};
+        pending_prices_.push_back({row.tag, value, modifier, embargo});
     }
 }
 
@@ -1283,6 +1334,7 @@ std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool 
     // Dryf zmienia relacje bez żadnego zdarzenia z gry — bez tego okno frakcji
     // zamarłoby na wartości z ostatniej strzelaniny.
     sync_reputations(cfg, /*force=*/false);
+    sync_prices(cfg, /*force=*/false);
 
     return out;
 }
