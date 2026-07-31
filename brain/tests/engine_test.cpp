@@ -772,6 +772,107 @@ int main() {
         }
     }
 
+    // --- Ceny: relacja przepisana na mnożnik cennika sklepu (Etap 6) ---
+    {
+        zf::Config pcfg; // mnoznik_wrog 1.6, mnoznik_sojusznik 0.8, prog_embarga -70
+
+        // Węzeł w zerze jest twardy: neutralna relacja NIE rusza cennika wygenerowanego
+        // przez grę. Bez tego gracz nie miałby punktu odniesienia dla zniżki ani kary.
+        assert(zf::price_modifier(0, pcfg) == 1.0);
+        assert(zf::price_modifier(-100, pcfg) == pcfg.ceny_mnoznik_wrog);
+        assert(zf::price_modifier(100, pcfg) == pcfg.ceny_mnoznik_sojusznik);
+        // Wrogość ma być DROŻSZA, sojusz TAŃSZY — i monotonicznie po drodze.
+        assert(zf::price_modifier(-50, pcfg) > 1.0);
+        assert(zf::price_modifier(50, pcfg) < 1.0);
+        for (double v = -100; v < 100; v += 1) {
+            assert(zf::price_modifier(v, pcfg) >= zf::price_modifier(v + 1, pcfg));
+        }
+        // Literówka w configu nie może zrobić towaru za darmo ani ceny nie do zapłacenia.
+        zf::Config absurd;
+        absurd.ceny_mnoznik_wrog = 1e9;
+        absurd.ceny_mnoznik_sojusznik = 0;
+        assert(zf::price_modifier(-100, absurd) <= 10.0);
+        assert(zf::price_modifier(100, absurd) >= 0.1);
+
+        zf::Db pdb(":memory:");
+        zf::Engine pe(pdb, fallback, /*rng_seed=*/11);
+        std::int64_t t = 9000000;
+
+        // session_start = pełny resync cennika: po jednym wpisie na NASZĄ frakcję.
+        pe.on_event(make_event("session_start", {{"world", "test"}}), pcfg, t);
+        auto prices = pe.take_prices();
+        assert(prices.size() == 3 && "session_start ma przepisać cennik każdej naszej frakcji");
+        for (const zf::PriceOut& p : prices) {
+            assert(p.modifier == 1.0 && !p.embargo && "świeży świat: cennik nietknięty");
+            assert(zf::faction_color(p.faction) != "white" && "cennik tylko naszych frakcji");
+        }
+
+        // Brak zmiany relacji = nie ruszamy sklepu.
+        t += kMinuteMs;
+        pe.on_event(make_event("proximity", {{"faction", "KRW"}, {"state", "enter"}, {"dist", 2000}}),
+                    pcfg, t);
+        assert(pe.take_prices().empty() && "brak zmiany relacji = brak price_update");
+
+        // Drgnięcie poniżej progu też nie: przestawienie cennika to przejście po WSZYSTKICH
+        // ofertach, więc nie robimy tego za każdy pojedynczy strzał.
+        pcfg.ceny_prog_zmiany = 0.5;
+        t += kMinuteMs;
+        pe.on_event(make_event("combat_hit",
+                               {{"faction", "KRW"}, {"damage", 1.0}, {"hits", 1}, {"weapon", "t"}}),
+                    pcfg, t);
+        assert(pe.take_prices().empty() && "zmiana poniżej prog_zmiany nie rusza cennika");
+
+        // ...ale narosła różnica leci przy najbliższej okazji (porównujemy do OSTATNIO
+        // WYSŁANEJ wartości, nie do poprzedniego odczytu — inaczej cennik by dryfował).
+        pcfg.ceny_prog_zmiany = 0.02;
+        t += kMinuteMs;
+        pe.on_event(make_event("proximity", {{"faction", "HEL"}, {"state", "exit"}, {"dist", 5000}}),
+                    pcfg, t);
+        auto after_gate = pe.take_prices();
+        assert(after_gate.size() == 1 && after_gate[0].faction == "KRW");
+        assert(after_gate[0].modifier > 1.0 && "ostrzelana frakcja ma podnieść ceny");
+
+        // Świat mściwy: dość głęboka wrogość zamyka handel całkiem.
+        t += kMinuteMs;
+        pe.on_event(make_event("grid_destroyed",
+                               {{"faction", "KRW"}, {"grid", "Stacja"}, {"is_station", true}}),
+                    pcfg, t);
+        t += kMinuteMs;
+        pe.on_event(make_event("grid_destroyed",
+                               {{"faction", "KRW"}, {"grid", "Stacja2"}, {"is_station", true}}),
+                    pcfg, t);
+        bool krw_embargo = false;
+        for (const zf::PriceOut& p : pe.take_prices()) {
+            if (p.faction == "KRW") {
+                krw_embargo = p.embargo;
+            }
+        }
+        assert(pdb.get_relation("KRW", "PLAYER").value <= pcfg.ceny_prog_embarga);
+        assert(krw_embargo && "relacja poniżej prog_embarga ma zamknąć sklep");
+
+        // Wyłącznik configiem, a po ponownym włączeniu — pełny resync (mod nie zgaduje,
+        // co przegapił, bo ceny bazowe trzyma u siebie).
+        pcfg.ceny_sync = false;
+        t += kMinuteMs;
+        pe.on_event(make_event("combat_hit",
+                               {{"faction", "HEL"}, {"damage", 500.0}, {"hits", 9}, {"weapon", "t"}}),
+                    pcfg, t);
+        assert(pe.take_prices().empty() && "sync=false ma wyłączyć przepisywanie cennika");
+        pcfg.ceny_sync = true;
+        t += kMinuteMs;
+        pe.on_event(make_event("proximity", {{"faction", "WGR"}, {"state", "enter"}, {"dist", 2000}}),
+                    pcfg, t);
+        assert(pe.take_prices().size() == 3 && "włączenie synchronizacji = pełny resync cennika");
+
+        // Embargo wyłączone configiem: nawet przy relacji -100 sklep zostaje otwarty.
+        pcfg.ceny_prog_embarga = -101;
+        t += kMinuteMs;
+        pe.on_event(make_event("session_start", {{"world", "test"}}), pcfg, t);
+        for (const zf::PriceOut& p : pe.take_prices()) {
+            assert(!p.embargo && "prog_embarga = -101 ma wyłączyć embargo");
+        }
+    }
+
     std::cout << "zf_engine_test: OK\n";
     return 0;
 }

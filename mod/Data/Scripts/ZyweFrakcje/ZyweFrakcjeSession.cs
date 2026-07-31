@@ -31,6 +31,7 @@ namespace ZyweFrakcje
         private TradeWatcher _trade;
         private ContractManager _contracts;
         private ReputationSync _reputation;
+        private PriceManager _prices;
         private int _tick;
 
         public override void LoadData()
@@ -55,6 +56,9 @@ namespace ZyweFrakcje
             // Też dopiero tu — konto gracza i ContractSystem nie są gotowe w LoadData.
             _trade = new TradeWatcher(_events);
             _contracts = new ContractManager(typeof(ZyweFrakcjeSession), _events, _trade);
+            // Cennik sklepów frakcji (ceny bazowe wracają ze storage — patrz Prices.cs).
+            // Też dopiero tu: LoadData jest za wcześnie na sięganie do świata.
+            _prices = new PriceManager(typeof(ZyweFrakcjeSession));
         }
 
         protected override void UnloadData()
@@ -128,6 +132,12 @@ namespace ZyweFrakcje
                 // potrafi ruszyć ją sama, np. nagrodą za kontrakt).
                 _reputation.Update(_tick);
             }
+            if (_prices != null)
+            {
+                // Stacje NPC same odnawiają asortyment — nowe oferty przychodzą z cenami
+                // z gry, więc cennik frakcji trzeba nakładać powtórnie, nie raz.
+                _prices.Update(_tick);
+            }
         }
 
         private void WriteSessionStart()
@@ -199,6 +209,17 @@ namespace ZyweFrakcje
                 if (_reputation != null)
                 {
                     _reputation.Report();
+                }
+                return;
+            }
+
+            if (messageText.Trim().Equals("/zf ceny", StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                // Kontrola cennika: jaki mnożnik kazał nałożyć brain i czy było na czym.
+                if (_prices != null)
+                {
+                    _prices.Report();
                 }
                 return;
             }
@@ -358,7 +379,7 @@ namespace ZyweFrakcje
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja> [typ], /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf ceny, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja> [typ], /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
                 return;
             }
 
@@ -442,7 +463,10 @@ namespace ZyweFrakcje
                 {
                     HandleReputationSync(msg);
                 }
-                // price_update: Etap 6 dalszy ciąg.
+                else if (type == "price_update")
+                {
+                    HandlePriceUpdate(msg);
+                }
             }
         }
 
@@ -536,6 +560,21 @@ namespace ZyweFrakcje
             object dataObj;
             msg.TryGetValue("data", out dataObj);
             _reputation.Handle(dataObj as Dictionary<string, object>);
+        }
+
+        /// <summary>
+        /// Cennik (Etap 6): brain przysyła mnożnik cen wyliczony z relacji, mod przepisuje go
+        /// ofertom na blokach sklepu frakcji (patrz Prices.cs).
+        /// </summary>
+        private void HandlePriceUpdate(Dictionary<string, object> msg)
+        {
+            if (_prices == null)
+            {
+                return;
+            }
+            object dataObj;
+            msg.TryGetValue("data", out dataObj);
+            _prices.Handle(dataObj as Dictionary<string, object>);
         }
 
         private void HandleStandDown(Dictionary<string, object> msg)

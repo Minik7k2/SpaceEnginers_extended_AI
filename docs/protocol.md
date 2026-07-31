@@ -29,7 +29,7 @@ spawn_request   {"faction":"KRW","kind":"patrol"|"raid"|"convoy","near_player":t
 stand_down      {"faction":"KRW","ransom":4000}   frakcja odpuściła — statki rajdu odlatują; ransom>0 = mod pobiera tyle kredytów gracz→frakcja (Etap 6)
 ransom_demand   {"faction":"KRW","item":"Iron","amount":500,"deadline_s":900}   B+ frakcja żąda trybutu: mod stawia skrzynkę zrzutu (owner=0, GPS), wstrzymuje ogień, pilnuje deadline; dostawa→ransom_paid, brak→ransom_expired
 reputation_sync {"faction":"KRW","other":"","value":-72.0,"vanilla":-1050}   HYBRYDA: nasza relacja przepisana na natywną reputację SE. other="" = relacja frakcja→gracz (SetReputationBetweenPlayerAndFaction), other="WGR" = polityka frakcja↔frakcja (SetReputation, symetryczna). Do zapisu służy `vanilla`; `value` (nasza skala) jest tylko do logów/`/zf rep`
-price_update    {"faction":"HEL","modifier":1.5}                            Etap 6 (jeszcze nieobsługiwane)
+price_update    {"faction":"HEL","modifier":1.5,"embargo":false,"value":-42.0}   cennik sklepu frakcji przepisany z relacji. Mod mnoży przez `modifier` CENY BAZOWE ofert (bazę pamięta u siebie), `embargo`=true zamyka handel; `value` (nasza skala) tylko do logów/`/zf ceny`
 contract_create {"faction":"WGR","kind":"dostawa","reward":50000,"duration_min":45,"target_faction":""}  mod stawia kontrakt na bloku frakcji i odsyła contract_created. `target_faction` ma znaczenie TYLKO dla kind="nagroda"
 
 ## Typy kontraktów — brain proponuje, gra rozstrzyga
@@ -110,13 +110,38 @@ wciąż blokuje frakcji wystawienie następnego.
   (RTSL, SPRT...) należy do gry.
 - Po `session_start` brain wysyła komplet wartości (mod nie utrwala ich między sesjami).
 
+## Cennik — kto tu rządzi
+
+Tak jak przy reputacji: liczy brain, zapisuje mod. Relacja frakcja→gracz idzie przez
+odcinkowo liniowe odwzorowanie z twardym węzłem w zerze (`[ceny]` w rules.toml):
+-100 → `mnoznik_wrog`, **0 → dokładnie 1.0**, +100 → `mnoznik_sojusznik`. Węzeł w zerze
+jest twardy celowo — przy neutralnej relacji cennik ma zostać taki, jaki wygenerowała gra,
+inaczej gracz nie ma z czym porównać późniejszej zniżki ani kary.
+
+- Mod przepisuje `PricePerUnit` ofertom na blokach sklepu należących do frakcji.
+  Używa MODOWEGO `Sandbox.ModAPI.IMyStoreBlock` (`GetStoreItems` — wszystkie oferty
+  bloku), nie tego z `Ingame` (tylko Insert/Cancel/GetPlayerStoreItems).
+  `VRage.Game.ModAPI.IMyStoreItem.PricePerUnit` i `Amount` są ZAPISYWALNE, więc ofert
+  nie trzeba anulować i wstawiać od nowa.
+- Mnożnik liczy się zawsze od CENY BAZOWEJ, nigdy od bieżącej. Ceny siedzą w zapisie
+  świata, więc bez pamiętanej bazy mnożniki składałyby się przy każdym wczytaniu
+  (1.6 → 2.56 → 4.1…). Baza idzie do `prices_mod_state.txt` w storage moda.
+- `embargo` (relacja ≤ `prog_embarga`) zeruje `Amount` ofert zamiast je kasować.
+  Mod zapamiętuje stan magazynu Z CHWILI EMBARGA i wraca dokładnie do niego — odtwarzanie
+  ilości bazowej pozwoliłoby wykupić stację tuż przed embargiem i odzyskać towar za darmo.
+- Powtarzalne: stacje NPC same odnawiają asortyment (nowe oferty mają ceny z gry), więc
+  mod nakłada cennik ponownie co ~30 s, a nie raz.
+- Synchronizowane są WYŁĄCZNIE nasze frakcje (HEL/KRW/WGR), tak jak przy reputacji.
+- Po `session_start` brain wysyła komplet cenników (mod nie utrwala mnożników, tylko bazy).
+
 ## Ekonomia — czego mostek NIE gwarantuje
 
-- `trade` to HEURYSTYKA, nie zdarzenie z gry: ModAPI nie ma callbacku transakcji
-  (IMyStoreBlock daje tylko Insert/Cancel/GetPlayerStoreItems). Mod porównuje saldo
-  gracza co 2 s i przypisuje zmianę do frakcji, jeśli jej sklep jest bliżej niż 300 m.
-  Własne przelewy moda (okup, nagroda za kontrakt) są wyciszane na ~10 s, żeby nie
-  liczyły się podwójnie.
+- `trade` to HEURYSTYKA, nie zdarzenie z gry: mod porównuje saldo gracza co 2 s
+  i przypisuje zmianę do frakcji, jeśli jej sklep jest bliżej niż 300 m. Własne przelewy
+  moda (okup, nagroda za kontrakt) są wyciszane na ~10 s, żeby nie liczyły się podwójnie.
+  (Trop na przyszłość: `IMyStoreItem` ma zdarzenie `OnTransaction` —
+  `Action<int,int,long,long,long>`. Semantyka parametrów nieudokumentowana, ale to
+  potencjalne zastąpienie heurystyki prawdziwym zdarzeniem transakcji.)
 - Kontrakt powstaje tylko wtedy, gdy frakcja MA w świecie blok kontraktów albo sklep
   (to jego EntityId trafia do `MyContractAcquisition` jako startBlockId). Brak takiego
   bloku = komunikat na czacie i pominięte zlecenie; sprawdzisz to komendą `/zf stations`.

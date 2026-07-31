@@ -62,6 +62,17 @@ struct ReputationOut {
     int vanilla = 0;    // skala gry, -zakres..+zakres
 };
 
+// Cennik sklepu frakcji przepisany z relacji (Etap 6). Druga strona hybrydy: reputacja
+// zmienia liczbę w oknie frakcji, cennik zmienia to, ile gracz płaci przy ladzie. Mod
+// mnoży PricePerUnit ofert przez `modifier` (patrz Prices.cs); przy `embargo` w ogóle
+// zdejmuje oferty ze sklepu — frakcja nie chce z tobą handlować.
+struct PriceOut {
+    std::string faction;
+    double value = 0;       // nasza skala -100..+100 (log/diagnostyka)
+    double modifier = 1.0;  // mnożnik CEN BAZOWYCH (nie bieżących — mod pamięta bazę)
+    bool embargo = false;
+};
+
 // Zlecenie wystawienia kontraktu (Etap 6). Silnik decyduje KIEDY i ZA ILE, mod
 // tworzy kontrakt przez MyAPIGateway.ContractSystem na bloku swojej frakcji i
 // odsyła contract_created z prawdziwym ID (dopiero wtedy trafia do SQLite).
@@ -111,6 +122,9 @@ public:
 
     // Zmiany reputacji do przepisania na stronę gry — analogicznie do take_spawns().
     std::vector<ReputationOut> take_reputations();
+
+    // Zmiany cennika sklepów do przepisania na stronę gry — analogicznie do take_spawns().
+    std::vector<PriceOut> take_prices();
 
     // Reakcja na decyzję LLM o odpuszczeniu (okup/kapitulacja/rozejm), wołana z main
     // po odebraniu wyniku z wątku LLM. Samobramkuje się: jeśli frakcja nie ma
@@ -164,6 +178,15 @@ private:
     std::map<std::string, int> last_vanilla_;
     std::vector<ReputationOut> pending_reputations_;
     bool reputacja_byla_wlaczona_ = false; // hot-reload: włączenie synchronizacji = pełny resync
+    // Ostatnio wysłany cennik per frakcja. W pamięci z tego samego powodu co reputacja:
+    // mod dostaje pełny resync po session_start, a ceny bazowe pamięta u siebie.
+    struct LastPrice {
+        double modifier = 1.0;
+        bool embargo = false;
+    };
+    std::map<std::string, LastPrice> last_price_;
+    std::vector<PriceOut> pending_prices_;
+    bool ceny_byly_wlaczone_ = false;
     // Cooldown bonusu "wróg mojego wroga": (obserwator, ostrzelany) -> ostatnia wypłata.
     // W pamięci jak cooldown radia — chodzi o minuty, restart brainu niczego nie psuje.
     std::map<std::pair<std::string, std::string>, std::int64_t> enemy_bonus_at_;
@@ -207,6 +230,9 @@ private:
     // gry i wystaw do wysyłki te, które się zmieniły. force = wyślij wszystko (start
     // sesji, włączenie synchronizacji configiem) — wtedy mod nie zgaduje, co przegapił.
     void sync_reputations(const Config& cfg, bool force);
+    // To samo dla cennika sklepów: przelicz relacje na mnożnik cen i wystaw do wysyłki te
+    // frakcje, u których cennik naprawdę drgnął (prog_zmiany) albo zmienił się embargo.
+    void sync_prices(const Config& cfg, bool force);
 
     void handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t now_ms,
                            std::vector<RadioOut>& out);
@@ -265,5 +291,11 @@ std::string faction_color(const std::string& tag);
 // prog_sojusznik -> tuż powyżej +prog („sojusznik"), 0 -> 0, ±100 -> ±zakres.
 // Dzięki temu etykieta w oknie frakcji zgadza się z tym, co mówi /zf rel.
 int vanilla_reputation(double value, const Config& cfg);
+
+// Nasza relacja (-100..+100) -> mnożnik cen w sklepie frakcji. Odcinkowo liniowa z węzłem
+// w zerze: -100 -> ceny_mnoznik_wrog, 0 -> 1.0 (cennik nietknięty), +100 ->
+// ceny_mnoznik_sojusznik. Wynik jest przycięty do sensownego pasma, żeby literówka
+// w configu nie zrobiła ze sklepu rozdawnictwa ani ceny nie do zapłacenia.
+double price_modifier(double value, const Config& cfg);
 
 } // namespace zf

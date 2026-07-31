@@ -99,6 +99,20 @@ struct Config {
     int reputacja_prog = 500;        // vanilla: ≤ -500 wróg, ≥ +500 sojusznik
     bool reputacja_polityka = true;  // synchronizuj też relacje frakcja↔frakcja (SetReputation)
 
+    // [ceny] — Etap 6: cennik sklepu frakcji idzie za relacją. To druga strona hybrydy
+    // reputacji: tam relacja zmienia LICZBĘ w oknie frakcji, tu zmienia to, ile płacisz
+    // przy ladzie. Sojusznik kupuje taniej, wróg płaci karę za to, że w ogóle go obsłużyli.
+    // Mod przepisuje PricePerUnit ofertom na bloku sklepu frakcji (patrz Prices.cs).
+    bool ceny_sync = true;
+    double ceny_mnoznik_wrog = 1.6;       // mnożnik cen bazowych przy relacji -100
+    double ceny_mnoznik_sojusznik = 0.8;  // przy relacji +100 (poniżej 1 = zniżka dla swoich)
+    // Cennik przestawia się skokowo (mod przechodzi po wszystkich ofertach), więc drobnych
+    // drgnięć relacji nie ma sensu wysyłać. Poniżej tej różnicy mnożnika komenda nie leci.
+    double ceny_prog_zmiany = 0.02;
+    // Świat mściwy: poniżej tej relacji frakcja nie handluje z tobą WCALE (mod zdejmuje
+    // oferty ze sklepu). -101 = embargo wyłączone, bo relacja nigdy tam nie zejdzie.
+    double ceny_prog_embarga = -70;
+
     // [kontrakty] — Etap 6: frakcja sama wystawia zlecenia (mod tworzy je przez
     // MyAPIGateway.ContractSystem). To jedyna realna droga ODKUPIENIA: dryf leczy
     // 1 pkt / 2 h, a wykonany kontrakt daje +kontrakt_max od ręki.
