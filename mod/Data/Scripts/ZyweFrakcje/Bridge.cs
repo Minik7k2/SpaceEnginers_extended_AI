@@ -405,15 +405,46 @@ namespace ZyweFrakcje
         private readonly Type _owner;
         private readonly Dictionary<string, int> _offsets = new Dictionary<string, int>();
 
+        // Diagnostyka mostka (2026-08-01). Zerwany mostek wyglądał dokładnie jak zdrowy:
+        // odczyt padał w catch niżej, offset nie schodził na dysk, a gra i log SE milczały.
+        // Te liczniki pokazuje `/zf stations`, żeby następnym razem wystarczyła jedna komenda.
+        public int ProcessedLines { get; private set; }   // linii skonsumowanych w tej sesji
+        public int PollCount { get; private set; }        // ile razy Poll() w ogóle się wykonało
+        public int ReadFailures { get; private set; }     // nieudane odczyty commands.jsonl (suma)
+        public int SaveFailures { get; private set; }     // nieudane zapisy offsetu (suma)
+        public string LastError { get; private set; }     // ostatni wyjątek, typ + treść
+
+        // Bez tego pojedynczy wyścig z brainem zalewałby czat. Meldujemy dopiero serię,
+        // czyli sytuację, w której awaria jest trwała, a nie chwilowa.
+        private const int FailuresBeforeShout = 5;
+        private int _consecutiveReadFailures;
+        private bool _saveFailureReported;
+
         public CommandReader(Type owner)
         {
             _owner = owner;
             LoadState();
         }
 
+        /// <summary>Jedna linia stanu mostka do `/zf stations`.</summary>
+        public string Diagnostics()
+        {
+            int offset;
+            _offsets.TryGetValue(BridgeNaming.RotatedFileName("commands", 1), out offset);
+            string s = "mostek: offset=" + offset + " przetworzono=" + ProcessedLines +
+                       " polli=" + PollCount;
+            if (ReadFailures > 0 || SaveFailures > 0)
+            {
+                s += " | BŁĘDY odczyt=" + ReadFailures + " zapis=" + SaveFailures +
+                     " (" + (LastError ?? "?") + ")";
+            }
+            return s;
+        }
+
         public List<Dictionary<string, object>> Poll()
         {
             var results = new List<Dictionary<string, object>>();
+            PollCount++;
 
             int activeIndex = 0;
             for (int idx = 1; MyAPIGateway.Utilities.FileExistsInWorldStorage(BridgeNaming.RotatedFileName("commands", idx), _owner); idx++)
@@ -438,12 +469,23 @@ namespace ZyweFrakcje
                         content = reader.ReadToEnd();
                     }
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
                     // Wyścig z zapisem po stronie brainu (plik chwilowo niedostępny) —
-                    // nie wywalamy gry, wracamy w następnym pollu za ~60 tików.
+                    // nie wywalamy gry, wracamy w następnym pollu za ~60 tików. ALE seria
+                    // takich błędów to martwy mostek, a nie wyścig: wtedy krzyczymy na czat.
+                    ReadFailures++;
+                    _consecutiveReadFailures++;
+                    LastError = e.GetType().Name + ": " + e.Message;
+                    if (_consecutiveReadFailures == FailuresBeforeShout)
+                    {
+                        MyAPIGateway.Utilities.ShowMessage("ZF",
+                            "MOSTEK: nie mogę odczytać " + fileName + " (" + FailuresBeforeShout +
+                            " prób z rzędu) — komendy brainu NIE docierają. " + LastError);
+                    }
                     continue;
                 }
+                _consecutiveReadFailures = 0;
                 List<string> lines = BridgeNaming.SplitCompleteLines(content);
 
                 int offset;
@@ -468,6 +510,7 @@ namespace ZyweFrakcje
 
                 if (lines.Count > offset)
                 {
+                    ProcessedLines += lines.Count - offset;
                     _offsets[fileName] = lines.Count;
                     stateChanged = true;
                 }
@@ -519,6 +562,13 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// Utrwala offsety. Nieudany zapis NIE może wywalić gry, ale nie może też przejść
+        /// niezauważony: offset zostaje wtedy w pamięci, a po wczytaniu świata mod cofa się
+        /// do starej wartości i przetwarza te same komendy DRUGI RAZ (zdublowane zlecenia,
+        /// powtórzone radio, podwójny reputation_sync). Zaobserwowane 2026-07-31: plik stanu
+        /// stał na 13 liniach, podczas gdy mod skonsumował 35.
+        /// </summary>
         private void SaveState()
         {
             var sb = new StringBuilder();
@@ -526,9 +576,24 @@ namespace ZyweFrakcje
             {
                 sb.Append(kv.Key).Append('\t').Append(kv.Value).Append('\n');
             }
-            using (TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage(StateFile, _owner))
+            try
             {
-                writer.Write(sb.ToString());
+                using (TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage(StateFile, _owner))
+                {
+                    writer.Write(sb.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                SaveFailures++;
+                LastError = e.GetType().Name + ": " + e.Message;
+                if (!_saveFailureReported)
+                {
+                    _saveFailureReported = true;
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "MOSTEK: nie mogę zapisać offsetu (" + StateFile + ") — po wczytaniu " +
+                        "świata komendy powtórzą się. " + LastError);
+                }
             }
         }
     }

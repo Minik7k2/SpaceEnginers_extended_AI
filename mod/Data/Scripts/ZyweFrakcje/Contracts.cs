@@ -519,7 +519,14 @@ namespace ZyweFrakcje
                 Vector3.Zero,
                 Vector3.Zero,
                 null,
-                SpawningOptions.None,
+                // SetNpcSpawnedGrid JEST KONIECZNE dla poszukiwań: MyContractFind.Update
+                // w pierwszym ticku po przyjęciu robi `if (grid != null && !grid.IsNpcSpawnedGrid)
+                // Fail()`, więc bez tej flagi zlecenie zawalało się ~1 s po przyjęciu
+                // (dekompilacja Sandbox.Game.dll, 2026-07-31). Flaga jest tylko do odczytu
+                // w ModAPI (IMyCubeGrid.IsNpcSpawnedGrid { get; }) — da się ją ustawić
+                // WYŁĄCZNIE tu, przy spawnie. Vanilla stawia swój rekwizyt poszukiwań
+                // dokładnie tak samo (MyContractWithSpawnableGrid.SpawnPrefab).
+                SpawningOptions.SetNpcSpawnedGrid,
                 owner,
                 true,
                 () =>

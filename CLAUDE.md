@@ -208,6 +208,15 @@ docs/protocol.md                # spec mostka JSONL
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
   i smoke test `--replay`. Wariant bez LLM łatwo psuje się niezauważenie.
+- **Kompilacja moda BEZ wchodzenia do gry** (2026-08-01): błąd składni w C# kosztuje
+  inaczej pełne przeładowanie świata. Roslyn z VS + zestawy z `Bin64` sprawdzają to
+  w kilka sekund:
+  `csc.exe -langversion:6 -target:library -out:<tmp>.dll -r:<Bin64>\{Sandbox,VRage,SpaceEngineers,protobuf}*.dll -r:<...>\Facades\netstandard.dll mod\Data\Scripts\ZyweFrakcje\*.cs`
+  Pułapki: `csc.exe` z `Microsoft.NET\Framework64` umie tylko C# 5 i wywala się na
+  `MESApi.cs` — trzeba Roslyna z `MSBuild\Current\Bin\Roslyn`. Natywnych DLL z `Bin64`
+  (`VRage.Native`, `Havok`, `steam_api64`…) nie wolno podawać jako `-r:` (CS0009),
+  a bez `netstandard.dll` z Facades sypie się CS0012 na `ValueType`.
+  To sprawdza SKŁADNIĘ I TYPY, nie whitelistę ModAPI — tę weryfikuje dopiero gra.
 
 ## Konwencje
 

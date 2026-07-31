@@ -34,6 +34,22 @@ namespace ZyweFrakcje
         private PriceManager _prices;
         private int _tick;
 
+        // Ostrzeżenia raz na rodzaj problemu — inaczej komunikat leciałby co poll (~co 60 tików).
+        private readonly HashSet<string> _warned = new HashSet<string>();
+
+        /// <summary>
+        /// Mówi o problemie RAZ. Powstało po sesji 2026-07-31, w której komendy brainu ginęły
+        /// bez śladu: handlery wychodziły na `if (_x == null) return;`, więc gra, czat i log SE
+        /// wyglądały tak samo jak przy zdrowym mostku.
+        /// </summary>
+        private void WarnOnce(string key, string message)
+        {
+            if (_warned.Add(key))
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "UWAGA: " + message);
+            }
+        }
+
         public override void LoadData()
         {
             _events = new EventWriter(typeof(ZyweFrakcjeSession), RotateBytes);
@@ -55,10 +71,29 @@ namespace ZyweFrakcje
             // Ekonomia (Etap 6): handel z heurystyki salda, kontrakty przez ContractSystem.
             // Też dopiero tu — konto gracza i ContractSystem nie są gotowe w LoadData.
             _trade = new TradeWatcher(_events);
-            _contracts = new ContractManager(typeof(ZyweFrakcjeSession), _events, _trade);
+            // Każdy komponent w osobnym try/catch: gdy jeden nie wstanie, reszta ma działać
+            // dalej, a gracz ma się o tym DOWIEDZIEĆ. Wcześniej wyjątek tutaj zostawiał
+            // `_contracts`/`_prices` jako null i kontrakty milczały przez całą sesję.
+            try
+            {
+                _contracts = new ContractManager(typeof(ZyweFrakcjeSession), _events, _trade);
+            }
+            catch (Exception e)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "BŁĄD startu kontraktów: " + e.GetType().Name + ": " + e.Message);
+            }
             // Cennik sklepów frakcji (ceny bazowe wracają ze storage — patrz Prices.cs).
             // Też dopiero tu: LoadData jest za wcześnie na sięganie do świata.
-            _prices = new PriceManager(typeof(ZyweFrakcjeSession));
+            try
+            {
+                _prices = new PriceManager(typeof(ZyweFrakcjeSession));
+            }
+            catch (Exception e)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "BŁĄD startu cennika: " + e.GetType().Name + ": " + e.Message);
+            }
         }
 
         protected override void UnloadData()
@@ -503,6 +538,8 @@ namespace ZyweFrakcje
         {
             if (_contracts == null)
             {
+                WarnOnce("contracts", "komenda contract_create przyszła, ale ContractManager nie " +
+                                      "wstał (BeforeStart) — zlecenia NIE powstaną");
                 return;
             }
             object dataObj;
@@ -570,6 +607,8 @@ namespace ZyweFrakcje
         {
             if (_prices == null)
             {
+                WarnOnce("prices", "komenda price_update przyszła, ale PriceManager nie wstał " +
+                                   "(BeforeStart) — ceny NIE będą się zmieniać");
                 return;
             }
             object dataObj;
@@ -677,6 +716,18 @@ namespace ZyweFrakcje
         /// </summary>
         private void ReportStations()
         {
+            // Stan mostka i komponentów PRZED stacjami: gdy komendy nie docierają albo
+            // ContractManager nie wstał, informacja o blokach jest bez znaczenia.
+            if (_commands != null)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", _commands.Diagnostics());
+            }
+            MyAPIGateway.Utilities.ShowMessage("ZF",
+                "komponenty: kontrakty=" + (_contracts == null ? "BRAK" : "ok") +
+                " ceny=" + (_prices == null ? "BRAK" : "ok") +
+                " handel=" + (_trade == null ? "BRAK" : "ok") +
+                " reputacja=" + (_reputation == null ? "BRAK" : "ok"));
+
             string[] tags = { "HEL", "KRW", "WGR" };
             for (int i = 0; i < tags.Length; i++)
             {
