@@ -21,5 +21,31 @@
       </Description>
     </EntityComponent>
 
+    <!-- Konwój (2026-08-01). Wcześniej konwoje w ogóle nie miały pilota:
+         [UseRivalAi:false] + pusty <Behaviour>, więc statek dostawał prędkość początkową
+         i DRYFOWAŁ po prostej — nie nawigował, nie omijał, nie wracał. Teraz jedzie
+         zachowaniem CargoShip: leci trasą i po niej znika, czyli zachowuje się jak
+         prawdziwy transport przelotowy.
+         BehaviorName:CargoShip jest jedną z dozwolonych wartości wg wiki MES (CargoShip,
+         Escort, Fighter, HorseFighter, Horsefly, Hunter, Nautical, Passive, Patrol, Strike).
+         AutopilotData wskazuje GOTOWY profil MES — nie ma sensu dublować sprawdzonych
+         nastaw (prędkości, tolerancja punktów trasy, poziomowanie w grawitacji), a
+         GetSpeedFromSpawnGroup sprawia, że <Speed> z naszej grupy dalej rządzi tempem. -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Konwoj</SubtypeId>
+      </Id>
+      <Description>
+
+      [RivalAI Behavior]
+      [BehaviorName:CargoShip]
+      [AutopilotData:MES-DefaultAutoPilot-CargoShip]
+      [UsePauseAutopilotFromSpawnGroup:true]
+      [GetSpeedFromSpawnGroup:true]
+
+      </Description>
+    </EntityComponent>
+
   </EntityComponents>
 </Definitions>

@@ -1,21 +1,414 @@
 <?xml version="1.0"?>
 <!-- SpawnGroupy MES dla ZyweFrakcje (Etap 5b → MES + RivalAI). Spawnowane WYŁĄCZNIE
-     przez MESApi.CustomSpawnRequest z braina (patrol/raid/convoy). Frakcja (HEL/KRW/WGR)
-     nadawana przy spawnie przez factionOverride — jedna grupa obsługuje wszystkie
-     frakcje, [FactionOwner] to tylko wartość domyślna.
+     przez MESApi.CustomSpawnRequest z braina (patrol/raid/convoy).
      Wymagany tag [RivalAiSpawn:true] — bez niego CustomSpawnRequest odrzuca grupę.
      Flagi typów spawnu (SpaceCargoShip itd.) = false: te grupy NIE spawnują się losowo.
 
-     RAJD/PATROL: [UseRivalAi:true] + [RivalAiReplaceRemoteControl:true] (vanilla dron
-     nie ma bloku AI Module, więc RivalAI podmienia jego Remote Control), a <Behaviour>
-     wskazuje profil ZF_Fighter (RivalAiBehaviors.sbc) → statek leci na gracza i atakuje.
-     CONVOY: bez RivalAI — cywilny przelot, nie napastnik.
+     RAJD/PATROL: [UseRivalAi:true] + [RivalAiReplaceRemoteControl:true] + <Behaviour>
+     ZF_Fighter (RivalAiBehaviors.sbc) → statek leci na gracza i atakuje.
+     CONVOY: bez RivalAI — cywilny przelot z nadaną prędkością, nie napastnik.
 
-     UWAGA (środowisko): prefab DS_Pirate_ShakedownDrone jest KOSMICZNY (jony). Te grupy
-     są do spawnu w KOSMOSIE — mod (TestSpawner) spawnuje je tylko przy zerowej grawitacji.
-     Warianty atmosferyczne/naziemne (osobne grupy + statki) dojdą później. -->
+     FLOTY PER FRAKCJA (2026-08-01). Wcześniej wszystkie trzy grupy używały jednego
+     prefabu (DS_Pirate_ShakedownDrone), więc patrol Helionu, rajd Krwawej Ręki
+     i konwój Górników to był na ekranie ten sam kadłub — dla moda o TRZECH różnych
+     frakcjach to najgorszy możliwy wybór. Teraz każda frakcja ma własną sylwetkę.
+     Grupy ogólne (ZF_Patrol/ZF_Raid/ZF_Convoy) zostają jako zapas dla tagów spoza
+     HEL/KRW/WGR — TestSpawner.GroupForKind dokleja _TAG tylko dla naszych frakcji.
+
+     DOBÓR PREFABÓW JEST WYMUSZONY TECHNICZNIE, nie estetycznie. RivalAI potrzebuje
+     bloku zdalnego sterowania, żeby poprowadzić statek, a wśród vanillowych prefabów
+     ZBROJNY + REMOTE CONTROL ma tylko sześć: DS_Assault_Support, DS_AutomatedGunShip,
+     DS_PirateBeaconDrone, DS_Pirate_Scavenger, DS_Pirate_Scimitar i używany dotąd
+     DS_Pirate_ShakedownDrone (przeskanowane po xsi:type bloków, 2026-08-01). Duże
+     frachtowce (C22/C42/C10) zdalnego sterowania NIE mają — dlatego jadą wyłącznie
+     jako konwoje, gdzie RivalAI nie jest potrzebne, a ich rozmiar robi robotę na ekranie.
+     WGR dostaje z tej szóstki DS_Assault_Support: górnicy nie mają w vanilli własnych
+     zbrojnych dronów, a nazwa czyta się neutralnie („WGR,Assault Support") w odróżnieniu
+     od pirackich. Do podmiany na własne flagowce w Etapie 7.
+
+     DLC: te prefaby są zbudowane z bloków DLC (sprawdzone — także ten używany dotąd),
+     ale to NIE jest problem: identyczne statki spawnuje w każdym świecie sama vanilla,
+     a bloki z dodatków działają u wszystkich, tylko nie da się ich samemu postawić.
+
+     UWAGA (środowisko): wszystkie te prefaby są KOSMICZNE. Mod (TestSpawner) spawnuje
+     je tylko przy zerowej grawitacji. Warianty atmosferyczne/naziemne dojdą później. -->
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <SpawnGroups>
+
+    <!-- ================= HEL — Korporacja Helion ================= -->
+    <!-- Ochrona kontraktowa: czysty sprzęt wojskowy, jeden ciężki zamiast roju. -->
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Patrol_HEL</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="DS_Assault_Support">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>25</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Raid_HEL</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <!-- 769 bloków, 3 wieżyczki: korporacja nie przysyła roju, tylko jeden okręt,
+             który ma załatwić sprawę. Własnego zdalnego sterowania nie ma — dostaje je
+             z manipulacji (kostka pancerza → RivalAIRemoteControlLarge). -->
+        <Prefab SubtypeId="C33_Military_Enforcer">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>40</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Convoy_HEL</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="C22_Trade_Merchant">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>30</Speed>
+          <Behaviour>ZF_Konwoj</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <!-- ================= KRW — Krwawa Ręka ================= -->
+    <!-- Piraci: poobijane, liczebne, tanie. Rajd to dwa kadłuby, nie jeden okręt. -->
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Patrol_KRW</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="DS_Pirate_Scavenger">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>25</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Raid_KRW</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <!-- Jeden duży rajder zamiast dwóch dronów. Grupa jest JEDNOROZMIAROWA celowo:
+             manipulacja wstawia blok dużogridowy, więc mała siatka w tej samej grupie
+             dostałaby blok nie na swój rozmiar. Rojenie się zostaje przy patrolach. -->
+        <Prefab SubtypeId="C40_Pirate_Vulture">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>40</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Convoy_KRW</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="C42_Pirate_SalvageCarrier">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>30</Speed>
+          <Behaviour>ZF_Konwoj</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <!-- ================= WGR — Wolni Górnicy ================= -->
+    <!-- Przemysł, nie wojsko: konwój to transportowiec rudy, a „patrol" to najęta
+         ochrona. Własne, górnicze kadłuby bojowe dojdą w Etapie 7. -->
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Patrol_WGR</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="DS_Assault_Support">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>25</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Raid_WGR</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <!-- Koniec kompromisu: górnicy nie latają już pożyczonym „Assault Support",
+             tylko własnym zbrojnym tendrem (716 bloków). Zdalne sterowanie z manipulacji. -->
+        <Prefab SubtypeId="C12_Mining_Armed_Tender">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>40</Speed>
+          <Behaviour>ZF_Fighter</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <SpawnGroup>
+      <Id>
+        <TypeId>SpawnGroupDefinition</TypeId>
+        <SubtypeId>ZF_Convoy_WGR</SubtypeId>
+      </Id>
+      <Description>
+
+        [Modular Encounters SpawnGroup]
+
+        [SpaceCargoShip:false]
+        [LunarCargoShip:false]
+        [SpaceRandomEncounter:false]
+        [AtmosphericCargoShip:false]
+        [PlanetaryInstallation:false]
+        [RivalAiSpawn:true]
+
+        [FactionOwner:SPRT]
+        [ReplenishSystems:true]
+
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
+
+        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+
+      </Description>
+      <IsPirate>true</IsPirate>
+      <Frequency>1.0</Frequency>
+      <Prefabs>
+        <Prefab SubtypeId="C10_Mining_Carriage">
+          <Position>
+            <X>0.0</X>
+            <Y>0.0</Y>
+            <Z>0.0</Z>
+          </Position>
+          <Speed>30</Speed>
+          <Behaviour>ZF_Konwoj</Behaviour>
+        </Prefab>
+      </Prefabs>
+    </SpawnGroup>
+
+    <!-- ============ Zapas dla tagów spoza HEL/KRW/WGR ============ -->
+    <!-- TestSpawner dokleja _TAG tylko dla naszych frakcji; każdy inny tag trafia tutaj. -->
 
     <SpawnGroup>
       <Id>
@@ -107,6 +500,9 @@
         <TypeId>SpawnGroupDefinition</TypeId>
         <SubtypeId>ZF_Convoy</SubtypeId>
       </Id>
+      <!-- BEZ [ManipulationGroups]: ta grupa jedzie MAŁĄ siatką (DS_Pirate_ShakedownDrone),
+           a nasza manipulacja wstawia RivalAIRemoteControlLarge. Dron ma zresztą własne
+           zdalne sterowanie, więc RivalAI podłącza się do niego bez pomocy. -->
       <Description>
 
         [Modular Encounters SpawnGroup]
@@ -121,8 +517,8 @@
         [FactionOwner:SPRT]
         [ReplenishSystems:true]
 
-        [UseRivalAi:false]
-        [RivalAiReplaceRemoteControl:false]
+        [UseRivalAi:true]
+        [RivalAiReplaceRemoteControl:true]
 
       </Description>
       <IsPirate>true</IsPirate>
@@ -135,7 +531,7 @@
             <Z>0.0</Z>
           </Position>
           <Speed>30</Speed>
-          <Behaviour></Behaviour>
+          <Behaviour>ZF_Konwoj</Behaviour>
         </Prefab>
       </Prefabs>
     </SpawnGroup>

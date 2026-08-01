@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!-- Profile manipulacji MES dla ZyweFrakcje (2026-08-01).
+
+     PO CO TO JEST. RivalAI potrafi poprowadzić statek tylko wtedy, gdy grid ma blok
+     zdalnego sterowania — dokumentacja MES mówi wprost, że [RivalAiReplaceRemoteControl]
+     PODMIENIA pierwszy vanillowy Remote Control, a nie dodaje nowego („ensure the grid
+     you are trying to add behavior to has a Remote Control block that can be replaced").
+     Tymczasem wśród vanillowych prefabów zdalne sterowanie ma garstka: duże frachtowce
+     i okręty (C33_Military_Enforcer, C40_Pirate_Vulture, C12_Mining_Armed_Tender,
+     C22_Trade_Merchant, C42_Pirate_SalvageCarrier, C10_Mining_Carriage) NIE mają go wcale.
+     Przez to konwoje tylko dryfowały po prostej, a na rajdy szły wyłącznie małe drony.
+
+     ROZWIĄZANIE bez kopiowania prefabów: [ReplaceArmorBlocksWithModules] zamienia kostkę
+     pancerza w dowolny blok — „For every value provided in this tag, one armor cube is
+     replaced with the provided block type". Zamieniamy więc jedną kostkę na
+     RivalAIRemoteControlLarge (blok z MES, TypeId=RemoteControl, 1x1x1, duża siatka)
+     i dowolny kadłub staje się sterowalny przez RivalAI. Alternatywa — własne kopie
+     prefabów Keena z dołożonym blokiem — oznaczałaby kilka MB XML-a w modzie na każdy
+     statek i ręczne szukanie wolnej kratki w siatce.
+
+     UWAGA: profil jest dla DUŻYCH siatek. Nasze małe drony bojowe (DS_Pirate_Scimitar,
+     DS_Assault_Support itd.) mają własne zdalne sterowanie i tej manipulacji nie potrzebują.
+     Gdyby kiedyś było trzeba, mały odpowiednik to RivalAIRemoteControlSmall. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <EntityComponents>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Manipulacja_Pilot</SubtypeId>
+      </Id>
+      <Description>
+
+        [MES Manipulation]
+
+        [ReplaceArmorBlocksWithModules:true]
+        [ModulesForArmorReplacement:MyObjectBuilder_RemoteControl/RivalAIRemoteControlLarge]
+
+      </Description>
+
+    </EntityComponent>
+
+    <!-- Grupa opakowuje profil, bo SpawnGroup podpina manipulacje tagiem
+         [ManipulationGroups:...] (wzorzec z MES-ManipulationGroup-Difficulty.sbc). -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_ManipulacjaGrupa_Pilot</SubtypeId>
+      </Id>
+      <Description>
+
+        [MES Manipulation Group]
+
+        [ManipulationProfiles:ZF_Manipulacja_Pilot]
+
+      </Description>
+
+    </EntityComponent>
+
+  </EntityComponents>
+</Definitions>

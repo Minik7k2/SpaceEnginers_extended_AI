@@ -342,15 +342,28 @@ namespace ZyweFrakcje
             }
         }
 
-        // kind (patrol/raid/convoy) → nazwa SpawnGroupa MES (SpawnGroups.sbc).
-        private static string GroupForKind(string kind)
+        // Nasze frakcje mają własne floty (ZF_Raid_KRW itd.); reszta idzie na grupy ogólne.
+        private static readonly HashSet<string> OwnTags =
+            new HashSet<string> { "HEL", "KRW", "WGR" };
+
+        /// <summary>
+        /// (frakcja, kind) → nazwa SpawnGroupa MES (SpawnGroups.sbc). Do 2026-08-01 mapowanie
+        /// szło po samym kind, więc wszystkie trzy frakcje latały tym samym pirackim dronem —
+        /// mechanika się zgadzała, ale na ekranie nie było widać żadnej różnicy między nimi.
+        /// Tag doklejamy tylko dla HEL/KRW/WGR: dla obcego tagu taka grupa nie istnieje,
+        /// a MES odrzuciłby spawn nieznanej nazwy.
+        /// </summary>
+        private static string GroupForKind(string tag, string kind)
         {
+            string baseName;
             switch (kind.ToLowerInvariant())
             {
-                case "raid": return "ZF_Raid";
-                case "convoy": return "ZF_Convoy";
-                default: return "ZF_Patrol";
+                case "raid": baseName = "ZF_Raid"; break;
+                case "convoy": baseName = "ZF_Convoy"; break;
+                default: baseName = "ZF_Patrol"; break;
             }
+            string upper = string.IsNullOrEmpty(tag) ? "" : tag.ToUpperInvariant();
+            return OwnTags.Contains(upper) ? baseName + "_" + upper : baseName;
         }
 
         // Klasyfikacja środowiska w punkcie spawnu. Na razie KOSMOS vs PLANETA po
@@ -387,7 +400,7 @@ namespace ZyweFrakcje
 
             MatrixD spawnMatrix = MatrixD.CreateWorld(pos, view.Forward, view.Up);
 
-            string group = GroupForKind(kind);
+            string group = GroupForKind(tag, kind);
             bool ok = _mes.CustomSpawnRequest(
                 new List<string> { group },
                 spawnMatrix,
