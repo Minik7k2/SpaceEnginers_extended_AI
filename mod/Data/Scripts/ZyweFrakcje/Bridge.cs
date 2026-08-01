@@ -273,13 +273,22 @@ namespace ZyweFrakcje
         }
 
         /// <summary>"/zf raid &lt;frakcja&gt;" — wymusza w brainie spawn_request danej frakcji (Etap 5).</summary>
-        public void WriteDebugSpawn(string faction)
+        /// <summary>
+        /// "/zf raid &lt;frakcja&gt; [rodzaj]" — wymuszony spawn (Etap 5).
+        /// kind == null => brain dobiera flotę do nastroju frakcji (wojna → raid,
+        /// napięcie → patrol, spokój → convoy). Podanie rodzaju omija ten wybór, więc
+        /// da się obejrzeć konwój, nie czekając, aż frakcja się uspokoi.
+        /// </summary>
+        public void WriteDebugSpawn(string faction, string kind)
         {
-            string data = new Json.Builder()
+            var builder = new Json.Builder()
                 .Add("cmd", "spawn")
-                .Add("faction", faction)
-                .Build();
-            WriteLine("debug_command", data);
+                .Add("faction", faction);
+            if (!string.IsNullOrEmpty(kind))
+            {
+                builder.Add("kind", kind);
+            }
+            WriteLine("debug_command", builder.Build());
         }
 
         /// <summary>

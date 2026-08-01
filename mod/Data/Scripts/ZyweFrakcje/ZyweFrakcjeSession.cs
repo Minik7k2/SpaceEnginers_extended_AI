@@ -392,16 +392,27 @@ namespace ZyweFrakcje
             if (messageText.StartsWith(raidPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                string tag = messageText.Substring(raidPrefix.Length).Trim().ToUpperInvariant();
-                if (tag.Length == 0)
+                // "/zf raid <frakcja> [rodzaj]" — rodzaj opcjonalny, jak przy `/zf kontrakt`.
+                string[] czesci = messageText.Substring(raidPrefix.Length)
+                    .Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (czesci.Length == 0)
                 {
-                    MyAPIGateway.Utilities.ShowMessage("ZF", "Użycie: /zf raid <frakcja> (np. /zf raid KRW)");
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "Użycie: /zf raid <frakcja> [patrol|raid|convoy] (np. /zf raid WGR convoy)");
                 }
                 else
                 {
+                    string rodzaj = czesci.Length > 1 ? czesci[1].ToLowerInvariant() : null;
+                    if (rodzaj != null && rodzaj != "patrol" && rodzaj != "raid" && rodzaj != "convoy")
+                    {
+                        MyAPIGateway.Utilities.ShowMessage("ZF",
+                            "Nieznany rodzaj \"" + rodzaj + "\" — dozwolone: patrol, raid, convoy.");
+                        return;
+                    }
                     // Wymuszony spawn przez brain: mod pisze debug_command spawn, brain
                     // odpisuje spawn_request, który wraca do PollCommands. Testuje cały potok.
-                    _events.WriteDebugSpawn(tag);
+                    // Bez rodzaju brain dobiera flotę do nastroju frakcji (kind_for_state).
+                    _events.WriteDebugSpawn(czesci[0].ToUpperInvariant(), rodzaj);
                 }
                 return;
             }
