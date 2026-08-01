@@ -306,7 +306,7 @@ std::string local_config_path(const std::string& path) {
     return p.generic_string();
 }
 
-Config load_config(const std::string& path) {
+Config load_config(const std::string& path, bool wymagaj_storage) {
     const toml::table tbl = parse_or_throw(path);
     if (tbl["bridge"].as_table() == nullptr) {
         throw std::runtime_error("config " + path + ": brak sekcji [bridge]");
@@ -337,7 +337,7 @@ Config load_config(const std::string& path) {
         }
     }
 
-    if (cfg.storage_dir.empty()) {
+    if (cfg.storage_dir.empty() && wymagaj_storage) {
         throw std::runtime_error("config " + path + ": nie znalazłem storage moda ani w [bridge].storage_dir, "
                                  "ani automatycznie w zapisach Space Engineers. Wczytaj raz świat z modem "
                                  "(wtedy powstaje events.jsonl) albo wpisz ścieżkę ręcznie w " + local_path +
@@ -352,8 +352,9 @@ Config load_config(const std::string& path) {
     return cfg;
 }
 
-ConfigWatcher::ConfigWatcher(std::string path) : path_(std::move(path)) {
-    config_ = load_config(path_);
+ConfigWatcher::ConfigWatcher(std::string path, bool wymagaj_storage)
+    : path_(std::move(path)), wymagaj_storage_(wymagaj_storage) {
+    config_ = load_config(path_, wymagaj_storage_);
     read_mtimes(mtime_main_, mtime_local_);
 }
 
@@ -427,7 +428,7 @@ bool ConfigWatcher::poll() {
     mtime_main_ = m;
     mtime_local_ = l;
     try {
-        config_ = load_config(path_);
+        config_ = load_config(path_, wymagaj_storage_);
         std::cerr << "[brain] config przeładowany (" << path_ << ")\n";
         return true;
     } catch (const std::exception& e) {

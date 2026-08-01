@@ -11,6 +11,7 @@
 #include "db.hpp"
 #include "engine.hpp"
 #include "fallback.hpp"
+#include "scenariusz.hpp"
 
 namespace fs = std::filesystem;
 
@@ -871,6 +872,29 @@ int main() {
         for (const zf::PriceOut& p : pe.take_prices()) {
             assert(!p.embargo && "prog_embarga = -101 ma wyłączyć embargo");
         }
+    }
+
+    // --- Okup w kredytach: kwota z wiadomości gracza + ocena oferty (L1-L3) ---
+    // Ta sama para funkcji decyduje w grze (main.cpp) i w scenariuszach, więc jej
+    // przypadki brzegowe testujemy wprost — zwłaszcza saldo NIEZNANE (-1), przez które
+    // pusta obietnica nie może kupić pokoju.
+    {
+        assert(zf::parse_ransom_amount("dam ci 5000 kredytow") == 5000);
+        assert(zf::parse_ransom_amount("biorę okup, oto 4000 sztabek") == 4000);
+        assert(zf::parse_ransom_amount("nie dam nic") == 0);
+        assert(zf::parse_ransom_amount("mam 7 sztabek") == 0 && "pojedyncza cyfra to nie kwota");
+        assert(zf::parse_ransom_amount("kod 999999999999999") == 0 && "absurd = brak kwoty");
+
+        using zf::OcenaOkupu;
+        assert(zf::ocen_oferte_okupu(5000, 3000, 10000) == OcenaOkupu::Wiazaca);
+        assert(zf::ocen_oferte_okupu(5000, 3000, 1000) == OcenaOkupu::BezPokrycia);
+        assert(zf::ocen_oferte_okupu(500, 3000, 10000) == OcenaOkupu::ZaMalo);
+        assert(zf::ocen_oferte_okupu(3000, 3000, 3000) == OcenaOkupu::Wiazaca &&
+               "oferta równa progowi i dokładnie pokryta saldem kupuje pokój");
+        assert(zf::ocen_oferte_okupu(5000, 3000, -1) == OcenaOkupu::Brak &&
+               "saldo nieznane: nie kupujemy obietnic, których nie da się sprawdzić");
+        assert(zf::ocen_oferte_okupu(5000, 0, 10000) == OcenaOkupu::Brak &&
+               "prog_kredyty = 0 wyłącza bramkę (decyduje wyłącznie model)");
     }
 
     std::cout << "zf_engine_test: OK\n";

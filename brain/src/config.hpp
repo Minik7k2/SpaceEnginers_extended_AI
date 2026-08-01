@@ -151,7 +151,9 @@ double contract_kind_multiplier(const Config& cfg, const std::string& kind);
 // Rzuca std::runtime_error gdy plik nie istnieje lub brakuje wymaganego pola
 // [bridge].storage_dir. Po wczytaniu pliku głównego nakłada wartości z pliku
 // lokalnego maszyny (rules.local.toml obok rules.toml, poza gitem), jeśli istnieje.
-Config load_config(const std::string& path);
+// wymagaj_storage=false przydaje się trybom bez gry (--replay/scenariusze): most
+// plikowy jest wtedy nieużywany, a brak zapisu SE nie może wywalać testu w CI.
+Config load_config(const std::string& path, bool wymagaj_storage = true);
 
 // "configs/rules.toml" -> "configs/rules.local.toml"
 std::string local_config_path(const std::string& path);
@@ -160,7 +162,7 @@ std::string local_config_path(const std::string& path);
 // przy zmianie któregokolwiek (CLAUDE.md: mtime check co tick pętli).
 class ConfigWatcher {
 public:
-    explicit ConfigWatcher(std::string path);
+    explicit ConfigWatcher(std::string path, bool wymagaj_storage = true);
 
     const Config& get() const { return config_; }
     // Zwraca true gdy config został właśnie przeładowany. Błąd parsowania po
@@ -170,6 +172,7 @@ public:
 private:
     std::string path_;
     Config config_;
+    bool wymagaj_storage_ = true;
     std::int64_t mtime_main_ = 0;
     std::int64_t mtime_local_ = 0;
     void read_mtimes(std::int64_t& main_out, std::int64_t& local_out) const;

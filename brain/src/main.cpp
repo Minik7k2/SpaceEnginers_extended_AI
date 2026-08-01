@@ -28,37 +28,13 @@
 #include "engine.hpp"
 #include "fallback.hpp"
 #include "llm.hpp"
+#include "scenariusz.hpp"
 
 namespace {
 
 constexpr const char* kFallbackPath = "personas/fallback.toml";
 
 std::atomic<bool> g_should_stop{false};
-
-// Wyłuskuje kwotę okupu z wiadomości gracza (Etap 6): pierwszy ciąg 2–12 cyfr,
-// np. "biorę okup, oto 4000 sztabek" -> 4000. 0 = brak kwoty (okup symboliczny).
-// Bez wyjątków (reguła pętli mostka): akumulacja ręczna, długie ciągi pomijane.
-std::int64_t parse_ransom_amount(const std::string& text) {
-    for (std::size_t i = 0; i < text.size();) {
-        if (text[i] >= '0' && text[i] <= '9') {
-            std::size_t j = i;
-            while (j < text.size() && text[j] >= '0' && text[j] <= '9') {
-                ++j;
-            }
-            if (j - i >= 2 && j - i <= 12) { // ignoruj pojedyncze cyfry i absurdy (overflow)
-                std::int64_t val = 0;
-                for (std::size_t k = i; k < j; ++k) {
-                    val = val * 10 + (text[k] - '0');
-                }
-                return val;
-            }
-            i = j;
-        } else {
-            ++i;
-        }
-    }
-    return 0;
-}
 
 // CLion i konsola startują z różnych katalogów roboczych, a config (i ścieżki
 // względne w nim, np. db_path) zakładają katalog brain/. Gdy configu nie ma
@@ -155,77 +131,16 @@ std::string build_system_prompt(const std::string& faction, zf::Db& db) {
 }
 
 // Tryb --replay: odtwarza zdarzenia z pliku JSONL bez gry i bez trwałego stanu
-// (baza w pamięci). Czas bierzemy z pola ts linii, więc dryf/tick liczą się
-// jak w prawdziwej sesji.
+// (baza w pamięci). Czas bierzemy z pola ts linii, więc dryf/tick liczą się jak
+// w prawdziwej sesji. Gdy plik zawiera linie "oczekuj", pełni rolę TESTU regresji —
+// całą robotę wykonuje scenariusz.cpp, żeby tę samą logikę dało się wołać z ctest.
 int run_replay(const std::string& file, const zf::Config& cfg) {
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-        std::cerr << "[brain] nie można otworzyć pliku replay: " << file << "\n";
+    const zf::WynikScenariusza wynik = zf::uruchom_scenariusz(file, cfg, kFallbackPath, std::cout);
+    if (!wynik.plik_wczytany) {
         return 1;
     }
-
-    zf::Db db(":memory:");
-    zf::Fallback fallback(kFallbackPath);
-    zf::Engine engine(db, fallback, /*rng_seed=*/1337);
-
-    const auto print_radio = [](const std::vector<zf::RadioOut>& msgs) {
-        for (const zf::RadioOut& msg : msgs) {
-            std::cout << "  [RADIO | " << msg.faction << "] " << msg.text << "\n";
-        }
-    };
-    const auto print_spawns = [&engine]() {
-        for (const zf::SpawnOut& sp : engine.take_spawns()) {
-            std::cout << "  [SPAWN | " << sp.faction << "] kind=" << sp.kind << " — " << sp.context << "\n";
-        }
-        for (const zf::ContractOut& c : engine.take_contracts()) {
-            std::cout << "  [KONTRAKT | " << c.faction << "] " << c.kind << " za " << c.reward
-                      << " kr (" << c.duration_min << " min"
-                      << (c.target_faction.empty() ? "" : ", cel " + c.target_faction) << ")\n";
-        }
-        for (const zf::ReputationOut& r : engine.take_reputations()) {
-            std::cout << "  [REPUTACJA | " << r.faction
-                      << (r.other.empty() ? "->gracz" : "->" + r.other) << "] " << r.value
-                      << " => " << r.vanilla << " (skala gry)\n";
-        }
-        for (const zf::PriceOut& p : engine.take_prices()) {
-            std::cout << "  [CENY | " << p.faction << "] relacja " << p.value << " => x"
-                      << p.modifier << (p.embargo ? " (EMBARGO)" : "") << "\n";
-        }
-    };
-    const auto print_ransoms = [&engine]() {
-        for (const zf::RansomDemandOut& rd : engine.take_ransom_demands()) {
-            std::cout << "  [OKUP | " << rd.faction << "] żądanie trybutu " << rd.amount << "x "
-                      << rd.item << " (deadline " << rd.deadline_s << " s)\n";
-        }
-    };
-
-    std::string line;
-    std::int64_t last_ts = 0;
-    while (std::getline(in, line)) {
-        if (line.empty()) {
-            continue;
-        }
-        nlohmann::json parsed;
-        try {
-            parsed = nlohmann::json::parse(line);
-        } catch (const nlohmann::json::exception& e) {
-            std::cerr << "[brain] pominięta uszkodzona linia: " << e.what() << "\n";
-            continue;
-        }
-        zf::Event ev;
-        ev.type = parsed.value("type", std::string{});
-        ev.data = parsed.value("data", nlohmann::json::object());
-        last_ts = parsed.value("ts", last_ts);
-
-        log_event(ev);
-        print_radio(engine.on_event(ev, cfg, last_ts));
-        print_radio(engine.tick(cfg, last_ts));
-        print_spawns();
-        print_ransoms();
-    }
-
-    std::cout << "[brain] replay zakończony. Relacje: " << engine.relations_report() << "\n";
-    return 0;
+    std::cout << "[brain] replay zakończony.\n";
+    return wynik.bledow == 0 ? 0 : 1;
 }
 
 } // namespace
@@ -267,7 +182,9 @@ int main(int argc, char** argv) {
     anchor_to_config_dir(argv[0], config_path);
 
     try {
-        zf::ConfigWatcher watcher(config_path);
+        // --replay/scenariusze nie dotykają mostka plikowego, więc brak storage SE nie
+        // może ich blokować (na maszynie CI żadnego zapisu gry nie ma).
+        zf::ConfigWatcher watcher(config_path, /*wymagaj_storage=*/replay_path.empty());
 
         if (!replay_path.empty()) {
             return run_replay(replay_path, watcher.get());
@@ -432,16 +349,18 @@ int main(int argc, char** argv) {
                 // Twarda bramka na okup w kredytach: konkretna oferta pokryta saldem gracza
                 // kończy rajd, choćby model dalej mówił "dawaj więcej" (obserwacja z gry:
                 // 4,5B potrafi zapętlić targ i NIGDY nie ustawić odpuszcza=true).
-                const std::int64_t oferta = parse_ransom_amount(res.player_msg);
+                const std::int64_t oferta = zf::parse_ransom_amount(res.player_msg);
                 const std::int64_t prog = engine.cash_ransom_threshold(res.faction, cfg);
                 const std::int64_t saldo = engine.player_balance();
-                const bool oferta_wiazaca =
-                    prog > 0 && oferta >= prog && saldo >= 0 && saldo >= oferta;
+                // Ta sama funkcja jedzie w testach (scenariusze + engine_test) — decyzja
+                // o pokoju nie może się rozjechać między grą a tym, co sprawdza CI.
+                const zf::OcenaOkupu ocena = zf::ocen_oferte_okupu(oferta, prog, saldo);
+                const bool oferta_wiazaca = ocena == zf::OcenaOkupu::Wiazaca;
                 if (oferta_wiazaca) {
                     std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
                               << " kr >= próg " << prog << " kr (saldo " << saldo
                               << ") — pokój niezależnie od decyzji modelu\n";
-                } else if (prog > 0 && oferta >= prog && saldo >= 0 && saldo < oferta) {
+                } else if (ocena == zf::OcenaOkupu::BezPokrycia) {
                     std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
                               << " kr bez pokrycia (saldo " << saldo << ") — pusta obietnica\n";
                 }
