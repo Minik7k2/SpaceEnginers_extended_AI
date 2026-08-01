@@ -34,6 +34,7 @@ namespace ZyweFrakcje
         private PriceManager _prices;
         private StationSpawner _stations;
         private CrewSpawner _crew;
+        private Autotest _autotest;
         private int _tick;
 
         // Ostrzeżenia raz na rodzaj problemu — inaczej komunikat leciałby co poll (~co 60 tików).
@@ -140,6 +141,8 @@ namespace ZyweFrakcje
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "BŁĄD startu załóg: " + e.GetType().Name + ": " + e.Message);
             }
+            // Samosprawdzanie w grze (/zf autotest) — dopiero tu, bo potrzebuje cennika.
+            _autotest = new Autotest(_events, _prices);
         }
 
         protected override void UnloadData()
@@ -235,6 +238,11 @@ namespace ZyweFrakcje
             {
                 // Ludzie na stacjach — tylko gdy gracz jest w okolicy i gdy AiEnabled żyje.
                 _crew.Update(_tick);
+            }
+            if (_autotest != null)
+            {
+                // Maszyna kroków /zf autotest; poza przebiegiem testu kosztuje jedno porównanie.
+                _autotest.Update(_tick);
             }
         }
 
@@ -547,10 +555,29 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Samosprawdzanie w grze: jedna komenda zamiast przeklikiwania listy z
+            // docs/testy-reczne.md. Sprawdza to, czego nie da się sprawdzić poza grą
+            // (czy ModAPI naprawdę robi to, co zakładamy) — patrz Autotest.cs.
+            const string autotestPrefix = "/zf autotest";
+            if (messageText.StartsWith(autotestPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                if (_autotest == null)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "Autotest nie wstał (BeforeStart) — patrz błędy startu wyżej.");
+                }
+                else
+                {
+                    _autotest.Handle(messageText.Substring(autotestPrefix.Length));
+                }
+                return;
+            }
+
             if (messageText.StartsWith("/zf", StringComparison.OrdinalIgnoreCase))
             {
                 sendToOthers = false;
-                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf ceny, /zf tick, /zf stations, /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja> [typ], /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
+                MyAPIGateway.Utilities.ShowMessage("ZF", "Komendy: /zf rel, /zf rep, /zf ceny, /zf tick, /zf stations, /zf autotest [sekcja], /zf spawn <frakcja>, /zf raid <frakcja>, /zf okup <frakcja>, /zf okup-surowce <frakcja>, /zf kontrakt <frakcja> [typ], /zf daj <surowiec> [ilość], /zf stacja <frakcja>, /zf event <json>");
                 return;
             }
 

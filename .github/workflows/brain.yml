@@ -1,9 +1,15 @@
-name: brain (C++)
+name: brain (C++) + dane moda
 
-# Buduje mózg BEZ llama.cpp (ZF_WITH_LLM=OFF) i puszcza ctest. To celowo ta sama
-# ścieżka, którą gracz dostaje bez modelu GGUF — i to ona zdążyła się po cichu
-# zepsuć (-Werror=unused-function), bo lokalnie budowaliśmy tylko wariant z LLM.
-# Submodułu llama.cpp NIE pobieramy: build bez niego ma działać z definicji.
+# Dwie bramki, obie działają BEZ Space Engineers:
+#  * brain — build bez llama.cpp (ZF_WITH_LLM=OFF) i ctest. To celowo ta sama ścieżka,
+#    którą gracz dostaje bez modelu GGUF — i to ona zdążyła się po cichu zepsuć
+#    (-Werror=unused-function), bo lokalnie budowaliśmy tylko wariant z LLM.
+#    Submodułu llama.cpp NIE pobieramy: build bez niego ma działać z definicji.
+#  * dane moda — walidator SBC. Gra nie mówi, że grupa spawnu wskazuje na nieistniejące
+#    zachowanie; po prostu nic się nie spawnuje albo statek dryfuje. Tu wychodzi to
+#    w kilka sekund, zamiast po pełnym wczytaniu świata.
+# Czego CI nie sprawdzi: kompilacji moda (potrzebne zestawy z Bin64 — tools/sprawdz-mod.ps1
+# lokalnie na Windowsie) ani niczego, co wymaga uruchomionej gry (patrz docs/testy-reczne.md).
 
 on:
   push:
@@ -30,6 +36,8 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      # ctest obejmuje testy jednostkowe ORAZ scenariusze z brain/tests/scenariusze/*.jsonl
+      # (zdarzenia + oczekiwania w jednym pliku — patrz brain/src/scenariusz.hpp).
       - name: Testy (ctest)
         run: ctest --test-dir build --output-on-failure
 
@@ -51,3 +59,16 @@ jobs:
           cd brain && ../build/zf_brain --replay /tmp/replay.jsonl | tee /tmp/replay.log
           grep -q "replay zakończony" /tmp/replay.log
           grep -q "KRW" /tmp/replay.log
+
+  dane-moda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Walidator SBC (referencje między plikami danych moda)
+        run: python3 tools/waliduj_sbc.py
+
+      # Walidator, który zawsze mówi „czysto", jest bezwartościowy — kontrtest psuje
+      # dane na kopii i wymaga, żeby KAŻDA usterka została wykryta.
+      - name: Kontrtest walidatora
+        run: python3 tools/test_waliduj_sbc.py

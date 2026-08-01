@@ -221,6 +221,20 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// Statki tej frakcji postawione w tej sesji przez MES (te same, które odwołuje
+        /// stand_down). Do diagnostyki i do <see cref="Autotest"/> — pusta lista znaczy albo
+        /// „nic nie stanęło", albo „poszła ścieżka awaryjna bez MES", bo tamtej nie śledzimy.
+        /// </summary>
+        public static List<IMyCubeGrid> SledzoneSiatki(string faction)
+        {
+            List<IMyCubeGrid> grids;
+            return FactionGrids.TryGetValue(faction, out grids) ? grids : new List<IMyCubeGrid>();
+        }
+
+        /// <summary>Czy spawny idą przez MES (false = ścieżka awaryjna vanilla, bez śledzenia).</summary>
+        public static bool MesAktywny { get { return _mes != null && _mes.MESApiReady; } }
+
         /// <summary>B+ okup w surowcach: wznowienie ognia po wygaśnięciu okupu (brak dostawy).</summary>
         public static void ResumeFire(string faction)
         {
