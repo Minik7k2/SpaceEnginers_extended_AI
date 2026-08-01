@@ -268,17 +268,25 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   do poprawy relacji niż dryf — o to w tym całym etapie chodzi.
   Zweryfikowane 2026-07-30 na typie `naprawa` (mnożnik 1.2 → `+24` zamiast bazowych
   `+20`, zgodnie z `[kontrakty.mnoznik]`).
-- [ ] **I6. Porażka:** przyjmij zlecenie i daj mu wygasnąć → `Zlecenie … zawalone`
+- [x] **I6. Porażka:** przyjmij zlecenie i daj mu wygasnąć → `Zlecenie … zawalone`
   i `-10` w konsoli.
+  Zweryfikowane 2026-07-31 na typie `poszukiwania`: `relacja WGR->gracz -9 za zawalony
+  kontrakt (poszukiwania, mnożnik 0.9)` — ścieżka `MyCustomContractStateEnum.Failed`
+  (odpytywanie w `Contracts.Update`) → `contract_done(success=false)` →
+  `-kontrakt_min × mnożnik` działa, razem z `reputation_sync` i `price_update`.
+  ⚠️ ALE porażka przyszła **1,2 s po przyjęciu** (tabela `events` w bazie braina:
+  `zlecenie_przyjete` 18:20:32.9 → `kontrakt_fail` 18:20:34.1), więc to NIE był timeout.
+  Przyczyna ustalona dekompilacją — patrz I19a. Test trzeba powtórzyć na zlecenie,
+  które faktycznie się przedawni.
 - [ ] **I7. Po wczytaniu świata:** wystaw zlecenie, zapisz i wczytaj świat, dopiero
   potem je wykonaj → rozliczenie MIMO że callbacki nie przeżywają zapisu (mod
   dopytuje o stan co ~5 s, ID trzyma w `contracts_mod_state.txt`).
-- [ ] **I8. Limit i cooldown:** po wystawieniu jednego zlecenia frakcja nie wystawia
+- [x] **I8. Limit i cooldown:** po wystawieniu jednego zlecenia frakcja nie wystawia
   drugiego (`max_otwartych = 1`), a po jego rozliczeniu następne dopiero po
   `cooldown_min` (20 min).
-- [ ] **I9. Wrogość zamyka kran:** doprowadź KRW do wojny → w ticku nie ma dla niej
+- [x] **I9. Wrogość zamyka kran:** doprowadź KRW do wojny → w ticku nie ma dla niej
   `contract_create` (próg `prog_relacji = -55`).
-- [ ] **I10. Handel:** sprzedaj/kup coś w sklepie frakcji (≤300 m od jej stacji) →
+- [x] **I10. Handel:** sprzedaj/kup coś w sklepie frakcji (≤300 m od jej stacji) →
   na czacie `[ZF] Handel z <TAG>: N kr`, w konsoli `relacja … +1..+3 za handel`.
 - [ ] **I11. Fałszywe alarmy handlu:** zapłać okup (`/zf okup KRW` przy rajdzie) i
   odbierz nagrodę za kontrakt → **NIE MA** komunikatu o handlu (wyciszenie ~10 s).
@@ -287,10 +295,16 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   `/zf rel` pokazuje `sufit +20`. Potem nawet wykonane kontrakty nie podniosą
   relacji powyżej sufitu — to celowe (świat mściwy).
 
-- [ ] **I13. Typy zleceń — losowanie:** `/zf kontrakt WGR` kilka razy pod rząd →
+- [x] **I13. Typy zleceń — losowanie:** `/zf kontrakt WGR` kilka razy pod rząd →
   w konsoli braina `kontrakt: WGR wystawia zlecenie (<typ>)` z RÓŻNYMI typami
   (wagi z `[kontrakty.typy.WGR]`: najczęściej `naprawa`, potem `dostawa`/`poszukiwania`).
   Na czacie `[ZF] Nowe zlecenie WGR (<typ>): …`.
+  Zweryfikowane 2026-07-31 przez `/zf tick` (nie `/zf kontrakt`): dwie rundy ofert dały
+  HEL `naprawa` → `dostawa`, KRW `dostawa` → `transport`, WGR `poszukiwania` — typ jest
+  losowany osobno przy każdym wystawieniu, nie przypisany frakcji na stałe. Wagi per
+  frakcja trzymają: KRW nie dostało ani razu `naprawa` (waga 0), a mnożniki w logu
+  zgadzają się z `[kontrakty.mnoznik]` (naprawa 1.2, dostawa 1.0, transport 1.1,
+  poszukiwania 0.9). Rozkład na tak małej próbce nierozstrzygnięty.
 - [ ] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
   (polityka KRW/HEL -70), mod tworzy `MyContractBounty`, a w terminalu stacji widać
   zlecenie na głowę pilota HEL. Analogicznie `transport`, `naprawa`, `poszukiwania`,
@@ -326,6 +340,37 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   celuje w NIEGO, nie w stację. Sprawdź w terminalu, że zlecenie da się wykonać:
   dolatujesz, łapiesz podwoziem magnetycznym, wieziesz pod stację frakcji.
   Powtórz komendę → drugi moduł NIE powstaje, jeśli pierwszy wciąż leży dość daleko.
+  CZĘŚCIOWO 2026-07-31: `kontrakt 1007452380566239508 (WGR, poszukiwania) wystawiony
+  w grze` — a że kontrakt tego typu powstaje dopiero w callbacku spawnu rekwizytu
+  (`SpawnProp` w `Contracts.cs`), to prefab musiał się postawić. NIEZWERYFIKOWANE:
+  nazwa i beacon gridu, GPS na HUD i samo wykonanie zlecenia.
+
+  **BŁĄD ZNALEZIONY I NAPRAWIONY 2026-07-31 (dekompilacja, nie zgadywanie).**
+  Zlecenie zawalało się 1,2 s po przyjęciu (patrz I6). `ilspycmd -t
+  Sandbox.Game.Contracts.MyContractFind` na `Sandbox.Game.dll` pokazał w `Update`:
+
+  ```csharp
+  case MyContractStateEnum.Active:
+      MyCubeGrid grid = Grid;
+      if (grid != null && !grid.IsNpcSpawnedGrid)
+          Fail();
+  ```
+
+  Poszukiwania wymagają, żeby CEL miał flagę `IsNpcSpawnedGrid` — w pierwszym ticku
+  po aktywacji grid bez niej jest wywalany. Nasz `SpawnProp` wołał
+  `PrefabManager.SpawnPrefab(..., SpawningOptions.None, ...)`, więc rekwizyt flagi nie
+  dostawał. Vanilla stawia swój rekwizyt z
+  `SpawnRandomCargo | SetAuthorship | UseOnlyWorldMatrix | SetNpcSpawnedGrid`
+  (`MyContractWithSpawnableGrid.SpawnPrefab`). Poprawka: `SpawningOptions.SetNpcSpawnedGrid`
+  w `SpawnProp`. Flaga jest w ModAPI tylko do ODCZYTU
+  (`IMyCubeGrid.IsNpcSpawnedGrid { get; }`), więc ustawić ją można wyłącznie przy spawnie —
+  nie da się tego załatać po fakcie.
+  Odrzucone po drodze (nie marnować na nie czasu): `cooldown_min` i `czas_min`
+  (`MyContract.Update` odlicza czas TYLKO w stanie `Active`, czyli dopiero od przyjęcia —
+  zlecenie wiszące na tablicy nie tyka), brak zasilania rekwizytu (`ZF_Zgubka` ma baterię
+  z `ProducerEnabled`), zły `gridId` (`TryFindProp` zwraca `grid.EntityId`).
+  `MyContractRepair` tego warunku NIE MA, więc `naprawa` (I19b) działała mimo braku flagi.
+  DO POWTÓRZENIA W GRZE: I19a i I6 na nowym buildzie moda.
 - [x] **I19b. Naprawa stawia wrak tylko w razie potrzeby:** przy nieuszkodzonych
   siatkach WGR `/zf kontrakt WGR naprawa` → 2,5 km od stacji pojawia się „Uszkodzony
   modul frakcji" (beacon AWARIA) z niepełnymi blokami i to on jest celem. Gdy jakaś
@@ -361,8 +406,12 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   (`stand_down`), statki odlatują. Wcześniej brain odpowiadał „nie prowadzi rajdu".
 - [x] **J3. Polityka frakcji:** `/zf rel` → po `||` widać `polityka: HEL/KRW -70 |
   HEL/WGR +10 | KRW/WGR -50`.
-- [ ] **J4. Wróg mojego wroga:** ostrzelaj statek KRW → w konsoli obok kary dla KRW
+- [x] **J4. Wróg mojego wroga:** ostrzelaj statek KRW → w konsoli obok kary dla KRW
   jest `relacja HEL->gracz +5 (wróg KRW ostrzelany)`.
+  Zweryfikowane 2026-07-31 na parze odwrotnej (ostrzał WGR): `relacja WGR->gracz -15
+  za ostrzał => -24` i w tej samej paczce `relacja KRW->gracz +5 (wróg WGR ostrzelany)
+  => +2`. HEL (polityka z WGR +10, powyżej `prog_wrogi`) słusznie NIC nie dostał — bonus
+  idzie tylko do frakcji, która naprawdę jest wroga ostrzelanej.
 - [ ] **J5. Koniec echa:** napisz zwykłą wiadomość na czacie (bez `@`) → **NIE MA**
   już `[RADIO | TEST] Echo: …` (test A1 jest tym samym unieważniony).
 - [ ] **J6. Nowy świat = czysty stan (regresja 2026-07-29):** załóż NOWY świat z modem
@@ -419,10 +468,13 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
   `oferta … bez pokrycia (saldo …) — pusta obietnica`, rajd trwa.
 - [ ] **L3. Próg rośnie z wrogością:** przy relacji -80 próg jest ~1,8x bazy
   (`deeskalacja_prog_kredyty` w rules.toml, hot-reload).
-- [ ] **L4. Koniec farmienia reputacji:** ostrzeliwuj jeden statek KRW przez minutę →
+- [x] **L4. Koniec farmienia reputacji:** ostrzeliwuj jeden statek KRW przez minutę →
   HEL/WGR dostają bonus „wróg KRW ostrzelany" **raz**, nie co 3 s
   (`atak_na_wroga_cooldown_min = 10`). Regresja: wcześniej minuta ostrzału robiła
   z gracza sojusznika wszystkich pozostałych frakcji.
+  Zweryfikowane 2026-07-31 na WGR: **osiem** paczek `combat_hit` (WGR z -9 do -100)
+  i przy nich dokładnie **jeden** `relacja KRW->gracz +5 (wróg WGR ostrzelany)` —
+  przy pierwszym trafieniu. Cooldown 10 min trzyma.
 - [ ] **L5. Radio się nie zapętla:** dłuższy targ na czacie (kilka wiadomości pod rząd) →
   frakcja nie powtarza w kółko tego samego zdania (kara za powtórzenia w samplerze).
 
@@ -470,6 +522,13 @@ pierwszy test rozstrzyga, czy w ogóle mamy dostęp do ofert.
 - [ ] **N3. Wrogość podnosi ceny:** ostrzelaj statek tej frakcji do relacji ok. -50
   (`/zf rel`) → w konsoli braina `price_update [TAG] relacja -50 => ceny x1.3`,
   a ceny w terminalu rosną mniej więcej o tyle.
+  POŁOWA ZROBIONA 2026-07-31: strona braina zgadza się co do kropki — ostrzał WGR dał
+  ciąg `price_update [WGR]` -9 → x1.054, -24 → x1.144, -39 → x1.234, -54 → **x1.324**,
+  -62 → x1.374 (dokładnie liniowo, `mnoznik_wrog = 1.6`, węzeł 1.00 w zerze).
+  BRAKUJE potwierdzenia po stronie gry: czy `PricePerUnit` w terminalu sklepu naprawdę
+  urosło. To wciąż otwarte pytanie całej sekcji N (sygnatury `IMyStoreBlock` nie były
+  potwierdzone dekompilacją) — bez `/zf ceny` z `ofert: N > 0` mnożnik może lecieć
+  w próżnię.
 - [ ] **N4. Sojusz obniża:** wykonaj kilka zleceń tej frakcji do relacji dodatniej →
   mnożnik poniżej 1.00 i tańszy towar w terminalu.
 - [ ] **N5. Mnożniki się NIE składają:** przy relacji -50 spisz cenę, zapisz i wczytaj
@@ -479,6 +538,10 @@ pierwszy test rozstrzyga, czy w ogóle mamy dostęp do ofert.
   wartości spisanych w N2 (a nie „gdzieś w pobliżu").
 - [ ] **N7. Embargo:** zejdź poniżej `prog_embarga` (-70) → na czacie `… wstrzymuje handel`,
   `/zf ceny` pokazuje `EMBARGO`, a w terminalu sklepu nie da się nic kupić (ilości 0).
+  POŁOWA ZROBIONA 2026-07-31: brain przełączył się na progu co do punktu — WGR przy
+  -62.3 jeszcze `x1.374` bez dopisku, przy -74.4 już
+  `price_update [WGR] … x1.4461 (EMBARGO — frakcja nie handluje)` i tak do -100.
+  BRAKUJE strony gry: komunikatu na czacie, `/zf ceny` i zerowych ilości w terminalu.
 - [ ] **N8. Embargo się cofa:** odbuduj relację powyżej progu → `… znów z tobą handluje`
   i towar wraca w TEJ SAMEJ ilości, jaka była w chwili embarga (nie w bazowej).
 - [ ] **N9. Embargo przeżywa wczytanie świata:** przy wiszącym embargu zapisz i wczytaj
