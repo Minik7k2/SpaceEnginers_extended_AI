@@ -268,14 +268,42 @@ docs/protocol.md                # spec mostka JSONL
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
+- **`/zf autotest [sekcja]`** (2026-08-01): samosprawdzanie W GRZE. Sekcje: `stacje`,
+  `ceny`, `rekwizyt` (bezpieczne, lecą bez argumentu), `floty`, `boty` (spawnują
+  prawdziwe rajdy — kosmos, świat testowy), `wszystko`. Odpowiada na pytania, których
+  nie da się zadać poza grą: czy `GetStoreItems` w ogóle zwraca oferty, czy
+  `PricePerUnit` jest zapisywalne, czy mnożnik nie składa się po reloadzie, czy
+  `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub z naszej grupy i czy ma on
+  pilota. Wynik na czat ORAZ do `events.jsonl` (`autotest_result`), więc konsola brainu
+  ma komplet. NIE zastąpi tego, co wymaga człowieka za sterami (dolot, złapanie
+  rekwizytu, przyjęcie zlecenia w terminalu, ocena brzmienia radia).
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
 - `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy
   zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
   i wagami typów kontraktów. Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
+- **Scenariusze** (`brain/tests/scenariusze/*.jsonl`, 2026-08-01): plik JSONL, w którym
+  obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
+  `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
+  Wcześniej CI robiło `grep` na stdout, czyli sprawdzało tylko, że brain się nie wywrócił.
+  Pokrywają brainową połowę mechanik pilnowanych dotąd wyłącznie ręcznie: `ceny.jsonl`
+  (N2–N8, N12), `kontrakty.jsonl` (I5/I6/I8/I20/I21/I22, M4), `okup.jsonl` (K2–K5, L1–L3).
+  Linia `{"restart":true}` tworzy nowy `Engine` na TEJ SAMEJ bazie — to test, co siedzi
+  w SQLite, a co tylko w RAM. Uwaga na granicę: scenariusz mówi, co brain LICZY i WYSYŁA,
+  nigdy czy gra to przyjmie.
+- **`tools/waliduj_sbc.py`** (2026-08-01): walidator danych moda. Gra nie mówi, że grupa
+  spawnu wskazuje na nieistniejące zachowanie — po prostu nic się nie spawnuje albo statek
+  dryfuje. Skrypt sprawdza referencje SpawnGroups ↔ RivalAiBehaviors ↔ ZF_Manipulations ↔
+  ZF_Boty ↔ kod (`GroupForKind`, nazwy prefabów, tablice w `Stations.cs`), wymagany
+  `[RivalAiSpawn:true]`, jednorozmiarowość grup z manipulacją pilota oraz duże kadłuby bez
+  zdalnego sterowania (przyczyna dryfujących konwojów). Vanillowych prefabów nie da się
+  potwierdzić bez plików gry, więc trzyma jawną tabelę `ZNANE_PREFABY` — prefab spoza niej
+  to błąd z prośbą o dopisanie. `tools/test_waliduj_sbc.py` psuje dane na kopii i wymaga
+  wykrycia każdej usterki (walidator, który zawsze mówi „czysto", byłby bezwartościowy).
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
-  i smoke test `--replay`. Wariant bez LLM łatwo psuje się niezauważenie.
+  (z scenariuszami) i smoke test `--replay`; osobna praca puszcza walidator SBC i jego
+  kontrtest. Wariant bez LLM łatwo psuje się niezauważenie.
 - **Kompilacja moda BEZ wchodzenia do gry** (2026-08-01): błąd składni w C# kosztuje
   inaczej pełne przeładowanie świata. Roslyn z VS + zestawy z `Bin64` sprawdzają to
   w kilka sekund:
@@ -285,6 +313,7 @@ docs/protocol.md                # spec mostka JSONL
   (`VRage.Native`, `Havok`, `steam_api64`…) nie wolno podawać jako `-r:` (CS0009),
   a bez `netstandard.dll` z Facades sypie się CS0012 na `ValueType`.
   To sprawdza SKŁADNIĘ I TYPY, nie whitelistę ModAPI — tę weryfikuje dopiero gra.
+  Gotowiec: `tools/sprawdz-mod.ps1` (sam znajduje Bin64 i Roslyna, filtruje natywne DLL).
 
 ## Konwencje
 

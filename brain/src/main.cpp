@@ -99,6 +99,15 @@ void log_event(const zf::Event& ev) {
                   << " dystans=" << num("dist") << " m\n";
     } else if (ev.type == "debug_command") {
         std::cout << "[brain] debug_command: " << str("cmd") << "\n";
+    } else if (ev.type == "autotest_result") {
+        // /zf autotest w grze: wynik ląduje też tutaj, żeby cały przebieg dało się
+        // przeczytać w jednym miejscu (i wkleić z logu, zamiast przepisywać z czatu).
+        std::cout << "[brain] autotest [" << str("sekcja") << "] " << str("wynik") << " "
+                  << str("nazwa");
+        if (!str("opis").empty()) {
+            std::cout << " — " << str("opis");
+        }
+        std::cout << "\n";
     }
     // heartbeat celowo bez logu — od Etapu 3 tylko zaśmiecał konsolę.
 }

@@ -1,4 +1,38 @@
-# Testy ręczne w grze — Etapy 1–4
+# Testy ręczne w grze — Etapy 1–6
+
+## Zanim wejdziesz do gry: co sprawdza się samo
+
+Trzy bramki działają BEZ Space Engineers i wyłapują większość regresji, więc odpal je
+najpierw — ręczna lista ma sens dopiero, gdy są zielone.
+
+| Narzędzie | Co pokrywa | Jak uruchomić |
+|---|---|---|
+| `ctest --test-dir brain/build` | logika braina + **scenariusze** (`brain/tests/scenariusze/*.jsonl`): brainowa połowa I5/I6/I8/I20/I21/I22, K2–K5, L1–L3, M4, N2–N8, N12 | po `cmake --build brain/build` |
+| `python3 tools/waliduj_sbc.py` | referencje w danych moda: grupy spawnu ↔ zachowania ↔ manipulacje ↔ boty ↔ kod (sekcje O i P niżej) | z korzenia repo |
+| `tools/sprawdz-mod.ps1` | czy mod w ogóle się kompiluje (składnia i typy, NIE whitelista) | Windows z SE + Visual Studio |
+
+**Uwaga o podziale.** Scenariusze sprawdzają, co brain LICZY i WYSYŁA — nie to, czy gra
+to przyjmie. „N3 zielone w ctest" znaczy tylko tyle, że mnożnik wyszedł 1.324; czy cena
+w terminalu naprawdę urosła, rozstrzyga `/zf autotest ceny` albo oko.
+
+## W grze: `/zf autotest [sekcja]`
+
+Jedna komenda zamiast przeklikiwania listy. Sprawdza to, czego nie da się sprawdzić poza
+grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `events.jsonl`
+(typ `autotest_result`), więc widać go też w konsoli brainu.
+
+- `/zf autotest` — sekcje bezpieczne: `stacje`, `ceny`, `rekwizyt` (nic nie spawnują wrogo).
+- `/zf autotest ceny` — **bramka całej sekcji N**: czy `GetStoreItems` zwraca oferty, czy
+  `PricePerUnit` jest zapisywalne, czy mnożnik liczy się od bazy (a nie składa), czy embargo
+  zeruje `Amount` i czy zniesienie embarga wraca do ilości sprzed niego.
+- `/zf autotest stacje` — I1a–I1c: każda frakcja ma blok kontraktów i sklep.
+- `/zf autotest rekwizyt` — I19a: czy `SpawningOptions.SetNpcSpawnedGrid` faktycznie ustawia
+  flagę (bez niej poszukiwania zawalają się sekundę po przyjęciu).
+- `/zf autotest floty` — sekcja O: czy rajd każdej frakcji staje i czy kadłub ma pilota.
+  **Tylko w kosmosie i na świecie testowym** — stawia prawdziwe statki rajdowe.
+- `/zf autotest boty` — sekcja P: czy załoga się pojawia (miękko: bez AiEnabled to
+  OSTRZEŻENIE, nie błąd).
+- `/zf autotest wszystko` — wszystko po kolei, kilka minut.
 
 Przygotowanie: uruchom świat z modami SE_ZyweFrakcje + MES, obok odpal
 `brain\cmake-build-debug\zf_brain.exe` (konsola musi pokazać `[brain] start,
@@ -567,6 +601,68 @@ pierwszy test rozstrzyga, czy w ogóle mamy dostęp do ofert.
   synchronizujemy wyłącznie sklepy HEL/KRW/WGR.
 - [ ] **N13. Handel dalej się liczy:** kup coś w sklepie frakcji po zmianie cen →
   `trade` w konsoli braina i relacja rośnie (cennik nie może psuć heurystyki handlu).
+
+## O. Floty per frakcja, pilot i konwoje (2026-08-01) — DO WERYFIKACJI
+
+Cała sekcja jest nowa i **nic nie jest odhaczone**. Dotyczy trzech zmian naraz: 9 grup
+`ZF_<Rodzaj>_<TAG>`, manipulacji `ZF_ManipulacjaGrupa_Pilot` (kostka pancerza →
+`RivalAIRemoteControlLarge`) i konwojów na zachowaniu `ZF_Konwoj`.
+
+Spójność nazw między SBC a kodem pilnuje `tools/waliduj_sbc.py` — jeśli jest zielony,
+a statek się nie pojawia, problem jest po stronie GRY (brak prefabu w vanilli, safety
+check MES, planeta), nie literówki. Wszystko testuj w KOSMOSIE.
+
+- [ ] **O1. Każda frakcja ma własną sylwetkę:** `/zf raid HEL`, `/zf raid KRW`,
+  `/zf raid WGR` → trzy RÓŻNE kadłuby (HEL wojskowy, KRW piracki, WGR górniczy), nie
+  trzy razy ten sam dron. Komunikat mówi, która grupa poszła (`ZF_Raid_<TAG>`).
+  Automat: `/zf autotest floty` sprawdza, że statek staje i ma pilota — sylwetkę oceniasz okiem.
+- [ ] **O2. Prefaby vanilli istnieją:** żaden spawn nie kończy się „prefab nie powstał".
+  Podejrzane nazwy: `C33_Military_Enforcer`, `C22_Trade_Merchant`, `C40_Pirate_Vulture`,
+  `C42_Pirate_SalvageCarrier`, `C12_Mining_Armed_Tender`, `C10_Mining_Carriage` — wzięte
+  ze skanu prefabów, nie potwierdzone uruchomieniem.
+- [ ] **O3. Pilot w dużym kadłubie:** duży rajdowy statek (HEL/KRW) **leci na gracza**,
+  a nie dryfuje po prostej. To sprawdza, czy manipulacja podmieniła kostkę pancerza na
+  `RivalAIRemoteControlLarge`. `/zf autotest floty` mówi tylko, czy blok JEST — czy
+  RivalAI go używa, widać dopiero po zachowaniu statku.
+- [ ] **O4. Manipulacja nie trafia w małą siatkę:** patrole (małe drony) mają swoje
+  zdalne sterowanie i NIE dostają dodatkowego bloku; żadna grupa patrolowa nie ma
+  `[ManipulationGroups]`. Objaw błędu: blok o złym rozmiarze wtopiony w kadłub.
+- [ ] **O5. Konwój jedzie trasą:** `/zf raid WGR convoy` → frachtowiec **leci trasą
+  i po niej znika**, zamiast dryfować po prostej z nadaną prędkością. To był powód
+  podpięcia `BehaviorName:CargoShip` + gotowego autopilota MES.
+- [ ] **O6. Konwój nie atakuje:** statek z O5 nie strzela do gracza bez powodu (to
+  transport, nie napastnik).
+- [ ] **O7. Grupy zapasowe dla obcych tagów:** `/zf raid SPRT` → brain odrzuca spawn
+  („frakcja spoza moda"); grupy `ZF_Patrol`/`ZF_Raid`/`ZF_Convoy` bez tagu zostają
+  wyłącznie jako zapas i nie są używane dla HEL/KRW/WGR.
+
+## P. Załogi NPC — AiEnabled (2026-08-01) — DO WERYFIKACJI
+
+Zależność MIĘKKA: bez moda AiEnabled (Workshop 2596208372) nikt się nie pojawia i to
+NIE jest błąd — reszta ma działać bez zmian. Dwie drogi: deklaratywna dla statków
+(`ZF_Boty.sbc` przez MES) i programowa dla stacji (`Crew.cs` przez API).
+
+**Najbardziej podejrzane miejsce:** wartości `[BotType]` (`Police_Bot`, `Space_Skeleton`)
+i `[BotBehavior]` (`Soldier`, `Grinder`) wzięto z opisu moda na Workshopie, a nie z jego
+plików. Wiki MES mówi wprost, że `BotType` to pole `Name` z SBC, a NIE SubtypeId — jeśli
+boty się nie pojawiają, zacznij od tego.
+
+- [ ] **P1. Załoga na stacji:** dolec bliżej niż 3 km do stacji frakcji → po ~1 min po
+  pokładzie chodzą postacie NPC. Automat: `/zf autotest boty` (OSTRZEŻENIE bez AiEnabled).
+- [ ] **P2. Załoga na statku rajdowym:** `/zf raid KRW` w kosmosie, podleć bliżej niż
+  1,5 km (trigger `PlayerNear`) → na pokładzie pojawia się załoga. Boty NIE chodzą po
+  małych siatkach, więc to działa tylko dla dużych kadłubów rajdowych.
+- [ ] **P3. Bot należy do frakcji:** postać z P1/P2 jest członkiem HEL/KRW/WGR (MES woła
+  `SetPlayersFaction`), a nie bezpańskim NPC.
+- [ ] **P4. SEDNO HYBRYDY — bot reaguje na relację:** przy dobrej relacji bot NIE atakuje,
+  po doprowadzeniu relacji poniżej `prog_wrogi` (`/zf rel`) **ten sam bot** zaczyna
+  strzelać, BEZ respawnu. Wrogość bota leci po natywnej reputacji, czyli po naszej hybrydzie.
+- [ ] **P5. Łupieżca KRW rozbiera, a nie strzela:** wśród załogi KRW jest bot
+  (`ZF_Bot_KRW_Lupiezca`, zachowanie `Grinder`), który bierze się za twój kadłub szlifierką.
+- [ ] **P6. Załoga się nie mnoży:** wyjdź i wróć w pobliże stacji kilka razy → liczba
+  postaci nie rośnie (idempotencja przez liczenie postaci, nie przez zapis w storage).
+- [ ] **P7. Bez AiEnabled nic się nie psuje:** wyłącz AiEnabled → świat wstaje, jest jedno
+  ostrzeżenie na sesję, a stacje, ceny i kontrakty działają jak dotąd.
 
 ## Znane zachowania (to nie błędy)
 
