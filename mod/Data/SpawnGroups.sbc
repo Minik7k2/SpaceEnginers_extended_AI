@@ -114,7 +114,7 @@
             <Z>0.0</Z>
           </Position>
           <Speed>40</Speed>
-          <Behaviour>ZF_Fighter</Behaviour>
+          <Behaviour>ZF_Fighter_HEL</Behaviour>
         </Prefab>
       </Prefabs>
     </SpawnGroup>
@@ -238,7 +238,7 @@
             <Z>0.0</Z>
           </Position>
           <Speed>40</Speed>
-          <Behaviour>ZF_Fighter</Behaviour>
+          <Behaviour>ZF_Fighter_KRW</Behaviour>
         </Prefab>
       </Prefabs>
     </SpawnGroup>
@@ -362,7 +362,7 @@
             <Z>0.0</Z>
           </Position>
           <Speed>40</Speed>
-          <Behaviour>ZF_Fighter</Behaviour>
+          <Behaviour>ZF_Fighter_WGR</Behaviour>
         </Prefab>
       </Prefabs>
     </SpawnGroup>

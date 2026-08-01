@@ -1,0 +1,295 @@
+<?xml version="1.0"?>
+<!-- Załogi statków frakcji (2026-08-01) — droga DEKLARATYWNA przez MES + AiEnabled.
+
+     Jak to działa: MES ma wbudowaną integrację z AiEnabled (wozi jego klienta API,
+     Data/Scripts/ModularEncountersSystems/API/AiEnabledApi.cs). Profil [MES Bot Spawn]
+     opisuje bota, akcja RivalAI [AddBotsToGrid] go stawia, a trigger decyduje kiedy.
+     My nie piszemy do tego ani linijki kodu — całość jest w danych.
+
+     KLUCZOWE: MES nadaje botowi tożsamość członka frakcji i DOPISUJE GO DO FRAKCJI
+     (BotSpawner.cs: SetPlayersFaction(botIdentity, faction.Tag)). Dzięki temu wrogość
+     bota leci po normalnej reputacji SE — czyli po tej, którą ustawia nasza hybryda.
+     Ten sam bot macha, gdy relacja jest dobra, i strzela, gdy spadnie. Bez respawnu.
+
+     ZALEŻNOŚĆ MIĘKKA: bez moda AiEnabled (Workshop 2596208372) MES po prostu nie stawia
+     botów — wszystko inne działa jak dotąd. Nie robimy z tego twardego wymogu.
+
+     DO WERYFIKACJI W GRZE: wartości [BotType] i [BotBehavior] wzięte są z opisu moda na
+     Workshopie, a nie z jego plików (nie było go na dysku, gdy to powstawało). Wiki MES
+     mówi wprost, że BotType to pole `Name` z SBC, a NIE SubtypeId — jeśli bot się nie
+     pojawi, to jest pierwsze miejsce do sprawdzenia. Boty NIE chodzą po małych siatkach,
+     więc profile podpięte są wyłącznie pod duże kadłuby rajdowe. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <EntityComponents>
+
+    <!-- ==================== PROFILE BOTÓW ==================== -->
+
+    <!-- HEL: ochrona kontraktowa. Celna, cicha, bez teatru. -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Bot_HEL_Ochrona</SubtypeId>
+      </Id>
+      <Description>
+
+        [MES Bot Spawn]
+
+        [BotType:Police_Bot]
+        [BotBehavior:Soldier]
+        [BotDisplayName:Ochrona Helionu]
+        [Color:{X:40 Y:90 Z:160}]
+
+        [CanUseSpaceNodes:true]
+        [CanUseAirNodes:true]
+        [CanUseLadders:true]
+        [CanUseSeats:true]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- KRW: rzezimieszek. Głośny i niecelny — ma robić wrażenie, nie kosić z dystansu. -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Bot_KRW_Rzezimieszek</SubtypeId>
+      </Id>
+      <Description>
+
+        [MES Bot Spawn]
+
+        [BotType:Police_Bot]
+        [BotBehavior:Soldier]
+        [BotDisplayName:Krwawa Ręka]
+        [Color:{X:150 Y:30 Z:30}]
+
+        [CanUseSpaceNodes:true]
+        [CanUseAirNodes:true]
+        [CanUseLadders:true]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- KRW: łupieżca. Nie strzela do ciebie — rozbiera twój statek. Najbardziej piracka
+         rzecz, jaką ten mod potrafi zrobić. -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Bot_KRW_Lupiezca</SubtypeId>
+      </Id>
+      <Description>
+
+        [MES Bot Spawn]
+
+        [BotType:Space_Skeleton]
+        [BotBehavior:Grinder]
+        [BotDisplayName:Lupiezca]
+        [Color:{X:120 Y:40 Z:40}]
+
+        [CanUseSpaceNodes:true]
+        [CanUseAirNodes:true]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- WGR: górnicy nie są wojskiem. Ochrona jest, ale to najęci ludzie, nie żołnierze. -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Bot_WGR_Zaloga</SubtypeId>
+      </Id>
+      <Description>
+
+        [MES Bot Spawn]
+
+        [BotType:Police_Bot]
+        [BotBehavior:Soldier]
+        [BotDisplayName:Wolni Gornicy]
+        [Color:{X:190 Y:150 Z:40}]
+
+        [CanUseSpaceNodes:true]
+        [CanUseLadders:true]
+        [CanUseSeats:true]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- ==================== AKCJE (co się dzieje) ==================== -->
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Akcja_Zaloga_HEL</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Action]
+
+        [AddBotsToGrid:true]
+        [BotCount:3]
+        [BotSpawnProfileNames:ZF_Bot_HEL_Ochrona]
+        [OnlySpawnBotsInPressurizedRooms:false]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- Dwa profile => MES losuje dla każdego bota jeden z nich (wiki: "If multiple values
+         are provided, then each spawn will select one at random"). Stąd mieszana banda:
+         część strzela, część rozbiera twój kadłub. -->
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Akcja_Zaloga_KRW</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Action]
+
+        [AddBotsToGrid:true]
+        [BotCount:4]
+        [BotSpawnProfileNames:ZF_Bot_KRW_Rzezimieszek]
+        [BotSpawnProfileNames:ZF_Bot_KRW_Lupiezca]
+        [OnlySpawnBotsInPressurizedRooms:false]
+
+      </Description>
+    </EntityComponent>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Akcja_Zaloga_WGR</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Action]
+
+        [AddBotsToGrid:true]
+        [BotCount:2]
+        [BotSpawnProfileNames:ZF_Bot_WGR_Zaloga]
+        [OnlySpawnBotsInPressurizedRooms:false]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- ==================== TRIGGERY (kiedy) ==================== -->
+    <!-- PlayerNear zamiast Timera: załoga pojawia się dopiero, gdy gracz podleci na 1,5 km.
+         Nie płacimy wydajnością za boty, których nikt nie zobaczy, a jednocześnie zdążą
+         wstać, zanim dojdzie do abordażu. MaxActions:1 — jedna załoga na statek. -->
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Trigger_Zaloga_HEL</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Trigger]
+
+        [UseTrigger:true]
+        [Type:PlayerNear]
+        [TargetDistance:1500]
+
+        [MinCooldownMs:5000]
+        [MaxCooldownMs:5001]
+        [StartsReady:true]
+
+        [MaxActions:1]
+        [Actions:ZF_Akcja_Zaloga_HEL]
+
+      </Description>
+    </EntityComponent>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Trigger_Zaloga_KRW</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Trigger]
+
+        [UseTrigger:true]
+        [Type:PlayerNear]
+        [TargetDistance:1500]
+
+        [MinCooldownMs:5000]
+        [MaxCooldownMs:5001]
+        [StartsReady:true]
+
+        [MaxActions:1]
+        [Actions:ZF_Akcja_Zaloga_KRW]
+
+      </Description>
+    </EntityComponent>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Trigger_Zaloga_WGR</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Trigger]
+
+        [UseTrigger:true]
+        [Type:PlayerNear]
+        [TargetDistance:1500]
+
+        [MinCooldownMs:5000]
+        [MaxCooldownMs:5001]
+        [StartsReady:true]
+
+        [MaxActions:1]
+        [Actions:ZF_Akcja_Zaloga_WGR]
+
+      </Description>
+    </EntityComponent>
+
+    <!-- ============ ZACHOWANIA Z ZAŁOGĄ (per frakcja) ============ -->
+    <!-- ZF_Fighter został bez zmian dla patroli (małe drony — boty i tak by po nich nie
+         chodziły). Te trzy są dla dużych kadłubów rajdowych: to samo zachowanie bojowe,
+         różnica jest wyłącznie w podpiętym triggerze załogi. -->
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Fighter_HEL</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Behavior]
+        [BehaviorName:Fighter]
+        [Triggers:ZF_Trigger_Zaloga_HEL]
+
+      </Description>
+    </EntityComponent>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Fighter_KRW</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Behavior]
+        [BehaviorName:Fighter]
+        [Triggers:ZF_Trigger_Zaloga_KRW]
+
+      </Description>
+    </EntityComponent>
+
+    <EntityComponent xsi:type="MyObjectBuilder_InventoryComponentDefinition">
+      <Id>
+        <TypeId>Inventory</TypeId>
+        <SubtypeId>ZF_Fighter_WGR</SubtypeId>
+      </Id>
+      <Description>
+
+        [RivalAI Behavior]
+        [BehaviorName:Fighter]
+        [Triggers:ZF_Trigger_Zaloga_WGR]
+
+      </Description>
+    </EntityComponent>
+
+  </EntityComponents>
+</Definitions>
