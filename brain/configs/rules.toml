@@ -145,7 +145,15 @@ transport = 2
 naprawa = 1
 poszukiwania = 1
 eskorta = 0
-wlasne = 1
+# wlasne = 0 (2026-08-01, ROZSTRZYGNIĘTE W GRZE + dekompilacją): zlecenie custom NIE MA
+# warunku wykonania. IMyContractCustom niesie tylko DefinitionId/EndBlockId/Name/Description,
+# a podpięty MyContractConditionCustom kończy WYŁĄCZNIE mod przez
+# IMyContractSystem.TryFinishCustomContract(id) — czego nie robimy. Gracz dostawał zlecenie
+# bez zadania, które po czasie wygasało (kara relacji + przepadek kaucji). Do włączenia
+# dopiero razem z własnym warunkiem po stronie moda. Uwaga: dla tego typu EndBlockId musi
+# być BLOKIEM KONTRAKTÓW (gra: `as MyContractBlock` → Fail_BlockNotFound), a nasz
+# FindHaulTarget schodzi na sklep — to osobna przyczyna odrzuceń.
+wlasne = 0
 
 [kontrakty.typy.HEL]
 # Korporacja żyje logistyką: dostawy i transport, brudną robotę zleca rzadko.

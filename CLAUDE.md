@@ -32,6 +32,19 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
   - Rotacja po 5 MB (`events-0002.jsonl`...), stare pliki kasuje odbiorca.
   - Każda linia ma pole `"v":1`. Niepełną/uszkodzoną linię pomiń i czekaj.
   - Po wczytaniu świata mod pisze `session_start`.
+  - **PUŁAPKA — nazwa świata musi być identyczna z nazwą katalogu w `Saves`**
+    (ustalone 2026-08-01 dekompilacją): gra składa storage moda z NAZWY świata
+    (`MySession.WorldSavePath = SavesPath + SessionName.Replace(':','-')`, potem
+    `WriteFileInWorldStorage` dokłada `\Storage\<mod>`), a nie ze ścieżki zapisu
+    (`CurrentPath`) — i przy zmianie nazwy NIE przemianowuje katalogu (w `MySession`
+    nie ma `Directory.Move`). Rozjazd daje dwa objawy: nazwa z końcową spacją (katalog
+    takiej mieć nie może, bo Win32 ją obcina) → `DirectoryNotFoundException` i BŁĄD
+    ładowania świata; zwykłe przemianowanie → cicha strata, bo mod pisze do świeżego
+    katalogu OBOK zapisu i kontrakty/ceny/offsety wyglądają na skasowane. Dotyka
+    każdego moda — MES w tej samej sesji nie zapisał żadnego swojego configu.
+    Mod ostrzega o rozjeździe na czacie (`CheckWorldNameMatchesFolder`), a błąd
+    zapisu wyłącza sam mostek (`EventWriter.Failed`), nie świat: wyjątek z `LoadData()`
+    zabija ładowanie świata, więc nic stamtąd nie może lecieć wyżej.
   - Pełna spec: `docs/protocol.md`.
 - **LLM:** qwen2.5-3b-instruct Q4_K_M (GGUF). Wyjście wymuszone gramatyką GBNF:
   JSON `{"tresc": str, "ton": str}`. Max ~200 znaków treści, 1 retry, potem
@@ -147,8 +160,14 @@ docs/protocol.md                # spec mostka JSONL
   KLUCZOWE: mod ma ostatnie słowo — gdy nie znajdzie w świecie celu (wrogiej
   tożsamości, drugiego bloku, uszkodzonej siatki…) albo gra odrzuci kontrakt,
   wystawia DOSTAWĘ i to ona wraca w `contract_created` (brain utrwala typ, który
-  naprawdę powstał). `wlasne` to jedyny typ nieopisany w dokumentacji API — jeśli
-  w grze zawiedzie, `wlasne = 0` w configu.
+  naprawdę powstał). **`wlasne` WYŁĄCZONE (waga 0, 2026-08-01):** ten typ NIE MA warunku
+  wykonania. `IMyContractCustom` niesie tylko `DefinitionId`/`EndBlockId`/`Name`/`Description`,
+  a podpięty `MyContractConditionCustom` kończy WYŁĄCZNIE mod przez
+  `IMyContractSystem.TryFinishCustomContract(id)` — czego nie robimy, więc gracz dostawał
+  zlecenie bez zadania, wygasające na karę relacji i przepadek kaucji. Do włączenia dopiero
+  razem z własnym warunkiem po stronie moda. Tamże: `EndBlockId` custom kontraktu musi być
+  BLOKIEM KONTRAKTÓW (`as MyContractBlock` → `Fail_BlockNotFound`), a `FindHaulTarget`
+  schodzi na sklep — osobna przyczyna odrzuceń.
   **Rekwizyty (2026-07-30):** frakcja sama przygotowuje robotę — `poszukiwania`
   i `naprawa` stawiają prefab z `mod/Data/Prefabs/ZF_ContractProps.sbc` (zgubiony
   moduł / uszkodzony wrak, właściciel = frakcja) i dopiero w callbacku spawnu tworzą
@@ -161,7 +180,15 @@ docs/protocol.md                # spec mostka JSONL
   **Wagi 0 do czasu testów w grze:** `nagroda` (vanilla liczy zabicia GRACZY, nie NPC)
   i `eskorta` (typ usunięty z gry w 2026) — kod kompletny, wystarczy wpisać wagę.
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
-  nie ma zdarzenia transakcji. Zostało: własne stacje frakcji.
+  nie ma zdarzenia transakcji. UWAGA: kaucję ściąganą przy PRZYJĘCIU zlecenia ta sama
+  heurystyka brała za zakup (darmowe +1..+3 relacji), stąd `_trade.Suppress()` także
+  w `Taken()`, nie tylko w `Finish()`.
+  **Własne stacje frakcji (2026-08-01):** `StationSpawner` stawia prefab `ZF_Stacja`
+  (`mod/Data/Prefabs/ZF_Stations.sbc`: blok kontraktów + sklep + bateria + radiolatarnia,
+  siatka duża, statyczna) 6-12 km od gracza każdej frakcji, która nie ma żadnego bloku
+  ekonomicznego. Warunek jest STANEM ŚWIATA, nie zapisem w storage — dzięki temu rzecz
+  jest idempotentna po wczytaniu świata, a zburzona stacja odbudowuje się po karencji
+  (~5 min). `/zf stacja` zostaje jako rusztowanie testowe, ale nie jest już konieczne.
   **Cennik (`price_update`, 2026-07-31):** relacja rusza nie tylko liczbę w oknie frakcji,
   ale i to, ile płacisz przy ladzie. Brain liczy mnożnik (`[ceny]` w rules.toml, odcinkowo
   liniowo: -100 → `mnoznik_wrog`, 0 → dokładnie 1.0, +100 → `mnoznik_sojusznik`), mod

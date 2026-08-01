@@ -37,6 +37,9 @@ namespace ZyweFrakcje
         private const int ReapplyEveryTicks = 1800;
         private const string StateFile = "prices_mod_state.txt";
 
+        // Awarię zapisu meldujemy raz na sesję — próba wraca co przebieg, dopóki jest brudno.
+        private bool _saveFailureReported;
+
         private const string StoreType = FactionEconomy.StoreType;
 
         private sealed class Cel
@@ -395,10 +398,29 @@ namespace ZyweFrakcje
                   .Append(kv.Value.IloscPrzedEmbargiem.ToString(CultureInfo.InvariantCulture))
                   .Append('\n');
             }
-            using (System.IO.TextWriter writer =
-                   MyAPIGateway.Utilities.WriteFileInWorldStorage(StateFile, _owner))
+            // Wyjątek stąd leci prosto z Update i wywalałby sesję (storage świata bywa martwy
+            // przez całą grę — nazwa świata ≠ katalog zapisu, 2026-08-01). Przy porażce
+            // ZOSTAWIAMY _brudny, żeby chwilowa awaria naprawiła się przy następnej próbie;
+            // ceny bazowe muszą przetrwać, bo bez nich mnożnik składałby się przy wczytaniu.
+            try
             {
-                writer.Write(sb.ToString());
+                using (System.IO.TextWriter writer =
+                       MyAPIGateway.Utilities.WriteFileInWorldStorage(StateFile, _owner))
+                {
+                    writer.Write(sb.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                if (!_saveFailureReported)
+                {
+                    _saveFailureReported = true;
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "UWAGA: nie mogę zapisać cen bazowych (" + StateFile + ") — po wczytaniu " +
+                        "świata mnożnik frakcji nałoży się na już zmienione ceny. " +
+                        e.GetType().Name + ": " + e.Message);
+                }
+                return;
             }
             _brudny = false;
         }

@@ -42,6 +42,9 @@ namespace ZyweFrakcje
         private const int PollEveryTicks = 300; // ~5 s przy 60 Hz
         private const string StateFile = "contracts_mod_state.txt";
 
+        // Awarię zapisu meldujemy raz na sesję — SaveState() leci przy każdej zmianie kontraktu.
+        private bool _saveFailureReported;
+
         // Poszukiwania: cel musi być dalej niż to od gracza (inaczej zlecenie „znajdź"
         // dotyczyłoby czegoś, na co gracz właśnie patrzy), a „znalezione" liczy się
         // w tym promieniu od celu.
@@ -557,6 +560,16 @@ namespace ZyweFrakcje
             {
                 return; // nie nasze zlecenie albo już rozliczone
             }
+            // Gra ŚCIĄGA kaucję w chwili przyjęcia, i to stojąc przy stacji frakcji — czyli
+            // dokładnie tam, gdzie heurystyka handlu jest najczulsza. Bez wyciszenia samo
+            // wzięcie zlecenia dawało graczowi +1..+3 relacji za nic i wysyłało do brainu
+            // fałszywy `trade` (zaobserwowane 2026-08-01: „Handel z WGR: 3716 kr" dwie
+            // sekundy po przyjęciu — co do złotówki zabezpieczenie kontraktu).
+            if (_trade != null)
+            {
+                _trade.Suppress();
+            }
+
             _events.WriteContractTaken(contractId.ToString(), _tracked[index].Faction,
                                        _tracked[index].Kind);
             MyAPIGateway.Utilities.ShowMessage("ZF",
@@ -829,6 +842,12 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// Nieudany zapis nie może wywalić gry — leci z Update i z callbacków kontraktów.
+        /// Storage świata potrafi być niedostępny przez całą sesję (nazwa świata ≠ katalog
+        /// zapisu, 2026-08-01), a wtedy pękałby tu każdy kontrakt. Meldujemy raz: ID zostają
+        /// w pamięci, więc sesja działa, ale po wczytaniu świata mod ich nie odtworzy.
+        /// </summary>
         private void SaveState()
         {
             var sb = new StringBuilder();
@@ -838,9 +857,23 @@ namespace ZyweFrakcje
                   .Append(_tracked[i].Faction).Append('\t')
                   .Append(_tracked[i].Kind).Append('\n');
             }
-            using (System.IO.TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage(StateFile, _owner))
+            try
             {
-                writer.Write(sb.ToString());
+                using (System.IO.TextWriter writer = MyAPIGateway.Utilities.WriteFileInWorldStorage(StateFile, _owner))
+                {
+                    writer.Write(sb.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                if (!_saveFailureReported)
+                {
+                    _saveFailureReported = true;
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "UWAGA: nie mogę zapisać stanu kontraktów (" + StateFile + ") — po " +
+                        "wczytaniu świata zlecenia nie zostaną odtworzone. " +
+                        e.GetType().Name + ": " + e.Message);
+                }
             }
         }
     }

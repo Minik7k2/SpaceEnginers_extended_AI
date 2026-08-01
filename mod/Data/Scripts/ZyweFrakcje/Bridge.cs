@@ -49,17 +49,60 @@ namespace ZyweFrakcje
         private long _currentBytes;
         private long _seq;
         private TextWriter _writer;
+        private bool _disabled;
 
+        /// <summary>Mostek padł i zdarzenia lecą do kosza — patrz <see cref="FailureReason"/>.</summary>
+        public bool Failed { get { return _disabled; } }
+
+        /// <summary>Typ i treść wyjątku, który wyłączył zapis; null, gdy mostek żyje.</summary>
+        public string FailureReason { get; private set; }
+
+        /// <summary>
+        /// Nieudane otwarcie events.jsonl NIE może wywalić gry: konstruktor leci z
+        /// <c>LoadData()</c>, a wyjątek stamtąd zabija ładowanie świata (BŁĄD „Przy ładowaniu
+        /// świata wystąpił błąd", 2026-08-01). Wystarczyła nazwa świata z końcową spacją:
+        /// gra składa storage moda z NAZWY świata (<c>MySession.WorldSavePath</c> =
+        /// SavesPath + SessionName), a katalog na dysku spacji nie ma, więc każdy zapis
+        /// leciał w nieistniejącą ścieżkę. Wtedy wyłączamy sam mostek, nie świat.
+        /// </summary>
         public EventWriter(Type owner, ulong rotateBytes)
         {
             _owner = owner;
             _rotateBytes = rotateBytes;
 
-            while (MyAPIGateway.Utilities.FileExistsInWorldStorage(BridgeNaming.RotatedFileName("events", _currentIndex + 1), _owner))
+            try
             {
-                _currentIndex++;
+                while (MyAPIGateway.Utilities.FileExistsInWorldStorage(BridgeNaming.RotatedFileName("events", _currentIndex + 1), _owner))
+                {
+                    _currentIndex++;
+                }
+                OpenActiveFile();
             }
-            OpenActiveFile();
+            catch (Exception e)
+            {
+                Disable(e);
+            }
+        }
+
+        private void Disable(Exception e)
+        {
+            _disabled = true;
+            FailureReason = e.GetType().Name + ": " + e.Message;
+            if (_writer != null)
+            {
+                // Uchwyt trzeba oddać, nie tylko zapomnieć: mod trzyma events.jsonl otwarty do
+                // zapisu przez całą sesję, a porzucony writer dalej blokowałby plik drugiej
+                // stronie (Etap 1 — trzymany uchwyt zapisu potrafił wywalić grę przy odczycie).
+                try
+                {
+                    _writer.Dispose();
+                }
+                catch (Exception)
+                {
+                    // Zamykamy uchwyt po awarii zapisu — druga porażka niczego już nie zmienia.
+                }
+                _writer = null;
+            }
         }
 
         public void WriteSessionStart(string world, long playerId, string playerName, string modVersion)
@@ -331,6 +374,10 @@ namespace ZyweFrakcje
 
         private void WriteLine(string type, string dataJson)
         {
+            if (_disabled)
+            {
+                return; // mostek wyłączony przy starcie — gra ma działać dalej, brain milczy
+            }
             _seq++;
             long ts = (long)(DateTime.UtcNow - UnixEpoch).TotalMilliseconds;
             string line = new Json.Builder()
@@ -341,11 +388,21 @@ namespace ZyweFrakcje
                 .AddRaw("data", dataJson)
                 .Build();
 
-            _writer.Write(line);
-            _writer.Write('\n');
-            _writer.Flush();
-            _currentBytes += Encoding.UTF8.GetByteCount(line) + 1;
-            RotateIfNeeded();
+            // Zapis w try/catch z tego samego powodu co konstruktor: wyjątek stąd leci przez
+            // UpdateAfterSimulation albo handler czatu i wywala sesję. Lepiej głośno wyłączyć
+            // mostek (patrz Failed) niż zabić świat w środku gry.
+            try
+            {
+                _writer.Write(line);
+                _writer.Write('\n');
+                _writer.Flush();
+                _currentBytes += Encoding.UTF8.GetByteCount(line) + 1;
+                RotateIfNeeded();
+            }
+            catch (Exception e)
+            {
+                Disable(e);
+            }
         }
 
         private void OpenActiveFile()
@@ -386,8 +443,15 @@ namespace ZyweFrakcje
         {
             if (_writer != null)
             {
-                _writer.Flush();
-                _writer.Dispose();
+                try
+                {
+                    _writer.Flush();
+                    _writer.Dispose();
+                }
+                catch (Exception)
+                {
+                    // Wyjście ze świata nie jest miejscem na wyjątek — plik i tak zamyka proces.
+                }
                 _writer = null;
             }
         }

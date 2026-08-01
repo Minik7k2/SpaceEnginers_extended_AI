@@ -32,10 +32,15 @@ namespace ZyweFrakcje
         private ContractManager _contracts;
         private ReputationSync _reputation;
         private PriceManager _prices;
+        private StationSpawner _stations;
         private int _tick;
 
         // Ostrzeżenia raz na rodzaj problemu — inaczej komunikat leciałby co poll (~co 60 tików).
         private readonly HashSet<string> _warned = new HashSet<string>();
+
+        // Awaria z LoadData. Nie melduje się jej od razu: w LoadData nie ma jeszcze czatu ani
+        // HUD-u, więc ShowMessage poszedłby w próżnię. Czeka na pierwszy tik.
+        private string _loadDataError;
 
         /// <summary>
         /// Mówi o problemie RAZ. Powstało po sesji 2026-07-31, w której komendy brainu ginęły
@@ -50,16 +55,42 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// UWAGA: wyjątek z LoadData zabija ładowanie świata („Przy ładowaniu świata wystąpił
+        /// błąd" i powrót do menu) — gracz nie ma wtedy ani gry, ani pojęcia, że winny jest mod.
+        /// Zdarzyło się 2026-08-01 przy nazwie świata z końcową spacją: storage moda gra składa
+        /// z NAZWY świata, a nie ze ścieżki zapisu, więc EventWriter nie miał gdzie pisać.
+        /// Dlatego każdy komponent osobno i nic nie leci wyżej — tak jak w BeforeStart().
+        /// </summary>
         public override void LoadData()
         {
+            // EventWriter z założenia NIE rzuca: przy błędzie storage wyłącza się sam (Failed),
+            // więc reszta moda zawsze ma z czym rozmawiać i nigdzie nie trzeba sprawdzać null.
             _events = new EventWriter(typeof(ZyweFrakcjeSession), RotateBytes);
-            _commands = new CommandReader(typeof(ZyweFrakcjeSession));
-            _radio = new RadioDisplay();
-            _mes = new MESApi(); // rejestruje handler; MESApiReady dopiero gdy MES odeśle API
-            TestSpawner.SetMes(_mes);
-            _ransom = new RansomManager(_events); // B+ okup w surowcach: skrzynka zrzutu + detekcja
-            // Hybryda reputacji: brain liczy, gra pokazuje (okno frakcji, wieżyczki, ceny).
-            _reputation = new ReputationSync();
+            // CommandReader czyta plik offsetów, czyli robi I/O — jedyny tutaj realny kandydat
+            // do wyjątku. Bez mostka w tę stronę gra żyje dalej, tylko brain nie ma jak odpowiadać.
+            try
+            {
+                _commands = new CommandReader(typeof(ZyweFrakcjeSession));
+            }
+            catch (Exception e)
+            {
+                _loadDataError = "CommandReader: " + e.GetType().Name + ": " + e.Message;
+            }
+            try
+            {
+                _radio = new RadioDisplay();
+                _mes = new MESApi(); // rejestruje handler; MESApiReady dopiero gdy MES odeśle API
+                TestSpawner.SetMes(_mes);
+                _ransom = new RansomManager(_events); // B+ okup w surowcach: skrzynka zrzutu + detekcja
+                // Hybryda reputacji: brain liczy, gra pokazuje (okno frakcji, wieżyczki, ceny).
+                _reputation = new ReputationSync();
+            }
+            catch (Exception e)
+            {
+                _loadDataError = (_loadDataError == null ? "" : _loadDataError + " | ") +
+                                 e.GetType().Name + ": " + e.Message;
+            }
             MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
         }
 
@@ -94,6 +125,9 @@ namespace ZyweFrakcje
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "BŁĄD startu cennika: " + e.GetType().Name + ": " + e.Message);
             }
+            // Bez własnych stacji frakcje nie mają gdzie wystawiać zleceń ani handlować —
+            // do 2026-08-01 trzeba było oddawać im siatkę ręcznie przez `/zf stacja`.
+            _stations = new StationSpawner();
         }
 
         protected override void UnloadData()
@@ -124,10 +158,12 @@ namespace ZyweFrakcje
 
             if (_tick == 1)
             {
+                ReportStartupProblems();
                 WriteSessionStart();
             }
             if (_tick % HeartbeatEveryTicks == 0)
             {
+                ReportStartupProblems(); // mostek potrafi paść też w trakcie gry
                 WriteHeartbeat();
             }
             if (_tick % CommandsPollEveryTicks == 0)
@@ -173,6 +209,73 @@ namespace ZyweFrakcje
                 // z gry, więc cennik frakcji trzeba nakładać powtórnie, nie raz.
                 _prices.Update(_tick);
             }
+            if (_stations != null)
+            {
+                // Frakcja bez własnego punktu ekonomicznego stawia sobie stację.
+                _stations.Update(_tick);
+            }
+        }
+
+        /// <summary>
+        /// Melduje na czacie, że mod wstał kaleki. Do 2026-08-01 taka awaria albo wywalała
+        /// ładowanie świata, albo (po naprawie) mogłaby zniknąć bez śladu — a mod bez mostka
+        /// wygląda dokładnie jak mod zdrowy: frakcje po prostu milczą.
+        /// Wołane co heartbeat, bo mostek potrafi paść też w środku gry; WarnOnce dedupuje.
+        /// </summary>
+        private void ReportStartupProblems()
+        {
+            if (_loadDataError != null)
+            {
+                WarnOnce("load-data", "część moda nie wstała: " + _loadDataError);
+            }
+            if (_events != null && _events.Failed)
+            {
+                WarnOnce("mostek-zapis",
+                    "nie mogę pisać zdarzeń do storage świata — frakcje będą milczeć. " +
+                    _events.FailureReason + " | Najczęstsza przyczyna: nazwa świata różni się " +
+                    "od nazwy katalogu zapisu (np. spacja na końcu). Zmień nazwę świata na taką " +
+                    "jak katalog w Saves.");
+            }
+            CheckWorldNameMatchesFolder();
+        }
+
+        private static readonly char[] PathSeparators = { '\\', '/' };
+
+        /// <summary>
+        /// Wyłapuje rozjazd nazwy świata z katalogiem zapisu — cichszego brata awarii z
+        /// 2026-08-01. Gra składa storage moda z NAZWY świata
+        /// (<c>MySession.WorldSavePath = SavesPath + SessionName</c>), a nie ze ścieżki zapisu,
+        /// i nie przemianowuje katalogu przy zmianie nazwy (w MySession nie ma Directory.Move).
+        /// Skutki rozjazdu: albo wyjątek (nazwa ze spacją na końcu — katalog takiej mieć nie może),
+        /// albo, częściej, cicha strata: mod pisze do świeżego katalogu OBOK zapisu, więc
+        /// kontrakty, ceny bazowe i offsety mostka wyglądają po wczytaniu jak skasowane.
+        /// </summary>
+        private void CheckWorldNameMatchesFolder()
+        {
+            string path = MyAPIGateway.Session.CurrentPath;
+            string name = MyAPIGateway.Session.Name;
+            if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+            // Tylko dla świata wczytanego z Saves. Świeżo zaczęty świat ze scenariusza pokazuje
+            // tu ścieżkę szablonu z Content i swojego katalogu jeszcze nie ma — ostrzeżenie
+            // byłoby fałszywym alarmem, a po pierwszym zapisie nazwy i tak się zgadzają.
+            if (path.IndexOf("\\Saves\\", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return;
+            }
+            int cut = path.LastIndexOfAny(PathSeparators);
+            string folder = cut >= 0 ? path.Substring(cut + 1) : path;
+            // Dwukropka katalog mieć nie może, więc gra podmienia go tak samo po obu stronach.
+            if (string.Equals(folder, name.Replace(':', '-'), StringComparison.Ordinal))
+            {
+                return;
+            }
+            WarnOnce("nazwa-swiata",
+                "nazwa świata [" + name + "] różni się od katalogu zapisu [" + folder +
+                "] — gra kieruje dane moda obok zapisu. Ustaw nazwę świata dokładnie taką jak " +
+                "katalog w Saves, inaczej kontrakty, ceny i stan mostka nie przetrwają wczytania.");
         }
 
         private void WriteSessionStart()
@@ -467,6 +570,10 @@ namespace ZyweFrakcje
 
         private void PollCommands()
         {
+            if (_commands == null)
+            {
+                return; // nie wstał w LoadData; gracz dostał już ostrzeżenie z ReportStartupProblems
+            }
             List<Dictionary<string, object>> messages = _commands.Poll();
             for (int i = 0; i < messages.Count; i++)
             {
@@ -721,6 +828,15 @@ namespace ZyweFrakcje
             if (_commands != null)
             {
                 MyAPIGateway.Utilities.ShowMessage("ZF", _commands.Diagnostics());
+            }
+            else
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "mostek: BRAK czytnika komend");
+            }
+            if (_events == null || _events.Failed)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF", "zapis zdarzeń: WYŁĄCZONY (" +
+                    (_events == null ? "brak" : _events.FailureReason) + ")");
             }
             MyAPIGateway.Utilities.ShowMessage("ZF",
                 "komponenty: kontrakty=" + (_contracts == null ? "BRAK" : "ok") +

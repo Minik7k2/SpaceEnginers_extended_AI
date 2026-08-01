@@ -254,7 +254,20 @@ budowli frakcji NPC, a bez tego I2-I10 nie da się ruszyć. Droga na skróty:
 3. wyceluj w grid i wpisz `/zf stacja WGR` → mod przepisuje siatkę na frakcję i od razu
    mówi, czy blok kontraktów został wykryty,
 4. `/zf stations` musi teraz pokazać `blok kontraktów: <nazwa> (id)` zamiast `BRAK`.
-Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowaniem do testów.
+Od 2026-08-01 nie jest to już konieczne — frakcje stawiają sobie stacje same (I1a-I1d
+niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
+
+- [ ] **I1a. Stacja powstaje sama:** NOWY świat, nie ruszaj `/zf stacja` → w ciągu ~30 s
+  na czacie `HEL/KRW/WGR postawiła stację X km stąd`, jedna frakcja na przebieg.
+  `/zf stations` pokazuje dla każdej `blok kontraktów: Stacja <TAG>`.
+- [ ] **I1b. Nie duplikuje się:** zapisz i wczytaj świat → NIE MA nowych stacji (warunek
+  to stan świata: frakcja z blokiem ekonomicznym jest pomijana). To samo po `/zf stacja`
+  — frakcja z ręcznie oddaną siatką nie dostaje drugiej stacji.
+- [ ] **I1c. Stacja działa jak stacja:** dolec do niej → terminal zleceń pokazuje kontrakty
+  tej frakcji (`/zf kontrakt <TAG>`), a `/zf ceny` widzi jej sklep (`ofert: N`).
+  Jeśli `ofert: 0`, sklep NPC nie dostał asortymentu — patrz sekcja N, to osobny problem.
+- [ ] **I1d. Odbudowa po zniszczeniu:** zburz stację frakcji → po ~5 min karencji frakcja
+  stawia nową. Sprawdź, że w międzyczasie czat NIE spamuje komunikatem co 30 s.
 
 - [x] **I2. Wymuszone zlecenie:** `/zf kontrakt WGR` → konsola braina
   `contract_create [WGR] dostawa za N kr`, a na czacie `[ZF] Nowe zlecenie WGR: …`.
@@ -278,7 +291,7 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   `zlecenie_przyjete` 18:20:32.9 → `kontrakt_fail` 18:20:34.1), więc to NIE był timeout.
   Przyczyna ustalona dekompilacją — patrz I19a. Test trzeba powtórzyć na zlecenie,
   które faktycznie się przedawni.
-- [ ] **I7. Po wczytaniu świata:** wystaw zlecenie, zapisz i wczytaj świat, dopiero
+- [x] **I7. Po wczytaniu świata:** wystaw zlecenie, zapisz i wczytaj świat, dopiero
   potem je wykonaj → rozliczenie MIMO że callbacki nie przeżywają zapisu (mod
   dopytuje o stan co ~5 s, ID trzyma w `contracts_mod_state.txt`).
 - [x] **I8. Limit i cooldown:** po wystawieniu jednego zlecenia frakcja nie wystawia
@@ -288,9 +301,9 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   `contract_create` (próg `prog_relacji = -55`).
 - [x] **I10. Handel:** sprzedaj/kup coś w sklepie frakcji (≤300 m od jej stacji) →
   na czacie `[ZF] Handel z <TAG>: N kr`, w konsoli `relacja … +1..+3 za handel`.
-- [ ] **I11. Fałszywe alarmy handlu:** zapłać okup (`/zf okup KRW` przy rajdzie) i
+- [x] **I11. Fałszywe alarmy handlu:** zapłać okup (`/zf okup KRW` przy rajdzie) i
   odbierz nagrodę za kontrakt → **NIE MA** komunikatu o handlu (wyciszenie ~10 s).
-- [ ] **I12. Stacja to nie statek:** zniszcz statyczną siatkę frakcji (stację) →
+- [x] **I12. Stacja to nie statek:** zniszcz statyczną siatkę frakcji (stację) →
   konsola `-50 za zniszczenie stacji` ORAZ `sufit relacji … obniżony na stałe do +20`;
   `/zf rel` pokazuje `sufit +20`. Potem nawet wykonane kontrakty nie podniosą
   relacji powyżej sufitu — to celowe (świat mściwy).
@@ -305,24 +318,24 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   frakcja trzymają: KRW nie dostało ani razu `naprawa` (waga 0), a mnożniki w logu
   zgadzają się z `[kontrakty.mnoznik]` (naprawa 1.2, dostawa 1.0, transport 1.1,
   poszukiwania 0.9). Rozkład na tak małej próbce nierozstrzygnięty.
-- [ ] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
+- [x] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
   (polityka KRW/HEL -70), mod tworzy `MyContractBounty`, a w terminalu stacji widać
   zlecenie na głowę pilota HEL. Analogicznie `transport`, `naprawa`, `poszukiwania`,
   `eskorta`, `wlasne`, `dostawa`.
-- [ ] **I15. Zejście na dostawę:** wymuś typ, dla którego w świecie NIE MA celu
+- [x] **I15. Zejście na dostawę:** wymuś typ, dla którego w świecie NIE MA celu
   (np. `/zf kontrakt HEL naprawa`, gdy żadna siatka HEL nie jest uszkodzona) → na czacie
   `Zlecenie HEL typu "naprawa" niemożliwe (frakcja nie ma uszkodzonej siatki do naprawy)
   — wystawiam dostawę`, a `contract_created` w konsoli braina ma `dostawa`, NIE `naprawa`.
   To najważniejszy test całej rozbudowy: żadne zlecenie nie może przepaść po cichu.
-- [ ] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
+- [x] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
   `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
   Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
   → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
-- [ ] **I17. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
+- [x] **I17. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
   (waga 0 w configu, więc tylko wymuszona) → kontrakt powstaje, ale w konsoli braina
   NIE MA jeszcze `spawn_request`. Dopiero gdy przyjmiesz zlecenie w terminalu →
   `kontrakt <ID> (HEL, eskorta) przyjęty przez gracza` i `spawn_request [HEL] kind=convoy`.
-- [ ] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
+- [x] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
   jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
   `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
   Sprawdź log SE: jeśli narzeka na `ContractTypes.sbc`, kontener/pola definicji trzeba
@@ -332,10 +345,10 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   zamknąć), po `czas_min` wygaśnie jako ZAWALONE i zabierze relację (`-kontrakt_min ×
   mnożnik`). Dlatego I18 rób na świecie testowym, a nie na tym, w którym się grasz.
   To samo dotyczy `eskorta` — jeśli okaże się, że gra nie potrafi jej rozliczyć.
-- [ ] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
+- [x] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
   `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
   niż +20 z dostawy. Kwota nagrody też jest przemnożona.
-- [ ] **I19a. Poszukiwania stawiają rekwizyt:** `/zf kontrakt WGR poszukiwania` →
+- [x] **I19a. Poszukiwania stawiają rekwizyt:** `/zf kontrakt WGR poszukiwania` →
   ~8 km od gracza powstaje mały grid „Zgubiony modul" (beacon ZGUBA na HUD), a kontrakt
   celuje w NIEGO, nie w stację. Sprawdź w terminalu, że zlecenie da się wykonać:
   dolatujesz, łapiesz podwoziem magnetycznym, wieziesz pod stację frakcji.
@@ -381,7 +394,7 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   brak komunikatu o nieudanym spawnie (na czacie cisza — sukces jest cichy, patrz
   `SpawnProp` w `Contracts.cs`), w terminalu pojawił się punkt GPS, kontrakt dało
   się przyjąć i wykonać. Nazwa/beacon rekwizytu nie zweryfikowane wprost na czacie.
-- [ ] **I19c. Rekwizyt przeżywa:** postaw rekwizyt (I19a), odleć >1 km, poczekaj kilka
+- [x] **I19c. Rekwizyt przeżywa:** postaw rekwizyt (I19a), odleć >1 km, poczekaj kilka
   minut → grid MA przetrwać sprzątacz śmieci SE (chroni go własność frakcji).
 - [x] **I20. Przyjęcie zlecenia rusza świat:** przyjmij dowolne zlecenie HEL → na czacie
   `[ZF] Zlecenie HEL przyjęte (<typ>)`, w konsoli braina `przyjęty przez gracza`,
@@ -401,7 +414,7 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   w `rules.local.toml`, odpal brain przy działającym świecie → konsola
   `storage wykryty automatycznie: …` ze ścieżką TEGO świata. Ręczna, istniejąca
   ścieżka nadal ma pierwszeństwo.
-- [ ] **J2. Rajd przeżywa restart braina:** `/zf raid KRW`, ubij `zf_brain.exe`
+- [x] **J2. Rajd przeżywa restart braina:** `/zf raid KRW`, ubij `zf_brain.exe`
   (Ctrl+C), odpal ponownie, potem `/zf okup KRW` → rajd zostaje odwołany
   (`stand_down`), statki odlatują. Wcześniej brain odpowiadał „nie prowadzi rajdu".
 - [x] **J3. Polityka frakcji:** `/zf rel` → po `||` widać `polityka: HEL/KRW -70 |
@@ -412,9 +425,9 @@ Docelowo zrobią to własne stacje frakcji (Etap 7) — komenda jest rusztowanie
   za ostrzał => -24` i w tej samej paczce `relacja KRW->gracz +5 (wróg WGR ostrzelany)
   => +2`. HEL (polityka z WGR +10, powyżej `prog_wrogi`) słusznie NIC nie dostał — bonus
   idzie tylko do frakcji, która naprawdę jest wroga ostrzelanej.
-- [ ] **J5. Koniec echa:** napisz zwykłą wiadomość na czacie (bez `@`) → **NIE MA**
+- [x] **J5. Koniec echa:** napisz zwykłą wiadomość na czacie (bez `@`) → **NIE MA**
   już `[RADIO | TEST] Echo: …` (test A1 jest tym samym unieważniony).
-- [ ] **J6. Nowy świat = czysty stan (regresja 2026-07-29):** załóż NOWY świat z modem
+- [x] **J6. Nowy świat = czysty stan (regresja 2026-07-29):** załóż NOWY świat z modem
   i odpal brain → konsola `baza: state/zf_state_<świat>_<hash>.sqlite3 (nowa, czyste
   relacje)`, a `[brain] relacje:` pokazuje `HEL +0 | KRW +0 | WGR +0` i okno frakcji
   w grze jest neutralne. Wróć do starego świata → jego relacje wracają (osobny plik).
