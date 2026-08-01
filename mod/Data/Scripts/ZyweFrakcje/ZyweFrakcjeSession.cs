@@ -33,6 +33,7 @@ namespace ZyweFrakcje
         private ReputationSync _reputation;
         private PriceManager _prices;
         private StationSpawner _stations;
+        private CrewSpawner _crew;
         private int _tick;
 
         // Ostrzeżenia raz na rodzaj problemu — inaczej komunikat leciałby co poll (~co 60 tików).
@@ -128,6 +129,17 @@ namespace ZyweFrakcje
             // Bez własnych stacji frakcje nie mają gdzie wystawiać zleceń ani handlować —
             // do 2026-08-01 trzeba było oddawać im siatkę ręcznie przez `/zf stacja`.
             _stations = new StationSpawner();
+            // Załoga na stacjach przez AiEnabled. Zależność MIĘKKA: bez tamtego moda API
+            // zgłasza się jako niegotowe i nikogo nie stawiamy — reszta działa bez zmian.
+            try
+            {
+                _crew = new CrewSpawner();
+            }
+            catch (Exception e)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "BŁĄD startu załóg: " + e.GetType().Name + ": " + e.Message);
+            }
         }
 
         protected override void UnloadData()
@@ -149,6 +161,11 @@ namespace ZyweFrakcje
             if (_events != null)
             {
                 _events.Dispose();
+            }
+            if (_crew != null)
+            {
+                // RemoteBotAPI rejestruje handler wiadomości — trzeba go oddać przy wyjściu.
+                _crew.Dispose();
             }
         }
 
@@ -213,6 +230,11 @@ namespace ZyweFrakcje
             {
                 // Frakcja bez własnego punktu ekonomicznego stawia sobie stację.
                 _stations.Update(_tick);
+            }
+            if (_crew != null)
+            {
+                // Ludzie na stacjach — tylko gdy gracz jest w okolicy i gdy AiEnabled żyje.
+                _crew.Update(_tick);
             }
         }
 

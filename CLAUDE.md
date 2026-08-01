@@ -234,6 +234,23 @@ docs/protocol.md                # spec mostka JSONL
   **Metoda:** gdy ModAPI odmawia bez powodu, dekompiluj zamiast bisekcji —
   `dotnet tool install -g ilspycmd --version 8.2.0.7535`, potem
   `DOTNET_ROLL_FORWARD=LatestMajor ilspycmd -t <TypPelnaNazwa> <dll>` na `Bin64`.
+- **Załogi NPC (AiEnabled, 2026-08-01) — ZALEŻNOŚĆ MIĘKKA.** Bez moda AiEnabled
+  (Workshop 2596208372) nikt się nie pojawia, reszta działa bez zmian. MES ma wbudowaną
+  integrację: wozi klienta `AiEnabledApi.cs` i sam stawia boty, a KLUCZOWE — nadaje botowi
+  tożsamość członka frakcji i dopisuje go do niej (`BotSpawner.cs`:
+  `SetPlayersFaction(botIdentity, faction.Tag)`). Dzięki temu wrogość bota leci po
+  natywnej reputacji, czyli po naszej hybrydzie: ten sam bot macha przy dobrej relacji
+  i strzela przy złej, BEZ respawnu.
+  Dwie drogi, obie w użyciu: **deklaratywna** dla statków (`mod/Data/ZF_Boty.sbc` —
+  profile `[MES Bot Spawn]`, akcje `[AddBotsToGrid]`, triggery `PlayerNear` 1,5 km,
+  zachowania `ZF_Fighter_<TAG>` podpięte pod kadłuby rajdowe) i **programowa** dla stacji
+  (`Crew.cs` + skopiowany `AiEnabledApi.cs`), bo stacje stawia nasz `PrefabManager`,
+  a nie MES — profile MES ich nie obejmują. Programowa daje przy okazji imiona botów
+  i uchwyty `entityId` pod rozkazy z brainu (Etap C/D: postacie w SQLite, radio od osoby,
+  pamięć imienna). Boty NIE chodzą po małych siatkach — stąd załogi tylko na dużych.
+  DO WERYFIKACJI: wartości `[BotType]`/`[BotBehavior]` wzięte z opisu na Workshopie,
+  nie z plików moda (nie było go na dysku); wiki MES ostrzega, że `BotType` to pole
+  `Name` z SBC, a nie SubtypeId.
 - **Etap 7 — polish:** Kult, LCD na stacjach, emisariusze (AiEnabled API),
   własne flagowce, A/B Bielik. Dalej: QLoRA fine-tune radia, RL zachowań.
 
