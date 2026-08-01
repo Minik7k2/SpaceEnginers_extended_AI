@@ -146,6 +146,22 @@ docs/protocol.md                # spec mostka JSONL
   priorytetowa, TTL 2 min; kolor frakcji jedzie w JSON, ale czat SE rysuje biało —
   `MyVisualScriptLogicProvider` poza whitelistą), spawn_request → MES API,
   adresowanie czatu (@frakcja / zasięg / szum), de-eskalacja z realnym okupem.
+  **Floty per frakcja (2026-08-01):** 9 grup `ZF_<Rodzaj>_<TAG>` + 3 zapasowe dla obcych
+  tagów; `TestSpawner.GroupForKind(tag, kind)` dokleja tag tylko dla HEL/KRW/WGR. HEL leci
+  wojskiem (`C33_Military_Enforcer`, `C22_Trade_Merchant`), KRW pirackim (`C40_Pirate_Vulture`,
+  `C42_Pirate_SalvageCarrier`), WGR górniczym (`C12_Mining_Armed_Tender`, `C10_Mining_Carriage`).
+  MES jest tylko silnikiem spawnu — statków ani stacji NIE zawiera (jego prefaby to atrapy
+  i wzorce symetrii), za to daje bloki NPC, 11 profili autopilota, 33 profile łupów.
+  **Pilot dla dużych kadłubów:** RivalAI potrafi prowadzić grid tylko z blokiem zdalnego
+  sterowania, a `[RivalAiReplaceRemoteControl]` wg wiki MES tylko PODMIENIA istniejący —
+  duże frachtowce i okręty vanilli nie mają go wcale (dlatego konwoje wcześniej dryfowały
+  po prostej, a rajdy szły małymi dronami). Zamiast kopiować prefaby Keena do moda,
+  `mod/Data/ZF_Manipulations.sbc` zamienia kostkę pancerza w `RivalAIRemoteControlLarge`
+  (`[ReplaceArmorBlocksWithModules]` + `[ModulesForArmorReplacement]`), a grupa podpina to
+  tagiem `[ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]`. KLUCZOWE: grupa z tą manipulacją
+  musi być JEDNOROZMIAROWA (same duże siatki) — mała dostałaby blok nie na swój rozmiar.
+  Konwoje jadą zachowaniem `ZF_Konwoj` (`BehaviorName:CargoShip` + gotowy autopilot MES),
+  czyli lecą trasą, zamiast dryfować.
 - **Etap 6 — kontrakty i ceny:** kod gotowy, DO WERYFIKACJI W GRZE (sekcja I
   w docs/testy-reczne.md). Frakcja wystawia zlecenie w ticku (`[kontrakty]`
   w rules.toml) → mod tworzy je przez `MyAPIGateway.ContractSystem` na bloku
@@ -183,12 +199,19 @@ docs/protocol.md                # spec mostka JSONL
   nie ma zdarzenia transakcji. UWAGA: kaucję ściąganą przy PRZYJĘCIU zlecenia ta sama
   heurystyka brała za zakup (darmowe +1..+3 relacji), stąd `_trade.Suppress()` także
   w `Taken()`, nie tylko w `Finish()`.
-  **Własne stacje frakcji (2026-08-01):** `StationSpawner` stawia prefab `ZF_Stacja`
-  (`mod/Data/Prefabs/ZF_Stations.sbc`: blok kontraktów + sklep + bateria + radiolatarnia,
-  siatka duża, statyczna) 6-12 km od gracza każdej frakcji, która nie ma żadnego bloku
-  ekonomicznego. Warunek jest STANEM ŚWIATA, nie zapisem w storage — dzięki temu rzecz
-  jest idempotentna po wczytaniu świata, a zburzona stacja odbudowuje się po karencji
-  (~5 min). `/zf stacja` zostaje jako rusztowanie testowe, ale nie jest już konieczne.
+  **Własne stacje frakcji (2026-08-01):** `StationSpawner` stawia GOTOWE stacje z vanilli
+  8-15 km od gracza, każdej frakcji, która nie ma żadnego bloku ekonomicznego — HEL
+  `GE_LogisticsFacility` (3362 bloki), KRW `RE19_PirateDepot`, WGR `RE05_StagingStation`.
+  Pierwsza wersja stawiała ręcznie napisany prefab (płyta 3x2 z czterema blokami) — działała,
+  ale wyglądała jak prototyp; vanilla ma gotowe, zaprojektowane stacje i to one idą do gry.
+  ŻADNA vanillowa stacja nie ma terminala zleceń ani sklepu (sprawdzone: 0 i 0 w każdej
+  kandydatce), więc mod dokłada oba po spawnie przez `IMyCubeGrid.AddBlock` — wolną kratkę
+  stykającą się z kadłubem znajduje `CanAddCubes` na ŻYWEJ siatce (przy edycji XML prefabu
+  trzeba by ją zgadywać), z preferencją najwyższej, czyli dachu. Kierunek spawnu jest
+  rozłożony per frakcja co ~120°, bo przy losowaniu z samych tików trzy stacje potrafiły
+  wylądować kilkaset metrów od siebie. Warunek postawienia jest STANEM ŚWIATA, nie zapisem
+  w storage — stąd idempotencja po wczytaniu świata i samodzielna odbudowa po zburzeniu
+  (karencja ~5 min). `/zf stacja` zostaje jako rusztowanie testowe, ale nie jest konieczne.
   **Cennik (`price_update`, 2026-07-31):** relacja rusza nie tylko liczbę w oknie frakcji,
   ale i to, ile płacisz przy ladzie. Brain liczy mnożnik (`[ceny]` w rules.toml, odcinkowo
   liniowo: -100 → `mnoznik_wrog`, 0 → dokładnie 1.0, +100 → `mnoznik_sojusznik`), mod
@@ -219,8 +242,9 @@ docs/protocol.md                # spec mostka JSONL
 - Komendy czatu w modzie: `/zf rel` (relacje + polityka frakcji), `/zf rep`
   (natywna reputacja w grze vs cel z brainu — kontrola hybrydy), `/zf ceny`
   (mnożnik cen per frakcja + ile ofert objął), `/zf tick`
-  (wymuś tick), `/zf spawn <frakcja>` (vanilla prefab), `/zf raid <frakcja>`
-  (potok MES), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
+  (wymuś tick), `/zf spawn <frakcja> [prefab]` (vanilla prefab, dowolny subtype — podgląd
+  kadłubów bez AI), `/zf raid <frakcja> [patrol|raid|convoy]` (pełny potok MES; bez rodzaju
+  brain dobiera flotę do nastroju frakcji), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
   <frakcja> [typ]` (wymuszone zlecenie; typ opcjonalny — dostawa, nagroda, transport,
   naprawa, poszukiwania, eskorta, wlasne), `/zf stations` (stacje i blok kontraktów),
   `/zf daj <surowiec> [ilość]` (towar do inwentarza — do testu trybutu bez trybu
