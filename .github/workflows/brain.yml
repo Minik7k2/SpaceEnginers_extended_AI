@@ -38,8 +38,19 @@ jobs:
 
       # ctest obejmuje testy jednostkowe ORAZ scenariusze z brain/tests/scenariusze/*.jsonl
       # (zdarzenia + oczekiwania w jednym pliku — patrz brain/src/scenariusz.hpp).
+      # Konfiguracja wywala się (FATAL_ERROR), jeśli scenariuszy nie ma — pusty glob raz
+      # już przeszedł tu niezauważony i CI było zielone bez ani jednego scenariusza.
       - name: Testy (ctest)
         run: ctest --test-dir build --output-on-failure
+
+      # Bramka na regresję pokrycia: liczba testów ma tylko rosnąć. Gdyby scenariusze
+      # znowu zniknęły (np. przez nową regułę w .gitignore), ctest dalej byłby zielony —
+      # zero testów przechodzi w 100%. Tu wyjdzie od razu.
+      - name: Scenariusze naprawdę się uruchomiły
+        run: |
+          ile=$(ctest --test-dir build -N | grep -c "scenariusz_")
+          echo "scenariuszy w ctest: $ile"
+          test "$ile" -ge 4
 
       - name: Smoke test --replay (mostek + silnik bez gry)
         run: |

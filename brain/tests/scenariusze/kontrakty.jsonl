@@ -1,0 +1,92 @@
+# Kontrakty — brainowa połowa sekcji I z docs/testy-reczne.md (I2, I5, I6, I8, I9, I13,
+# I14, I19, I20, I21, I22) plus M4 (reputacja idzie za relacją).
+# Granica: scenariusz mówi, jaki typ i za ile brain PROPONUJE. Czy gra ten typ przyjmie,
+# czy zejdzie na dostawę, rozstrzyga wyłącznie /zf autotest kontrakty — mod ma ostatnie słowo.
+#
+# Wartości z rules.toml: nagroda_min=15000, nagroda_max=60000, prog_relacji=-55,
+# cooldown_min=20, max_otwartych=1, kontrakt_min=10, kontrakt_max=20.
+# Zlecenie WYMUSZONE (/zf kontrakt) idzie po relacji = prog_relacji, czyli po najniższej
+# stawce widełek: nagroda = 15000 * mnożnik trudności typu. To czyni tabelę
+# [kontrakty.mnoznik] sprawdzalną co do złotówki i niezależną od losowania.
+{"opis": "I2. Pierwszy tick świata: każda frakcja wystawia zlecenie (typ z losowania wagami)"}
+{"type": "session_start", "ts": 1000, "data": {"world": "SCEN", "player_id": 1, "player_name": "Test", "mod_version": "test"}}
+# Typu nie sprawdzamy — jest losowany wagami z [kontrakty.typy]. Sprawdzamy, że zlecenie
+# W OGÓLE poszło i że kwota mieści się w widełkach po mnożniku (relacja 0 => ~30967 kr bazy).
+{"oczekuj": "kontrakt", "frakcja": "HEL", "min_nagroda": 25000, "max_nagroda": 50000}
+{"oczekuj": "kontrakt", "frakcja": "KRW", "min_nagroda": 25000, "max_nagroda": 50000}
+{"oczekuj": "kontrakt", "frakcja": "WGR", "min_nagroda": 25000, "max_nagroda": 50000}
+
+{"opis": "I14/I19. Wymuszony typ: tabela [kontrakty.mnoznik] co do złotówki (15000 * mnożnik)"}
+{"type": "debug_command", "ts": 5000, "data": {"cmd": "kontrakt", "faction": "WGR", "kind": "dostawa"}}
+{"oczekuj": "kontrakt", "frakcja": "WGR", "typ": "dostawa", "min_nagroda": 15000, "max_nagroda": 15000}
+{"type": "debug_command", "ts": 10000, "data": {"cmd": "kontrakt", "faction": "WGR", "kind": "transport"}}
+{"oczekuj": "kontrakt", "frakcja": "WGR", "typ": "transport", "min_nagroda": 16500, "max_nagroda": 16500}
+{"type": "debug_command", "ts": 15000, "data": {"cmd": "kontrakt", "faction": "WGR", "kind": "naprawa"}}
+{"oczekuj": "kontrakt", "frakcja": "WGR", "typ": "naprawa", "min_nagroda": 18000, "max_nagroda": 18000}
+{"type": "debug_command", "ts": 20000, "data": {"cmd": "kontrakt", "faction": "WGR", "kind": "poszukiwania"}}
+{"oczekuj": "kontrakt", "frakcja": "WGR", "typ": "poszukiwania", "min_nagroda": 13500, "max_nagroda": 13500}
+{"type": "debug_command", "ts": 25000, "data": {"cmd": "kontrakt", "faction": "KRW", "kind": "wlasne"}}
+{"oczekuj": "kontrakt", "frakcja": "KRW", "typ": "wlasne", "min_nagroda": 16500, "max_nagroda": 16500}
+{"type": "debug_command", "ts": 30000, "data": {"cmd": "kontrakt", "faction": "HEL", "kind": "eskorta"}}
+{"oczekuj": "kontrakt", "frakcja": "HEL", "typ": "eskorta", "min_nagroda": 21000, "max_nagroda": 21000}
+# Eskorta NIE wysyła konwoju przy wystawieniu — dopiero gdy gracz przyjmie zlecenie (I17).
+{"oczekuj": "brak_spawnu", "frakcja": "HEL"}
+
+{"opis": "I14. Nagroda za głowę: cel bierze się z POLITYKI (najgorszy wróg wystawcy)"}
+# KRW ma HEL na -70, WGR na -50 => celem musi być HEL, a nie WGR.
+{"type": "debug_command", "ts": 35000, "data": {"cmd": "kontrakt", "faction": "KRW", "kind": "nagroda"}}
+{"oczekuj": "kontrakt", "frakcja": "KRW", "typ": "nagroda", "cel": "HEL", "min_nagroda": 24000, "max_nagroda": 24000}
+
+{"opis": "I5 + M4. Wykonanie zlecenia: +kontrakt_max * mnożnik typu, reputacja idzie za relacją"}
+{"type": "contract_created", "ts": 40000, "data": {"contract_id": "n1", "faction": "WGR", "kind": "naprawa", "reward": 18000, "opis": "test"}}
+{"type": "contract_done", "ts": 45000, "data": {"contract_id": "n1", "faction": "WGR", "success": true}}
+# naprawa = mnożnik 1.2 => +20 * 1.2 = +24 (a nie bazowe +20).
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": 24}
+# Odwzorowanie na skalę gry: 0..prog_sojusznik(40) => 0..prog(500), czyli 24/40*500 = 300.
+{"oczekuj": "reputacja", "frakcja": "WGR", "wobec": "", "wartosc": 300}
+
+{"opis": "I6. Zawalone zlecenie: -kontrakt_min * mnożnik typu"}
+{"type": "contract_created", "ts": 50000, "data": {"contract_id": "p1", "faction": "WGR", "kind": "poszukiwania", "reward": 13500, "opis": "test"}}
+{"type": "contract_done", "ts": 55000, "data": {"contract_id": "p1", "faction": "WGR", "success": false}}
+# poszukiwania = mnożnik 0.9 => -10 * 0.9 = -9. Razem 24 - 9 = 15.
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": 15}
+{"oczekuj": "reputacja", "frakcja": "WGR", "wobec": "", "wartosc": 188}
+
+{"opis": "I20. Przyjęcie zlecenia u HEL kosztuje zaufanie u KAŻDEGO wroga HEL"}
+{"type": "contract_created", "ts": 60000, "data": {"contract_id": "h1", "faction": "HEL", "kind": "dostawa", "reward": 15000, "opis": "test"}}
+{"type": "contract_taken", "ts": 65000, "data": {"contract_id": "h1", "faction": "HEL", "kind": "dostawa"}}
+# KRW ma HEL na -70 (poniżej prog_wrogi) => -3. WGR ma HEL na +10 => bez zmian.
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -3}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": 15}
+# Sam wystawca nic nie traci ani nie zyskuje za samo przyjęcie.
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 0}
+
+{"opis": "I21. Kara raz na kontrakt — status `taken` siedzi w SQLite, więc przeżywa restart"}
+{"restart": true}
+{"type": "contract_taken", "ts": 70000, "data": {"contract_id": "h1", "faction": "HEL", "kind": "dostawa"}}
+# Drugie przyjęcie tego samego zlecenia NIE MOŻE zabrać kolejnych -3.
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -3}
+
+{"opis": "I9. Wrogość zamyka kran: KRW schodzi poniżej prog_relacji (-55)"}
+{"type": "combat_hit", "ts": 75000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+# Bonus \"wróg ostrzelany\" leci RAZ (cooldown 10 min): HEL i WGR po +5 i koniec.
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 5}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": 20}
+{"type": "combat_hit", "ts": 80000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 85000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 90000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -63}
+# Kara za wroga ostrzelanego naliczona dokładnie raz mimo czterech paczek combat_hit (L4).
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 5}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": 20}
+
+{"opis": "I8/I9/I22. Jeden tick, trzy różne powody: cooldown minął, więc widać, kto NIE wystawia"}
+# ts przeskakuje ponad cooldown_min (20 min = 1 200 000 ms), żeby tick naprawdę próbował.
+{"type": "debug_command", "ts": 2000000, "data": {"cmd": "tick"}}
+# WGR: relacja +20, brak otwartych zleceń, cooldown minął => WYSTAWIA (dowód, że tick zadziałał).
+{"oczekuj": "kontrakt", "frakcja": "WGR"}
+# HEL: cooldown minął, relacja dodatnia, ale zlecenie h1 jest PRZYJĘTE — status `taken`
+# liczy się do max_otwartych tak samo jak `open`, więc drugiego nie ma (I22).
+{"oczekuj": "brak_kontraktu", "frakcja": "HEL"}
+# KRW: -63 to poniżej prog_relacji (-55) — wrogowie nie dają roboty (I9).
+{"oczekuj": "brak_kontraktu", "frakcja": "KRW"}

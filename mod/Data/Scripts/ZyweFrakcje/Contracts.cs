@@ -85,6 +85,46 @@ namespace ZyweFrakcje
         private readonly TradeWatcher _trade; // wyciszenie heurystyki handlu przy wypłacie nagrody
         private int _tick;
 
+        // ---- Ślad po ostatnim wystawieniu: wyłącznie dla /zf autotest (Autotest.cs) ----
+        // Create() jest „wystrzel i zapomnij" — mówi graczowi na czat, co się stało, i tyle.
+        // Autotest musi to samo WIEDZIEĆ, żeby odróżnić „powstała naprawa" od „naprawa zeszła
+        // po cichu na dostawę". To drugie jest najgroźniejszym cichym błędem tej mechaniki
+        // (I15 w docs/testy-reczne.md): zlecenie powstaje, contract_created wraca z typem
+        // „dostawa", brain go utrwala i wszystko wygląda zdrowo — a zamówiony typ od tygodni
+        // nie działa. Liczy się każde ROZSTRZYGNIĘCIE, także odmowa przed AddContract.
+        public string OstatniZadanyTyp { get; private set; }
+        public string OstatniTyp { get; private set; }   // null = nic nie powstało
+        public long OstatnieId { get; private set; }
+        public string OstatniPowod { get; private set; } // powód odmowy albo zejścia na dostawę
+        public int LicznikRozstrzygniec { get; private set; }
+
+        private void Rozstrzygniete(string zadany, string powstal, long id, string powod)
+        {
+            OstatniZadanyTyp = zadany;
+            OstatniTyp = powstal;
+            OstatnieId = id;
+            OstatniPowod = powod;
+            LicznikRozstrzygniec++;
+        }
+
+        /// <summary>
+        /// Kasuje zlecenie i przestaje je śledzić — po to, by `/zf autotest kontrakty` nie
+        /// zostawiał w terminalu kilkunastu zleceń po sobie. Zwykła rozgrywka tego nie używa:
+        /// kontrakty kończy gracz albo czas.
+        /// </summary>
+        public bool UsunSledzony(long contractId)
+        {
+            bool usuniete = MyAPIGateway.ContractSystem != null &&
+                            MyAPIGateway.ContractSystem.RemoveContract(contractId);
+            int index = IndexOf(contractId);
+            if (index >= 0)
+            {
+                _tracked.RemoveAt(index);
+                SaveState();
+            }
+            return usuniete;
+        }
+
         public ContractManager(Type owner, EventWriter events, TradeWatcher trade)
         {
             _owner = owner;
@@ -128,8 +168,10 @@ namespace ZyweFrakcje
         /// </summary>
         public void Create(string faction, string kind, long reward, int durationMin, string targetFaction)
         {
+            string zadany = string.IsNullOrEmpty(kind) ? "dostawa" : kind;
             if (MyAPIGateway.ContractSystem == null)
             {
+                Rozstrzygniete(zadany, null, 0, "brak ContractSystem w tej wersji gry");
                 MyAPIGateway.Utilities.ShowMessage("ZF", "Kontrakty niedostępne w tej wersji gry (brak ContractSystem)");
                 return;
             }
@@ -137,6 +179,7 @@ namespace ZyweFrakcje
             EconomyBlock start = FactionEconomy.FindContractBlock(faction);
             if (start == null)
             {
+                Rozstrzygniete(zadany, null, 0, "frakcja nie ma bloku kontraktów ani sklepu");
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "Kontrakt " + faction + " pominięty: frakcja nie ma bloku kontraktów ani sklepu (postaw stację frakcji)");
                 return;
@@ -147,6 +190,7 @@ namespace ZyweFrakcje
             // wywracają AddContract najczęściej, sprawdzamy więc sami i mówimy o nich wprost.
             if (MyAPIGateway.Session.SessionSettings != null && !MyAPIGateway.Session.SessionSettings.EnableEconomy)
             {
+                Rozstrzygniete(zadany, null, 0, "w ustawieniach świata wyłączona jest ekonomia");
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "Kontrakt " + faction + " pominięty: w ustawieniach świata WYŁĄCZONA jest ekonomia " +
                     "— bez niej gra nie przyjmie żadnego zlecenia");
@@ -156,6 +200,7 @@ namespace ZyweFrakcje
             var block = MyAPIGateway.Entities.GetEntityById(start.BlockId) as IMyFunctionalBlock;
             if (block != null && !block.IsWorking)
             {
+                Rozstrzygniete(zadany, null, 0, "blok kontraktów nie działa (zasilanie?)");
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "Kontrakt " + faction + " pominięty: blok \"" + block.CustomName +
                     "\" nie działa (brak zasilania albo niedokończony)");
@@ -224,7 +269,9 @@ namespace ZyweFrakcje
             // stąd jednoelementowa tablica jako uchwyt domknięcia.
             long[] idBox = new long[1];
 
-            string actualKind = string.IsNullOrEmpty(kind) ? "dostawa" : kind;
+            string zadanyKind = string.IsNullOrEmpty(kind) ? "dostawa" : kind;
+            string actualKind = zadanyKind;
+            string powodZejscia = null;
             long contractId;
             string opis;
             string powod;
@@ -233,12 +280,14 @@ namespace ZyweFrakcje
             {
                 if (actualKind == "dostawa")
                 {
+                    Rozstrzygniete(zadanyKind, null, 0, powod);
                     MyAPIGateway.Utilities.ShowMessage("ZF",
                         "Kontrakt " + faction + " pominięty: " + powod);
                     return;
                 }
                 // Typ nie ma celu w świecie (albo gra go odrzuciła) — zamiast gubić zlecenie
                 // wystawiamy dostawę i mówimy dlaczego.
+                powodZejscia = powod;
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "Zlecenie " + faction + " typu \"" + actualKind + "\" niemożliwe (" + powod +
                     ") — wystawiam dostawę");
@@ -246,11 +295,13 @@ namespace ZyweFrakcje
                 if (!TryAddOfKind(faction, actualKind, start, money, collateral, durationSeconds,
                                   targetFaction, idBox, out contractId, out opis, out powod))
                 {
+                    Rozstrzygniete(zadanyKind, null, 0, powod);
                     MyAPIGateway.Utilities.ShowMessage("ZF", "Kontrakt " + faction + " pominięty: " + powod);
                     return;
                 }
             }
             idBox[0] = contractId;
+            Rozstrzygniete(zadanyKind, actualKind, contractId, powodZejscia);
 
             var tracked = new Tracked { Id = contractId, Faction = faction, Kind = actualKind };
             _tracked.Add(tracked);

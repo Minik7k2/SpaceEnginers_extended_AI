@@ -1,0 +1,94 @@
+# Okup — brainowa połowa sekcji K i L z docs/testy-reczne.md (K2-K6, L1-L3).
+# GRANICA: scenariusz sprawdza, co brain LICZY i WYSYŁA (ransom_demand, stand_down,
+# naliczenia relacji). Czy skrzynka zrzutu naprawdę stanie w świecie, czy GPS się pojawi
+# i czy sprzątacz śmieci jej nie zje — rozstrzyga wyłącznie /zf autotest okup.
+#
+# Wartości z rules.toml: deeskalacja_prog_kredyty=3000, deeskalacja_prog_za_punkt=0.01,
+# deeskalacja_bonus=15, okup_ilosc_min=50, okup_ilosc_max=100, deadline_s=900,
+# bonus_dostawa=20, kara_zlamanie=5.
+{"opis": "Start świata + wymuszony rajd KRW (bez aktywnego rajdu nie ma pod co żądać okupu)"}
+{"type": "session_start", "ts": 1000, "data": {"world": "SCEN", "player_id": 1, "player_name": "Test", "mod_version": "test"}}
+{"type": "debug_command", "ts": 5000, "data": {"cmd": "spawn", "faction": "KRW", "kind": "raid"}}
+{"oczekuj": "spawn", "frakcja": "KRW", "kind": "raid"}
+
+{"opis": "L3. Próg okupu kredytowego rośnie z wrogością (+1% za każdy punkt poniżej zera)"}
+# Relacja 0 => próg dokładnie bazowy.
+{"oczekuj": "prog_okupu", "frakcja": "KRW", "wartosc": 3000}
+
+{"opis": "L2. Pusta obietnica nie kupuje pokoju: oferta ponad saldo gracza"}
+# Saldo gracza brain zna wyłącznie z pola `balans` w chat_message.
+{"type": "chat_message", "ts": 10000, "data": {"text": "@KRW dam ci 50000 kredytow", "target": "KRW", "signal": "clear", "balans": 5000}}
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "dam ci 50000 kredytow", "wynik": "pusta_obietnica"}
+# Rajd trwa dalej — pusta obietnica niczego nie odwołuje.
+{"oczekuj": "brak_stand_down", "frakcja": "KRW"}
+
+{"opis": "Oferta poniżej progu to zwykły targ, nie pokój"}
+{"type": "chat_message", "ts": 15000, "data": {"text": "@KRW masz 1000 kredytow i spadaj", "target": "KRW", "signal": "clear", "balans": 5000}}
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "masz 1000 kredytow i spadaj", "wynik": "za_malo"}
+{"oczekuj": "brak_stand_down", "frakcja": "KRW"}
+
+{"opis": "K2. Żądanie trybutu w surowcach (/zf okup-surowce) — ilość i okno czasu"}
+{"type": "debug_command", "ts": 20000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "ilosc_min": 50, "ilosc_max": 100, "deadline_s": 900}
+# Drugie wywołanie NIE MOŻE zdublować żądania (jedna skrzynka zrzutu na frakcję).
+{"type": "debug_command", "ts": 25000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "brak_okupu", "frakcja": "KRW"}
+
+{"opis": "K3. Dostawa trybutu: pokój i relacja w górę o bonus_dostawa"}
+{"type": "ransom_paid", "ts": 30000, "data": {"faction": "KRW", "item": "Iron", "amount": 100}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": 20}
+# Rajd odwołany — kolejna de-eskalacja nie ma już czego odwoływać.
+{"type": "debug_command", "ts": 35000, "data": {"cmd": "okup", "faction": "KRW"}}
+{"oczekuj": "brak_stand_down", "frakcja": "KRW"}
+
+{"opis": "K4. Deadline bez dostawy: kara za złamane słowo"}
+{"type": "debug_command", "ts": 40000, "data": {"cmd": "spawn", "faction": "KRW", "kind": "raid"}}
+{"type": "debug_command", "ts": 45000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "ilosc_min": 50, "ilosc_max": 100}
+{"type": "ransom_expired", "ts": 50000, "data": {"faction": "KRW", "reason": "deadline"}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": 15}
+
+{"opis": "K6 (kontrtest). Przepadła skrzynka to NIE wina gracza — żądanie ginie BEZ kary"}
+{"type": "debug_command", "ts": 55000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "ilosc_min": 50, "ilosc_max": 100}
+{"type": "ransom_expired", "ts": 60000, "data": {"faction": "KRW", "reason": "brak_skrzynki"}}
+# Relacja bez zmian: karanie gracza za to, że gra zjadła naszą skrzynkę, byłoby
+# najgorszą możliwą wersją świata mściwego.
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": 15}
+
+{"opis": "K5. Pokój kasuje wiszący trybut — de-eskalacja jest nadrzędna nad żądaniem"}
+{"type": "debug_command", "ts": 65000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "ilosc_min": 50, "ilosc_max": 100}
+{"type": "debug_command", "ts": 70000, "data": {"cmd": "okup", "faction": "KRW"}}
+{"oczekuj": "stand_down", "frakcja": "KRW"}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": 30}
+# Żądanie zniknęło razem z rajdem: po pokoju frakcja nie ma już czego żądać, więc
+# ponowne /zf okup-surowce jest odrzucane (brak aktywnego rajdu).
+{"type": "debug_command", "ts": 75000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "brak_okupu", "frakcja": "KRW"}
+# UWAGA na granicę: „po deadline NIE ma kary" (druga połowa K5) jest gwarancją MODU —
+# to on przestaje wysyłać ransom_expired po skasowaniu skrzynki. Brain, gdy dostanie
+# ransom_expired z powodem `deadline`, karę naliczy i ma prawo tak robić. Tego scenariusz
+# celowo nie udaje, że sprawdza — od tego jest /zf autotest okup.
+
+{"opis": "L1. Oferta pokryta saldem kończy rajd niezależnie od decyzji modelu"}
+{"type": "debug_command", "ts": 80000, "data": {"cmd": "spawn", "faction": "KRW", "kind": "raid"}}
+# Relacja KRW = +30, więc próg zostaje bazowy (mnożnik rośnie tylko poniżej zera).
+{"oczekuj": "prog_okupu", "frakcja": "KRW", "wartosc": 3000}
+{"type": "chat_message", "ts": 85000, "data": {"text": "@KRW biore okup, oto 5000 kredytow", "target": "KRW", "signal": "clear", "balans": 9000}}
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "biore okup, oto 5000 kredytow", "wynik": "pokoj"}
+# Ocena wiążąca sama wywołuje de-eskalację — dokładnie tak jak main.cpp po odpowiedzi modelu.
+{"oczekuj": "stand_down", "frakcja": "KRW", "okup": 5000}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": 45}
+
+{"opis": "L3 c.d. Przy wrogości próg realnie rośnie: -80 => 1.8x bazy"}
+{"type": "combat_hit", "ts": 90000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 95000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 100000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 105000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 110000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 115000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 120000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 125000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -75}
+{"oczekuj": "prog_okupu", "frakcja": "KRW", "wartosc": 5250}

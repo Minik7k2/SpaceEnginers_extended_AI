@@ -229,6 +229,23 @@ void sprawdz_oczekiwanie(const nlohmann::json& linia, Bufory& buf, Db& db, Engin
         return;
     }
 
+    // Odpowiednik "brak_cen" dla hybrydy reputacji: frakcjom spoza moda (vanilla/MES)
+    // NIE WOLNO nam ruszać reputacji — to sekcja M7 z docs/testy-reczne.md. Bez tego
+    // rodzaju oczekiwania scenariusz mógł stwierdzić tylko, że coś poszło, nigdy że
+    // czegoś słusznie NIE poszło.
+    if (rodzaj == "brak_reputacji") {
+        bool jest = false;
+        std::string bylo;
+        for (const ReputationOut& r : buf.reputacje) {
+            bylo += (bylo.empty() ? "" : ", ") + r.faction +
+                    (r.other.empty() ? "->gracz" : "->" + r.other) + " " + std::to_string(r.vanilla);
+            jest = jest || r.faction == frakcja;
+        }
+        k.sprawdz(!jest, "reputacja " + frakcja + " NIE miała lecieć do gry",
+                  bylo.empty() ? "(nic)" : bylo);
+        return;
+    }
+
     if (rodzaj == "kontrakt") {
         const ContractOut* znaleziony = nullptr;
         for (const ContractOut& c : buf.kontrakty) {

@@ -268,30 +268,65 @@ docs/protocol.md                # spec mostka JSONL
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
-- **`/zf autotest [sekcja]`** (2026-08-01): samosprawdzanie W GRZE. Sekcje: `stacje`,
-  `ceny`, `rekwizyt` (bezpieczne, lecą bez argumentu), `floty`, `boty` (spawnują
-  prawdziwe rajdy — kosmos, świat testowy), `wszystko`. Odpowiada na pytania, których
-  nie da się zadać poza grą: czy `GetStoreItems` w ogóle zwraca oferty, czy
-  `PricePerUnit` jest zapisywalne, czy mnożnik nie składa się po reloadzie, czy
-  `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub z naszej grupy i czy ma on
-  pilota. Wynik na czat ORAZ do `events.jsonl` (`autotest_result`), więc konsola brainu
-  ma komplet. NIE zastąpi tego, co wymaga człowieka za sterami (dolot, złapanie
-  rekwizytu, przyjęcie zlecenia w terminalu, ocena brzmienia radia).
+- **`/zf autotest [sekcja]`** (2026-08-01, rozszerzone 2026-08-02): samosprawdzanie W GRZE.
+  Sekcje bezpieczne (lecą bez argumentu): `stacje`, `ceny`, `rekwizyt`, `kontrakty`,
+  `reputacja`, `okup`. Osobno `floty` i `boty` (spawnują prawdziwe rajdy — kosmos, świat
+  testowy) oraz `wszystko`. Odpowiada na pytania, których nie da się zadać poza grą: czy
+  `GetStoreItems` w ogóle zwraca oferty, czy `PricePerUnit` jest zapisywalne, czy mnożnik
+  nie składa się po reloadzie, czy `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub
+  z naszej grupy i czy ten kadłub NAPRAWDĘ leci (dystans w oknie 30 s, bo sam blok zdalnego
+  sterowania niczego nie dowodzi).
+  **Sekcja `kontrakty` jest najważniejsza:** zamawia po kolei wszystkie siedem typów zleceń
+  i porównuje typ ZAMÓWIONY z tym, który powstał. Mod ma przy zleceniach ostatnie słowo
+  i przy braku celu po cichu wystawia dostawę — dotąd nie było jak zauważyć, że typ od
+  tygodni degraduje, bo `contract_created` wraca poprawne i wszystko wygląda zdrowo.
+  Hak: `ContractManager.OstatniTyp`/`OstatniPowod`/`LicznikRozstrzygniec`.
+  **Sekcja `reputacja`** pokrywa hybrydę (M1–M3, M5, M7) — łącznie z tym, czy mod przywraca
+  swój cel po tym, jak gra ruszy reputację sama.
+  Autotest podaje mechanikom dokładnie takie ładunki, jakie przysłałby brain (`PriceManager
+  .Handle`, `ReputationSync.Handle`, `RansomManager.HandleDemand`), więc **działa też bez
+  uruchomionego `zf_brain.exe`**.
+  KAŻDY krok zmieniający świat rejestruje przywrócenie — podsumowanie odwija je nawet wtedy,
+  gdy sekcja padnie w połowie (cennik do x1.00, reputacja do wartości sprzed testu, zlecenia
+  i rekwizyty skasowane, żądanie trybutu odwołane). Test, który zostawia po sobie embargo
+  albo wrogą reputację, jest gorszy niż brak testu.
+  Kroki monotoniczne („coś się pojawiło") są pollowane co 0,25 s zamiast czekać sztywne
+  okno — sprawdzeń negatywnych pollować NIE WOLNO (przeszłyby w pierwszym tiku).
+  Wynik na czat ORAZ do `events.jsonl` (`autotest_result` per krok, `autotest_summary`
+  z bilansem na koniec — po tym drugim poznasz, że przebieg się skończył, a nie urwał).
+  NIE zastąpi tego, co wymaga człowieka za sterami (dolot, złapanie rekwizytu, PRZYJĘCIE
+  zlecenia w terminalu, ocena brzmienia radia i sylwetki kadłuba).
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
 - `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy
   zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
   i wagami typów kontraktów. Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
-- **Scenariusze** (`brain/tests/scenariusze/*.jsonl`, 2026-08-01): plik JSONL, w którym
+- **Scenariusze** (`brain/tests/scenariusze/*.jsonl`, 2026-08-02): plik JSONL, w którym
   obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
   `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
   Wcześniej CI robiło `grep` na stdout, czyli sprawdzało tylko, że brain się nie wywrócił.
-  Pokrywają brainową połowę mechanik pilnowanych dotąd wyłącznie ręcznie: `ceny.jsonl`
-  (N2–N8, N12), `kontrakty.jsonl` (I5/I6/I8/I20/I21/I22, M4), `okup.jsonl` (K2–K5, L1–L3).
+  Cztery pliki, 99 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
+  wyłącznie ręcznie:
+  `ceny.jsonl` (N2–N8, N12), `kontrakty.jsonl` (I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, M4),
+  `okup.jsonl` (K2–K6, L1–L3), `reputacja.jsonl` (M1–M3, M7).
+  Wartości nie są przepisane z przebiegu, tylko WYLICZONE z `rules.toml` — np. zlecenie
+  wymuszone idzie po `prog_relacji`, czyli kosztuje dokładnie `nagroda_min × mnożnik typu`,
+  co czyni tabelę `[kontrakty.mnoznik]` sprawdzalną co do złotówki i niezależną od losowania.
   Linia `{"restart":true}` tworzy nowy `Engine` na TEJ SAMEJ bazie — to test, co siedzi
   w SQLite, a co tylko w RAM. Uwaga na granicę: scenariusz mówi, co brain LICZY i WYSYŁA,
-  nigdy czy gra to przyjmie.
+  nigdy czy gra to przyjmie — od tego jest `/zf autotest`. Tam, gdzie granica przecina
+  jeden test ręczny (K5: „po pokoju nie ma kary" jest gwarancją MODU, bo to on przestaje
+  wysyłać `ransom_expired`), scenariusz mówi o tym wprost zamiast udawać pokrycie.
+- **PUŁAPKA — `*.jsonl` w `.gitignore` zjadło całą tę warstwę** (znalezione 2026-08-02):
+  scenariusze nigdy nie trafiły do repo, bo globalna reguła dla danych runtime mostka
+  łapała też je. `file(GLOB)` nie znajdował ani jednego pliku, pusty glob to w CMake
+  CISZA (nie błąd), więc `ctest` pokazywał 4 testy zamiast 8, a CI świeciło na zielono,
+  nie uruchamiając NICZEGO z tej warstwy — kod `scenariusz.cpp` był martwy przez tydzień.
+  Zabezpieczenia: wyjątek `!brain/tests/scenariusze/*.jsonl` w `.gitignore` ORAZ
+  `FATAL_ERROR` w `brain/tests/CMakeLists.txt`, gdy glob nic nie zwróci. Glob ma
+  `CONFIGURE_DEPENDS`, bo bez tego świeżo dopisany scenariusz nie pojawiał się w `ctest`
+  aż do ręcznego `cmake` — i łatwo było uznać, że przechodzi.
 - **`tools/waliduj_sbc.py`** (2026-08-01): walidator danych moda. Gra nie mówi, że grupa
   spawnu wskazuje na nieistniejące zachowanie — po prostu nic się nie spawnuje albo statek
   dryfuje. Skrypt sprawdza referencje SpawnGroups ↔ RivalAiBehaviors ↔ ZF_Manipulations ↔

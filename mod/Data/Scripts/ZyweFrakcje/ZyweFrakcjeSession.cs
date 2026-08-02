@@ -141,8 +141,11 @@ namespace ZyweFrakcje
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "BŁĄD startu załóg: " + e.GetType().Name + ": " + e.Message);
             }
-            // Samosprawdzanie w grze (/zf autotest) — dopiero tu, bo potrzebuje cennika.
-            _autotest = new Autotest(_events, _prices);
+            // Samosprawdzanie w grze (/zf autotest) — dopiero tu, bo bierze wszystkie mechaniki,
+            // które sprawdza: cennik, kontrakty, hybrydę reputacji i żądania okupu. Autotest
+            // podaje im dokładnie takie ładunki, jakie przysłałby brain, więc sekcje działają
+            // także wtedy, gdy zf_brain.exe nie jest uruchomiony.
+            _autotest = new Autotest(_events, _prices, _contracts, _reputation, _ransom);
         }
 
         protected override void UnloadData()
