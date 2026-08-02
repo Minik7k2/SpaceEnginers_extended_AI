@@ -11,6 +11,11 @@ brain/state/
 # mostek JSONL — dane runtime, nie kod
 storage/
 *.jsonl
+# WYJĄTEK: scenariusze testowe to KOD, nie dane runtime. Bez tej linii `*.jsonl` połykało
+# je po cichu — pliki nigdy nie trafiły do repo, `file(GLOB)` w CMake nie znajdował ani
+# jednego, ctest pokazywał 4 testy zamiast 7 i CI świeciło na zielono, nie uruchamiając
+# NICZEGO z tej warstwy. Guard w brain/tests/CMakeLists.txt pilnuje, żeby się nie powtórzyło.
+!brain/tests/scenariusze/*.jsonl
 
 # mod (C#)
 mod/bin/

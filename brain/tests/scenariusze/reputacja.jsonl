@@ -1,0 +1,67 @@
+# Hybryda reputacji — brainowa połowa sekcji M z docs/testy-reczne.md (M1, M2, M3, M7).
+# GRANICA: scenariusz sprawdza ODWZOROWANIE, czyli jaką liczbę brain każe wpisać do gry.
+# Czy SetReputationBetweenPlayerAndFaction ją przyjmie i czy mod przywróci swój cel po
+# tym, jak gra ruszy wartość sama (M5) — rozstrzyga wyłącznie /zf autotest reputacja.
+#
+# Odwzorowanie z [reputacja]: zakres=1500, prog=500, a węzły biorą się z NASZYCH progów
+# ([relacje]: prog_wrogi=-30, prog_sojusznik=+40). Odcinkami:
+#   -100..-30 => -1500..-501   (u nas wróg == w grze wróg, bez stania jedną nogą w neutralności)
+#   -30..0    =>  -500..0
+#   0..+40    =>     0..+500
+#   +40..+100 =>  +501..+1500
+{"opis": "M1. Start świata: pełny resync — relacje do gracza i cała polityka frakcji"}
+{"type": "session_start", "ts": 1000, "data": {"world": "SCEN", "player_id": 1, "player_name": "Test", "mod_version": "test"}}
+{"oczekuj": "reputacja", "frakcja": "HEL", "wobec": "", "wartosc": 0}
+{"oczekuj": "reputacja", "frakcja": "KRW", "wobec": "", "wartosc": 0}
+{"oczekuj": "reputacja", "frakcja": "WGR", "wobec": "", "wartosc": 0}
+# M2. Polityka zasiana raz na świat trafia do okna frakcji: HEL/KRW -70, HEL/WGR +10,
+# KRW/WGR -50. To dzięki temu KRW jest w grze wrogie od pierwszej sekundy.
+{"oczekuj": "reputacja", "frakcja": "HEL", "wobec": "KRW", "wartosc": -1072}
+{"oczekuj": "reputacja", "frakcja": "HEL", "wobec": "WGR", "wartosc": 125}
+{"oczekuj": "reputacja", "frakcja": "KRW", "wobec": "WGR", "wartosc": -786}
+
+{"opis": "Górna połowa skali: +20 to jeszcze neutralność, +40 to już sojusz"}
+{"type": "contract_created", "ts": 5000, "data": {"contract_id": "a1", "faction": "HEL", "kind": "dostawa", "reward": 15000, "opis": "test"}}
+{"type": "contract_done", "ts": 10000, "data": {"contract_id": "a1", "faction": "HEL", "success": true}}
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 20}
+# 20/40 * 500 = 250 — poniżej progu gry (500), więc w oknie frakcji dalej NEUTRALNY.
+{"oczekuj": "reputacja", "frakcja": "HEL", "wobec": "", "wartosc": 250}
+{"type": "contract_created", "ts": 15000, "data": {"contract_id": "a2", "faction": "HEL", "kind": "dostawa", "reward": 15000, "opis": "test"}}
+{"type": "contract_done", "ts": 20000, "data": {"contract_id": "a2", "faction": "HEL", "success": true}}
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 40}
+# Dokładnie na NASZYM progu sojusznika gracz ma być sojusznikiem także W GRZE — stąd
+# węzeł na prog+1 = 501, a nie na 500.
+{"oczekuj": "reputacja", "frakcja": "HEL", "wobec": "", "wartosc": 501}
+
+{"opis": "M3. Dolna połowa skali: nasz próg wrogości (-30) to w grze dokładnie WRÓG"}
+{"type": "combat_hit", "ts": 25000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -15}
+# -15 leży w połowie odcinka -30..0, czyli -250: wrogo, ale jeszcze nie „wróg" w grze.
+{"oczekuj": "reputacja", "frakcja": "KRW", "wobec": "", "wartosc": -250}
+{"type": "combat_hit", "ts": 30000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -30}
+{"oczekuj": "reputacja", "frakcja": "KRW", "wobec": "", "wartosc": -501}
+
+{"opis": "Punkt powyżej progu wraca do neutralności — próg działa w obie strony"}
+# Handel o wartości 0 daje minimalną poprawkę handel_min = +1.
+{"type": "trade", "ts": 35000, "data": {"faction": "KRW", "kind": "buy", "value": 0}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -29}
+# -500 + (1/30)*500 = -483.33 => -483. Powyżej progu -500, czyli w oknie frakcji NEUTRALNY.
+{"oczekuj": "reputacja", "frakcja": "KRW", "wobec": "", "wartosc": -483}
+
+{"opis": "Dno skali: -100 mapuje się na pełne -1500, bez przekroczenia zakresu"}
+{"type": "combat_hit", "ts": 40000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 45000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 50000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 55000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"type": "combat_hit", "ts": 60000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -100, "tol": 0.001}
+{"oczekuj": "reputacja", "frakcja": "KRW", "wobec": "", "wartosc": -1500}
+
+{"opis": "M7. Frakcjom vanilla/MES nie ruszamy ani reputacji, ani cennika"}
+{"type": "combat_hit", "ts": 65000, "data": {"attacker": 1, "faction": "SPRT", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+# Relacja SPRT jest ŚLEDZONA (widać ją w /zf rel)...
+{"oczekuj": "relacja", "frakcja": "SPRT", "wartosc": -15}
+# ...ale do gry nie leci nic: reputacja i ceny stacji vanilla należą do gry.
+{"oczekuj": "brak_reputacji", "frakcja": "SPRT"}
+{"oczekuj": "brak_cen", "frakcja": "SPRT"}

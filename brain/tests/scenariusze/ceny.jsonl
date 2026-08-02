@@ -1,0 +1,73 @@
+# Cennik sklepów — brainowa połowa sekcji N z docs/testy-reczne.md (N2-N8, N12).
+# Sprawdza, co brain LICZY i WYSYŁA jako price_update. Czy gra to przyjmie (czy
+# PricePerUnit da się zapisać) rozstrzyga wyłącznie /zf autotest ceny — tej granicy
+# scenariusz nie przekracza i nie udaje, że przekracza.
+#
+# Odwzorowanie z [ceny] rules.toml: mnoznik_wrog=1.6, mnoznik_sojusznik=0.8, węzeł 1.0
+# w zerze, czyli dla relacji <= 0 mnożnik = 1.0 - 0.006 * relacja. prog_embarga = -70,
+# prog_zmiany = 0.02 (drgnięcia poniżej progu nie ruszają sklepu).
+{"opis": "N2. Start świata: relacja 0 => cennik dokładnie x1.00 u każdej frakcji"}
+{"type": "session_start", "ts": 1000, "data": {"world": "SCEN", "player_id": 1, "player_name": "Test", "mod_version": "test"}}
+{"oczekuj": "ceny", "frakcja": "HEL", "mnoznik": 1.0, "embargo": false}
+{"oczekuj": "ceny", "frakcja": "KRW", "mnoznik": 1.0, "embargo": false}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.0, "embargo": false}
+
+{"opis": "N3. Wrogość podnosi ceny — ostrzał WGR po 15 pkt (damage 2000 = ostrzal_max)"}
+{"type": "combat_hit", "ts": 6000, "data": {"attacker": 1, "faction": "WGR", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -15}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.09, "embargo": false}
+# KRW jest wrogiem WGR w polityce (-50), więc dostaje bonus "wróg ostrzelany" +5.
+# Mnożnik idzie z 1.00 na 0.99 — to MNIEJ niż prog_zmiany 0.02, więc sklepu NIE ruszamy.
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": 5}
+{"oczekuj": "brak_cen", "frakcja": "KRW"}
+# HEL ma z WGR +10 (powyżej prog_wrogi), więc bonusu nie dostaje — i cennik stoi.
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 0}
+{"oczekuj": "brak_cen", "frakcja": "HEL"}
+
+{"opis": "N3 c.d. Liniowość: każde -15 relacji to +0.09 mnożnika"}
+{"type": "combat_hit", "ts": 12000, "data": {"attacker": 1, "faction": "WGR", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -30}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.18, "embargo": false}
+{"type": "combat_hit", "ts": 18000, "data": {"attacker": 1, "faction": "WGR", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -45}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.27, "embargo": false}
+{"type": "combat_hit", "ts": 24000, "data": {"attacker": 1, "faction": "WGR", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -60}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.36, "embargo": false}
+
+{"opis": "N7. Embargo: poniżej prog_embarga (-70) frakcja nie handluje wcale"}
+{"type": "combat_hit", "ts": 30000, "data": {"attacker": 1, "faction": "WGR", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -75}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.45, "embargo": true}
+
+{"opis": "N12. Frakcje spoza moda nie dostają price_update ani reputation_sync"}
+{"type": "combat_hit", "ts": 36000, "data": {"attacker": 1, "faction": "SPRT", "damage": 2000, "hits": 10, "weapon": "gatling"}}
+# SPRT rejestruje się jako znana frakcja i JEGO relacja jest śledzona...
+{"oczekuj": "relacja", "frakcja": "SPRT", "wartosc": -15}
+# ...ale cennik i reputacja stacji vanilla należą do gry, nie do nas.
+{"oczekuj": "brak_cen", "frakcja": "SPRT"}
+
+{"opis": "N5. Mnożnik liczony od BAZY: restart brainu nie składa go po raz drugi"}
+{"restart": true}
+# Po restarcie brain nie wie, co mod ma u siebie — pierwszy sync jest WYMUSZONY, więc
+# price_update leci ponownie. Kluczowe: ta sama wartość co przed restartem, nie 1.45*1.45.
+{"type": "session_start", "ts": 42000, "data": {"world": "SCEN", "player_id": 1, "player_name": "Test", "mod_version": "test"}}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.45, "embargo": true}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -75}
+
+{"opis": "N8/N6. Odkupienie czynami: wykonane zlecenia zdejmują embargo i wracają do bazy"}
+{"type": "contract_created", "ts": 48000, "data": {"contract_id": "c1", "faction": "WGR", "kind": "dostawa", "reward": 15000, "opis": "test"}}
+{"type": "contract_done", "ts": 54000, "data": {"contract_id": "c1", "faction": "WGR", "success": true}}
+# dostawa ma mnożnik trudności 1.0, więc +kontrakt_max = +20 => -75 + 20 = -55.
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -55}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.33, "embargo": false}
+{"type": "contract_created", "ts": 60000, "data": {"contract_id": "c2", "faction": "WGR", "kind": "dostawa", "reward": 15000, "opis": "test"}}
+{"type": "contract_done", "ts": 66000, "data": {"contract_id": "c2", "faction": "WGR", "success": true}}
+{"oczekuj": "relacja", "frakcja": "WGR", "wartosc": -35}
+{"oczekuj": "ceny", "frakcja": "WGR", "mnoznik": 1.21, "embargo": false}
+
+{"opis": "N4. Relacja dodatnia daje ZNIŻKĘ (mnożnik poniżej 1.00)"}
+{"type": "contract_created", "ts": 72000, "data": {"contract_id": "c3", "faction": "HEL", "kind": "dostawa", "reward": 15000, "opis": "test"}}
+{"type": "contract_done", "ts": 78000, "data": {"contract_id": "c3", "faction": "HEL", "success": true}}
+{"oczekuj": "relacja", "frakcja": "HEL", "wartosc": 20}
+{"oczekuj": "ceny", "frakcja": "HEL", "mnoznik": 0.96, "embargo": false}

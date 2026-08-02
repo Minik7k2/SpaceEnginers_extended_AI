@@ -7,13 +7,20 @@ najpierw — ręczna lista ma sens dopiero, gdy są zielone.
 
 | Narzędzie | Co pokrywa | Jak uruchomić |
 |---|---|---|
-| `ctest --test-dir brain/build` | logika braina + **scenariusze** (`brain/tests/scenariusze/*.jsonl`): brainowa połowa I5/I6/I8/I20/I21/I22, K2–K5, L1–L3, M4, N2–N8, N12 | po `cmake --build brain/build` |
+| `ctest --test-dir brain/build` | logika braina + **scenariusze** (`brain/tests/scenariusze/*.jsonl`, 99 sprawdzeń): brainowa połowa I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, K2–K6, L1–L3, M1–M3/M4/M7, N2–N8, N12 | po `cmake --build brain/build` |
 | `python3 tools/waliduj_sbc.py` | referencje w danych moda: grupy spawnu ↔ zachowania ↔ manipulacje ↔ boty ↔ kod (sekcje O i P niżej) | z korzenia repo |
 | `tools/sprawdz-mod.ps1` | czy mod w ogóle się kompiluje (składnia i typy, NIE whitelista) | Windows z SE + Visual Studio |
 
 **Uwaga o podziale.** Scenariusze sprawdzają, co brain LICZY i WYSYŁA — nie to, czy gra
 to przyjmie. „N3 zielone w ctest" znaczy tylko tyle, że mnożnik wyszedł 1.324; czy cena
 w terminalu naprawdę urosła, rozstrzyga `/zf autotest ceny` albo oko.
+
+Ta granica bywa cienka i wtedy scenariusz mówi o niej wprost, zamiast udawać pokrycie.
+Przykład: K5 („pokój kasuje trybut") ma dwie połowy — to, że de-eskalacja kasuje wiszące
+żądanie, liczy brain i sprawdza `okup.jsonl`; to, że po pokoju NIE przyjdzie kara za
+deadline, jest gwarancją MODU (przestaje wysyłać `ransom_expired`) i sprawdza to
+`/zf autotest okup`. Sam brain, dostawszy `ransom_expired` z powodem `deadline`, karę
+naliczy — i ma prawo.
 
 ## W grze: `/zf autotest [sekcja]`
 

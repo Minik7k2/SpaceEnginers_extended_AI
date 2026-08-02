@@ -24,7 +24,20 @@ zf_add_test(config_test config_test.cpp)
 # testy w grze — ceny, okup i kontrakty. zf_brain wraca kodem 1, gdy choć jedno
 # oczekiwanie nie wyjdzie, więc ctest wystarczy uruchomienie binarki.
 # WORKING_DIRECTORY = brain/, bo config i persony mają ścieżki względne do niego.
-file(GLOB ZF_SCENARIUSZE ${CMAKE_CURRENT_SOURCE_DIR}/scenariusze/*.jsonl)
+# CONFIGURE_DEPENDS: bez tego glob liczy się TYLKO przy konfiguracji, więc świeżo dopisany
+# scenariusz nie pojawiał się w ctest aż do ręcznego `cmake -S brain -B build`. Łatwo tego
+# nie zauważyć i uznać, że nowy test przechodzi — a on się w ogóle nie uruchamiał.
+file(GLOB ZF_SCENARIUSZE CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/scenariusze/*.jsonl)
+# Pusty glob to CISZA, nie błąd — i właśnie dlatego ta warstwa raz już zniknęła
+# niezauważona (globalne `*.jsonl` w .gitignore zjadło scenariusze, CI dalej było zielone,
+# bo zero testów przechodzi w 100%). Brak plików musi wywalić KONFIGURACJĘ, nie zostawić
+# zielonego przebiegu bez pokrycia.
+if(NOT ZF_SCENARIUSZE)
+  message(FATAL_ERROR
+    "Brak scenariuszy w ${CMAKE_CURRENT_SOURCE_DIR}/scenariusze/*.jsonl. "
+    "Jeśli to nowy klon: sprawdź, czy .gitignore ma wyjątek "
+    "`!brain/tests/scenariusze/*.jsonl` — bez niego pliki nie trafiają do repo.")
+endif()
 foreach(plik ${ZF_SCENARIUSZE})
   get_filename_component(nazwa ${plik} NAME_WE)
   add_test(NAME scenariusz_${nazwa}
