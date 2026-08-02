@@ -48,9 +48,17 @@ jobs:
       # zero testów przechodzi w 100%. Tu wyjdzie od razu.
       - name: Scenariusze naprawdę się uruchomiły
         run: |
-          ile=$(ctest --test-dir build -N | grep -c "scenariusz_")
-          echo "scenariuszy w ctest: $ile"
-          test "$ile" -ge 4
+          # `|| true` jest KONIECZNE: przy zerze trafień `grep -c` wraca kodem 1, a krok
+          # leci pod `bash -e`, więc urwałby się na tym przypisaniu — bez wypisania
+          # czegokolwiek. Bramka, która milczy dokładnie w sytuacji, dla której powstała,
+          # jest gorsza niż jej brak.
+          ile=$(ctest --test-dir build -N | grep -c "scenariusz_" || true)
+          echo "scenariuszy w ctest: $ile (oczekiwane co najmniej 4)"
+          if [ "$ile" -lt 4 ]; then
+            echo "::error::Scenariusze nie trafiły do ctest. Sprawdź, czy .gitignore ma wyjątek" \
+                 "'!brain/tests/scenariusze/*.jsonl' — globalne '*.jsonl' raz już je zjadło."
+            exit 1
+          fi
 
       - name: Smoke test --replay (mostek + silnik bez gry)
         run: |
