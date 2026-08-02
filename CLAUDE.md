@@ -268,15 +268,34 @@ docs/protocol.md                # spec mostka JSONL
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
-- **`/zf autotest [sekcja]`** (2026-08-01): samosprawdzanie W GRZE. Sekcje: `stacje`,
-  `ceny`, `rekwizyt` (bezpieczne, lecą bez argumentu), `floty`, `boty` (spawnują
-  prawdziwe rajdy — kosmos, świat testowy), `wszystko`. Odpowiada na pytania, których
-  nie da się zadać poza grą: czy `GetStoreItems` w ogóle zwraca oferty, czy
-  `PricePerUnit` jest zapisywalne, czy mnożnik nie składa się po reloadzie, czy
-  `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub z naszej grupy i czy ma on
-  pilota. Wynik na czat ORAZ do `events.jsonl` (`autotest_result`), więc konsola brainu
-  ma komplet. NIE zastąpi tego, co wymaga człowieka za sterami (dolot, złapanie
-  rekwizytu, przyjęcie zlecenia w terminalu, ocena brzmienia radia).
+- **`/zf autotest [sekcja]`** (2026-08-01, rozszerzone 2026-08-02): samosprawdzanie W GRZE.
+  Sekcje bezpieczne (lecą bez argumentu): `stacje`, `ceny`, `rekwizyt`, `kontrakty`,
+  `reputacja`, `okup`. Osobno `floty` i `boty` (spawnują prawdziwe rajdy — kosmos, świat
+  testowy) oraz `wszystko`. Odpowiada na pytania, których nie da się zadać poza grą: czy
+  `GetStoreItems` w ogóle zwraca oferty, czy `PricePerUnit` jest zapisywalne, czy mnożnik
+  nie składa się po reloadzie, czy `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub
+  z naszej grupy i czy ten kadłub NAPRAWDĘ leci (dystans w oknie 30 s, bo sam blok zdalnego
+  sterowania niczego nie dowodzi).
+  **Sekcja `kontrakty` jest najważniejsza:** zamawia po kolei wszystkie siedem typów zleceń
+  i porównuje typ ZAMÓWIONY z tym, który powstał. Mod ma przy zleceniach ostatnie słowo
+  i przy braku celu po cichu wystawia dostawę — dotąd nie było jak zauważyć, że typ od
+  tygodni degraduje, bo `contract_created` wraca poprawne i wszystko wygląda zdrowo.
+  Hak: `ContractManager.OstatniTyp`/`OstatniPowod`/`LicznikRozstrzygniec`.
+  **Sekcja `reputacja`** pokrywa hybrydę (M1–M3, M5, M7) — łącznie z tym, czy mod przywraca
+  swój cel po tym, jak gra ruszy reputację sama.
+  Autotest podaje mechanikom dokładnie takie ładunki, jakie przysłałby brain (`PriceManager
+  .Handle`, `ReputationSync.Handle`, `RansomManager.HandleDemand`), więc **działa też bez
+  uruchomionego `zf_brain.exe`**.
+  KAŻDY krok zmieniający świat rejestruje przywrócenie — podsumowanie odwija je nawet wtedy,
+  gdy sekcja padnie w połowie (cennik do x1.00, reputacja do wartości sprzed testu, zlecenia
+  i rekwizyty skasowane, żądanie trybutu odwołane). Test, który zostawia po sobie embargo
+  albo wrogą reputację, jest gorszy niż brak testu.
+  Kroki monotoniczne („coś się pojawiło") są pollowane co 0,25 s zamiast czekać sztywne
+  okno — sprawdzeń negatywnych pollować NIE WOLNO (przeszłyby w pierwszym tiku).
+  Wynik na czat ORAZ do `events.jsonl` (`autotest_result` per krok, `autotest_summary`
+  z bilansem na koniec — po tym drugim poznasz, że przebieg się skończył, a nie urwał).
+  NIE zastąpi tego, co wymaga człowieka za sterami (dolot, złapanie rekwizytu, PRZYJĘCIE
+  zlecenia w terminalu, ocena brzmienia radia i sylwetki kadłuba).
 - Brain: `--mock-llm`, `--replay <plik.jsonl>` (odtworzenie zdarzeń bez gry).
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
 - `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy

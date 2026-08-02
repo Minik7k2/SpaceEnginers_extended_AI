@@ -21,18 +21,43 @@ Jedna komenda zamiast przeklikiwania listy. Sprawdza to, czego nie da się spraw
 grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `events.jsonl`
 (typ `autotest_result`), więc widać go też w konsoli brainu.
 
-- `/zf autotest` — sekcje bezpieczne: `stacje`, `ceny`, `rekwizyt` (nic nie spawnują wrogo).
+- `/zf autotest` — sekcje bezpieczne (`stacje`, `ceny`, `rekwizyt`, `kontrakty`, `reputacja`,
+  `okup`): nic nie spawnują wrogo i **przywracają stan świata**, także gdy krok padnie
+  w połowie (cennik wraca do x1.00, reputacja do wartości sprzed testu, zlecenia i rekwizyty
+  autotestu są kasowane, żądanie trybutu odwołane).
 - `/zf autotest ceny` — **bramka całej sekcji N**: czy `GetStoreItems` zwraca oferty, czy
   `PricePerUnit` jest zapisywalne, czy mnożnik liczy się od bazy (a nie składa), czy embargo
-  zeruje `Amount` i czy zniesienie embarga wraca do ilości sprzed niego.
-- `/zf autotest stacje` — I1a–I1c: każda frakcja ma blok kontraktów i sklep.
+  zeruje `Amount`, czy zniesienie embarga wraca do ilości sprzed niego i czy mnożnik NIE
+  wycieka na sklepy frakcji vanilla (N12).
+- `/zf autotest stacje` — I1a–I1c: każda frakcja ma blok kontraktów i sklep; dodatkowo I1b
+  w wersji bez reloadu (czy w świecie nie stoją dwie stacje tej samej frakcji).
 - `/zf autotest rekwizyt` — I19a: czy `SpawningOptions.SetNpcSpawnedGrid` faktycznie ustawia
   flagę (bez niej poszukiwania zawalają się sekundę po przyjęciu).
-- `/zf autotest floty` — sekcja O: czy rajd każdej frakcji staje i czy kadłub ma pilota.
+- `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie siedem
+  typów zleceń i porównuje typ ZAMÓWIONY z tym, który NAPRAWDĘ powstał. Mod ma przy
+  zleceniach ostatnie słowo i przy braku celu po cichu wystawia dostawę (I15) — dotąd
+  nie było jak zauważyć, że jakiś typ od tygodni degraduje. Sprawdza też, że `Duration`
+  jest w MINUTACH i że zlecenie wisi na bloku frakcji. Zlecenia i rekwizyty kasuje po sobie.
+- `/zf autotest reputacja` — sekcja M bez klikania w okno frakcji: czy cel z brainu ląduje
+  w grze, czy trafia w progi etykiet (±500), czy działa polityka frakcja↔frakcja i — sedno
+  hybrydy — czy mod PRZYWRACA swój cel po tym, jak gra ruszy reputację po swojemu (M5).
+  Pilnuje też, że frakcjom vanilla nic nie zmieniamy (M7).
+- `/zf autotest okup` — K2/K5/K6: czy żądanie trybutu stawia skrzynkę zrzutu z GPS-em, czy
+  skrzynka zostaje w świecie (nie zjada jej sprzątacz śmieci) i czy pokój kasuje żądanie
+  razem ze skrzynką i punktem GPS. Samej DOSTAWY towaru autotest nie zrobi — to gracz
+  przekłada ładunek.
+- `/zf autotest floty` — sekcja O: czy rajd każdej frakcji staje, czy kadłub ma pilota
+  i czy faktycznie LECI (200 m w 30 s — sam blok zdalnego sterowania nie dowodzi, że
+  RivalAI go używa). Osobno konwój na `ZF_Konwoj`.
   **Tylko w kosmosie i na świecie testowym** — stawia prawdziwe statki rajdowe.
-- `/zf autotest boty` — sekcja P: czy załoga się pojawia (miękko: bez AiEnabled to
-  OSTRZEŻENIE, nie błąd).
+- `/zf autotest boty` — sekcja P: czy załoga się pojawia (P1/P2), czy NALEŻY do frakcji
+  (P3 — bez tego bot nie zareaguje na zmianę relacji) i czy się nie mnoży (P6). Miękko:
+  bez AiEnabled to OSTRZEŻENIE, nie błąd.
 - `/zf autotest wszystko` — wszystko po kolei, kilka minut.
+
+Wynik każdego kroku leci do `events.jsonl` jako `autotest_result`, a domknięcie przebiegu
+jako `autotest_summary` (bilans PASS/FAIL/OSTRZEŻEŃ) — po tej drugiej linii poznasz
+w konsoli brainu, że test się SKOŃCZYŁ, a nie urwał w połowie.
 
 Przygotowanie: uruchom świat z modami SE_ZyweFrakcje + MES, obok odpal
 `brain\cmake-build-debug\zf_brain.exe` (konsola musi pokazać `[brain] start,
@@ -297,6 +322,7 @@ niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
 - [ ] **I1b. Nie duplikuje się:** zapisz i wczytaj świat → NIE MA nowych stacji (warunek
   to stan świata: frakcja z blokiem ekonomicznym jest pomijana). To samo po `/zf stacja`
   — frakcja z ręcznie oddaną siatką nie dostaje drugiej stacji.
+  Automat (bez reloadu): `/zf autotest stacje` — wykrywa dwie stacje tej samej frakcji.
 - [ ] **I1c. Stacja działa jak stacja:** dolec do niej → terminal zleceń pokazuje kontrakty
   tej frakcji (`/zf kontrakt <TAG>`), a `/zf ceny` widzi jej sklep (`ofert: N`).
   Jeśli `ofert: 0`, sklep NPC nie dostał asortymentu — patrz sekcja N, to osobny problem.
@@ -361,6 +387,7 @@ niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
   `Zlecenie HEL typu "naprawa" niemożliwe (frakcja nie ma uszkodzonej siatki do naprawy)
   — wystawiam dostawę`, a `contract_created` w konsoli braina ma `dostawa`, NIE `naprawa`.
   To najważniejszy test całej rozbudowy: żadne zlecenie nie może przepaść po cichu.
+  Automat: `/zf autotest kontrakty` zamawia wszystkie siedem typów i melduje KAŻDE zejście na dostawę wraz z powodem.
 - [x] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
   `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
   Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
@@ -480,6 +507,7 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
 - [ ] **K2. Żądanie trybutu:** `/zf raid KRW`, potem `/zf okup-surowce KRW` →
   `[KRW] Trybut za pokój: dostarcz N …` + GPS `ZRZUT KRW`, w świecie stoi skrzynka
   z beaconem ZRZUT, statki KRW wstrzymują ogień.
+  Automat: `/zf autotest okup` — skrzynka, GPS i wstrzymanie ognia.
 - [ ] **K3. Dostawa:** `/zf daj <żądany surowiec> <żądana ilość>`, przełóż towar do
   skrzynki → `[KRW] Trybut dostarczony`, `ransom_paid` w events.jsonl, relacja +20,
   skrzynka i GPS znikają, statki odlatują.
@@ -490,6 +518,7 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
   skrzynka i GPS znikają od razu, a po upływie deadline'u NIE ma `ransom_expired`
   ani kary za złamaną obietnicę. Wcześniej skrzynka wisiała do końca okna i pokój
   kończył się karą.
+  Automat: `/zf autotest okup`.
 - [ ] **K6. Skrzynka NIE znika sama (regresja 2026-07-28):** po `/zf okup-surowce KRW`
   skrzynka stoi ~120 m przed graczem i **zostaje** — wcześniej zjadał ją sprzątacz śmieci
   SE (świat: `TrashRemovalEnabled=true`, `BlockCountThreshold=20`, `PlayerDistanceThreshold=500`;
@@ -497,6 +526,7 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
   prefab jest statyczny i ma baterię, więc beacon `ZRZUT` świeci i grid jest nietykalny.
   Kontrtest: gdyby mimo to przepadła, ma przyjść `[KRW] Skrzynka zrzutu przepadła —
   żądanie trybutu anulowane (bez kary)` i BRAK kary w konsoli braina.
+  Automat: `/zf autotest okup` sprawdza, że skrzynka stoi i ma GPS.
 - [ ] **K7. Frakcja wie, ile zostało czasu:** przy wiszącym żądaniu napisz
   `@krw ile mi zostało czasu?` → odpowiedź podaje realną liczbę minut i ilość surowca
   (brain wstrzykuje to do promptu). Wcześniej model zmyślał.
@@ -540,16 +570,19 @@ wartość, którą gra ma naprawdę, i cel przysłany przez brain (przy rozjeźd
 - [x] **M3. Strzelanina zmienia liczbę w grze:** ostrzelaj statek HEL do relacji poniżej
   -30 (`/zf rel`) → w oknie frakcji HEL robi się WRÓG, `/zf rep` pokazuje ≤ -500.
   To jest sedno zmiany: wcześniej brain ogłaszał wojnę, a gra dalej miała neutralność.
+  Automat: `/zf autotest reputacja` sprawdza samo odwzorowanie (zapis celu + progi ±500), bez strzelania.
 - [ ] **M4. Powrót:** wykonaj kontrakt tej frakcji (albo `/zf event` z `contract_done`)
   → relacja rośnie, reputacja w grze rośnie razem z nią.
 - [x] **M5. Brak podwójnego liczenia:** po nagrodzie reputacyjnej z kontraktu vanilla
   `/zf rep` w ciągu ~5 s wraca do wartości z brainu (mod przywraca cel). Krótki
   `ROZJAZD` zaraz po rozliczeniu kontraktu jest OK, utrzymujący się — nie.
+  Automat: `/zf autotest reputacja` — ustawia reputację obok celu i sprawdza, czy mod ją cofnął.
 - [x] **M6. Wyłącznik:** `sync = false` w `[reputacja]` (hot-reload) → brain przestaje
   wysyłać, gra zostaje na ostatniej wartości; po `sync = true` leci pełny resync.
 - [x] **M7. Nic nie psuje ekonomii:** reputacja frakcji vanilla (RTSL/UNIV itd.) w oknie
   frakcji nie zmienia się przez nasz mod — synchronizujemy tylko HEL/KRW/WGR.
 
+  Automat: `/zf autotest reputacja`.
 ## N. Cennik sklepów — price_update (2026-07-31) — DO WERYFIKACJI
 
 Cała sekcja jest nowa i **nic nie jest odhaczone**. Potrzebna stacja ze sklepem należąca
@@ -599,6 +632,7 @@ pierwszy test rozstrzyga, czy w ogóle mamy dostęp do ofert.
   ceny zostają na ostatniej wartości; po `sync = true` leci pełny resync.
 - [ ] **N12. Nie ruszamy cudzego:** ceny na stacjach vanilla/MES (RTSL, SPRT…) bez zmian —
   synchronizujemy wyłącznie sklepy HEL/KRW/WGR.
+  Automat: `/zf autotest ceny` — zapamiętuje cenę w obcym sklepie i sprawdza ją po zmianach mnożnika.
 - [ ] **N13. Handel dalej się liczy:** kup coś w sklepie frakcji po zmianie cen →
   `trade` w konsoli braina i relacja rośnie (cennik nie może psuć heurystyki handlu).
 
@@ -624,12 +658,14 @@ check MES, planeta), nie literówki. Wszystko testuj w KOSMOSIE.
   a nie dryfuje po prostej. To sprawdza, czy manipulacja podmieniła kostkę pancerza na
   `RivalAIRemoteControlLarge`. `/zf autotest floty` mówi tylko, czy blok JEST — czy
   RivalAI go używa, widać dopiero po zachowaniu statku.
+  Automat: `/zf autotest floty` mierzy teraz DYSTANS przebyty w 30 s (próg 200 m), nie tylko obecność bloku.
 - [ ] **O4. Manipulacja nie trafia w małą siatkę:** patrole (małe drony) mają swoje
   zdalne sterowanie i NIE dostają dodatkowego bloku; żadna grupa patrolowa nie ma
   `[ManipulationGroups]`. Objaw błędu: blok o złym rozmiarze wtopiony w kadłub.
 - [ ] **O5. Konwój jedzie trasą:** `/zf raid WGR convoy` → frachtowiec **leci trasą
   i po niej znika**, zamiast dryfować po prostej z nadaną prędkością. To był powód
   podpięcia `BehaviorName:CargoShip` + gotowego autopilota MES.
+  Automat: `/zf autotest floty` — osobny krok na konwój (despawn po dolocie też liczy się jako sukces).
 - [ ] **O6. Konwój nie atakuje:** statek z O5 nie strzela do gracza bez powodu (to
   transport, nie napastnik).
 - [ ] **O7. Grupy zapasowe dla obcych tagów:** `/zf raid SPRT` → brain odrzuca spawn
@@ -654,6 +690,7 @@ boty się nie pojawiają, zacznij od tego.
   małych siatkach, więc to działa tylko dla dużych kadłubów rajdowych.
 - [ ] **P3. Bot należy do frakcji:** postać z P1/P2 jest członkiem HEL/KRW/WGR (MES woła
   `SetPlayersFaction`), a nie bezpańskim NPC.
+  Automat: `/zf autotest boty` — po tożsamości kontrolera.
 - [ ] **P4. SEDNO HYBRYDY — bot reaguje na relację:** przy dobrej relacji bot NIE atakuje,
   po doprowadzeniu relacji poniżej `prog_wrogi` (`/zf rel`) **ten sam bot** zaczyna
   strzelać, BEZ respawnu. Wrogość bota leci po natywnej reputacji, czyli po naszej hybrydzie.
@@ -661,6 +698,7 @@ boty się nie pojawiają, zacznij od tego.
   (`ZF_Bot_KRW_Lupiezca`, zachowanie `Grinder`), który bierze się za twój kadłub szlifierką.
 - [ ] **P6. Załoga się nie mnoży:** wyjdź i wróć w pobliże stacji kilka razy → liczba
   postaci nie rośnie (idempotencja przez liczenie postaci, nie przez zapis w storage).
+  Automat: `/zf autotest boty` — liczy załogę dwa razy w odstępie dłuższym niż cykl CrewSpawnera.
 - [ ] **P7. Bez AiEnabled nic się nie psuje:** wyłącz AiEnabled → świat wstaje, jest jedno
   ostrzeżenie na sesję, a stacje, ceny i kontrakty działają jak dotąd.
 

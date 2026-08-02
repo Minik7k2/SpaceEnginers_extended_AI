@@ -118,6 +118,23 @@ namespace ZyweFrakcje
         }
 
         /// <summary>
+        /// Czy tej frakcji wisi żądanie trybutu — dla `/zf autotest okup`. Drugi parametr
+        /// mówi, czy skrzynka NAPRAWDĘ stoi w świecie: SpawnPrefab jest asynchroniczny, więc
+        /// „żądanie jest" i „skrzynka jest" to dwa różne pytania i K2 sprawdza oba.
+        /// </summary>
+        public bool MaPending(string faction, out bool skrzynkaStoi)
+        {
+            skrzynkaStoi = false;
+            Pending p;
+            if (faction == null || !_pending.TryGetValue(faction, out p))
+            {
+                return false;
+            }
+            skrzynkaStoi = p.Crate != null && !p.Crate.MarkedForClose;
+            return true;
+        }
+
+        /// <summary>
         /// Odwołanie wiszącego żądania bez kary i bez wznawiania ognia (stand_down: okup
         /// gotówkowy, kapitulacja, rozejm). Brain przy stand_down kasuje swój pending
         /// z założeniem, że skrzynkę sprząta mod — to jest to sprzątanie.

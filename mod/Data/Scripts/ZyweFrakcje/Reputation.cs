@@ -110,6 +110,35 @@ namespace ZyweFrakcje
             _doUsuniecia.Clear();
         }
 
+        /// <summary>
+        /// Cel przysłany przez brain — dla `/zf autotest reputacja`. Autotest podmienia cele
+        /// na własne (żeby sprawdzić zapis, progi i przywracanie), więc musi najpierw móc
+        /// zapamiętać, co tu stało, i po teście to oddać. false = brain nic dla tej pary
+        /// nie przysłał (np. nie działa) i po teście trzeba cel ZAPOMNIEĆ, nie odtwarzać.
+        /// </summary>
+        public bool TryGetCel(string faction, string other, out int vanilla, out double value)
+        {
+            vanilla = 0;
+            value = 0;
+            Cel cel;
+            if (!_cele.TryGetValue(Key(faction, other ?? ""), out cel))
+            {
+                return false;
+            }
+            vanilla = cel.Vanilla;
+            value = cel.Value;
+            return true;
+        }
+
+        /// <summary>
+        /// Przestań pilnować celu (autotest sprząta po sobie wpisy, których brain nie zna).
+        /// Wartość w grze zostaje taka, jaka jest — kolejny reputation_sync ją poprawi.
+        /// </summary>
+        public void Zapomnij(string faction, string other)
+        {
+            _cele.Remove(Key(faction, other ?? ""));
+        }
+
         /// <summary>"/zf rep" — co brain chce mieć w grze i co gra ma naprawdę.</summary>
         public void Report()
         {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI;
+using Sandbox.ModAPI.Contracts;
 using VRage.Game;
 using VRage.Game.ModAPI;
 using VRageMath;
@@ -8,7 +9,8 @@ using VRageMath;
 namespace ZyweFrakcje
 {
     /// <summary>
-    /// Samosprawdzanie w grze — komenda <c>/zf autotest [sekcja]</c> (2026-08-01).
+    /// Samosprawdzanie w grze — komenda <c>/zf autotest [sekcja]</c> (2026-08-01,
+    /// rozszerzone 2026-08-02).
     ///
     /// PO CO TO JEST. Duża część mechaniki opiera się na założeniach o ModAPI, których
     /// nie da się potwierdzić poza grą: czy <c>GetStoreItems</c> w ogóle coś zwróci, czy
@@ -16,30 +18,55 @@ namespace ZyweFrakcje
     /// flagę <c>IsNpcSpawnedGrid</c>, czy MES postawi kadłub z naszej grupy. Do tej pory
     /// każde takie pytanie kosztowało osobny przebieg ręcznej listy z docs/testy-reczne.md
     /// — wczytanie świata, dolot, patrzenie w terminal. Autotest zadaje te pytania sam
-    /// i odpowiada PASS/FAIL, a wynik idzie na czat ORAZ do events.jsonl (typ
-    /// <c>autotest_result</c>), więc konsola brainu pokazuje komplet.
+    /// i odpowiada PASS/FAIL, a wynik idzie na czat ORAZ do events.jsonl (typy
+    /// <c>autotest_result</c> i <c>autotest_summary</c>), więc konsola brainu ma komplet.
     ///
     /// CZEGO NIE ZASTĄPI: rzeczy wymagających człowieka za sterami — dolecieć do rekwizytu,
-    /// złapać go podwoziem, przyjąć zlecenie w terminalu, ocenić, czy radio brzmi sensownie.
-    /// Te zostają w docs/testy-reczne.md.
+    /// złapać go podwoziem, PRZYJĄĆ zlecenie w terminalu, ocenić brzmienie radia czy
+    /// sylwetkę kadłuba. Te zostają w docs/testy-reczne.md. Autotest sprawdza wszystko
+    /// PRZED tą granicą: że zlecenie powstało właściwego typu, że skrzynka stoi, że
+    /// reputacja doszła do gry — czyli dokładnie te miejsca, w których dotąd psuło się
+    /// po cichu.
     ///
-    /// Sekcje są rozdzielone celowo: „szybkie" (stacje, ceny, rekwizyt) nic nie psują
-    /// i nie ściągają na gracza wrogów, a „floty"/„boty" spawnują prawdziwe statki rajdowe
-    /// i wymagają kosmosu. Bez argumentu lecą tylko szybkie.
+    /// Sekcje są rozdzielone celowo: „szybkie" nic nie psują i nie ściągają na gracza
+    /// wrogów, a „floty"/„boty" spawnują prawdziwe statki rajdowe i wymagają kosmosu.
+    /// Bez argumentu lecą tylko szybkie.
     ///
     /// Konstrukcja: prosta maszyna kroków, bo połowa sprawdzeń jest asynchroniczna
     /// (SpawnPrefab woła callback, MES stawia statek po chwili, AiEnabled buduje mapę
     /// siatki). Każdy krok ma Start, czas oczekiwania i sprawdzenie.
+    ///
+    /// KAŻDY krok, który zmienia stan świata, musi zarejestrować przywrócenie
+    /// (<see cref="Posprzataj"/>) — podsumowanie odwija je nawet wtedy, gdy krok padł
+    /// w połowie. Test, który zostawia po sobie embargo albo wrogą reputację, jest
+    /// gorszy niż brak testu.
     /// </summary>
     internal sealed class Autotest
     {
         private const int Sekunda = 60; // tików przy 60 Hz
+        // Co ile tików ponawiać sprawdzenie monotoniczne (patrz Krok.Poll).
+        private const int PollCoTikow = 15;
 
         // Stała, a nie literał w kodzie: tools/waliduj_sbc.py sprawdza, czy nazwa prefabu
         // spawnowanego przez mod naprawdę istnieje w mod/Data/Prefabs.
         private const string RekwizytPrefab = "ZF_Zgubka";
 
+        // Nazwy rekwizytów z prefabów (DisplayName) — po nich sprzątamy po sekcji kontraktów.
+        private const string NazwaZgubki = "Zgubiony modul";
+        private const string NazwaWraku = "Uszkodzony modul frakcji";
+        private const string NazwaSkrzynki = "Skrzynka zrzutu";
+
+        // Parametry zleceń wystawianych przez autotest. Czas w MINUTACH — i to jest jedna
+        // z rzeczy, które ten test pilnuje (gra bierze minuty, my kiedyś dawaliśmy sekundy).
+        private const long KontraktNagroda = 5000;
+        private const int KontraktCzasMin = 45;
+
         private static readonly string[] Tagi = { "HEL", "KRW", "WGR" };
+
+        // Tagi frakcji vanilla, na których sprawdzamy, że NIC im nie ruszamy (M7, N12).
+        // Lista jawna zamiast przeglądania kolekcji frakcji: TryGetFactionByTag jest jedynym
+        // wejściem, którego mod używa i o którym wiemy, że jest na whiteliście.
+        private static readonly string[] TagiVanilla = { "SPRT", "UNIV", "RTSL", "CLEN", "MA" };
 
         /// <summary>Jeden krok testu: zrób coś, odczekaj, sprawdź.</summary>
         private sealed class Krok
@@ -49,12 +76,32 @@ namespace ZyweFrakcje
             // Zwraca pusty string = PASS, tekst = opis niepowodzenia.
             public Func<string> Sprawdz;
             public int CzekajTikow;
-            // Zależność miękka (AiEnabled): niepowodzenie ma być OSTRZEŻENIEM, nie błędem.
+            // Zależność miękka (AiEnabled) albo wynik dopuszczalny (typ zlecenia, który
+            // legalnie schodzi na dostawę): niepowodzenie ma być OSTRZEŻENIEM, nie błędem.
             public bool Miekki;
+            // Sprawdzenie MONOTONICZNE („coś się pojawiło/zniknęło po naszej akcji") — wolno
+            // je ponawiać, bo raz spełnione nie przestanie być prawdą. Wtedy czekamy tylko
+            // tyle, ile trzeba, zamiast zawsze pełnego CzekajTikow: bez tego `wszystko`
+            // schodziło z samego czekania grubo ponad minutę, a na wolniejszej maszynie
+            // sztywny czas i tak potrafił nie wystarczyć.
+            // NIE ustawiaj tego na sprawdzeniach negatywnych („nic nie powstało") — takie
+            // przeszłyby w pierwszym tiku, zanim rzecz zdążyłaby się w ogóle wydarzyć.
+            public bool Poll;
+            // Nazwa grupy kroków (zwykle sekcji). Kroki SPRZĄTAJĄCE zostawiaj bez grupy —
+            // one mają lecieć zawsze, także po pominięciu reszty.
+            public string Grupa;
+            // Warunek konieczny grupy. Gdy padnie, pozostałe kroki tej samej grupy są
+            // POMIJANE zamiast po kolei przewracać się na tym samym braku: na świeżym świecie
+            // (stacje wstają ~30 s) sekcja kontraktów przepalała na to ponad pół minuty
+            // czekania i wypluwała siedem identycznych porażek zamiast jednej wymownej.
+            public bool Bramka;
         }
 
         private readonly EventWriter _events;
         private readonly PriceManager _prices;
+        private readonly ContractManager _contracts;
+        private readonly ReputationSync _reputation;
+        private readonly RansomManager _ransom;
 
         private List<Krok> _kroki;
         private string _sekcja;
@@ -64,6 +111,8 @@ namespace ZyweFrakcje
         private int _pass;
         private int _fail;
         private int _warn;
+        // Grupa, której bramka padła — jej pozostałe kroki pomijamy (patrz Krok.Bramka).
+        private string _pominietaGrupa;
 
         // Stan dzielony między krokami sekcji „ceny" — bazowa oferta, na której mierzymy.
         private string _cenyTag;
@@ -71,14 +120,38 @@ namespace ZyweFrakcje
         private long _cenyOferta;
         private int _cenyBaza;
         private int _cenyIlosc;
+        // Cudzy sklep (frakcja spoza moda) — punkt kontrolny do N12.
+        private long _obcyBlok;
+        private long _obcaOferta;
+        private int _obcaCena;
+
+        // Sekcja „kontrakty": licznik rozstrzygnięć sprzed wywołania i lista do posprzątania.
+        private int _kontraktLicznik;
+        private readonly List<long> _kontraktyDoUsuniecia = new List<long>();
+
+        // Sekcja „floty": pozycja statku sprzed okna obserwacji (czy w ogóle leci) oraz
+        // liczba śledzonych siatek sprzed spawnu — po niej poznajemy NOWY kadłub.
+        private Vector3D _flotaPozycja;
+        private long _flotaGrid;
+        private int _flotaPrzed;
+
+        // Sekcja „boty": liczebność załogi sprzed powtórnego podejścia (P6).
+        private int _zalogaPrzed;
 
         // Siatki do posprzątania po teście (rekwizyty), żeby autotest nie zaśmiecał świata.
         private readonly List<IMyCubeGrid> _doSprzatniecia = new List<IMyCubeGrid>();
+        // Przywrócenia stanu świata (reputacja, cennik, żądania okupu). Odwijane ZAWSZE
+        // w podsumowaniu — także gdy krok w środku sekcji padł.
+        private readonly List<Action> _przywrocenia = new List<Action>();
 
-        public Autotest(EventWriter events, PriceManager prices)
+        public Autotest(EventWriter events, PriceManager prices, ContractManager contracts,
+                        ReputationSync reputation, RansomManager ransom)
         {
             _events = events;
             _prices = prices;
+            _contracts = contracts;
+            _reputation = reputation;
+            _ransom = ransom;
         }
 
         public bool Trwa { get { return _kroki != null; } }
@@ -100,9 +173,7 @@ namespace ZyweFrakcje
             switch (sekcja)
             {
                 case "szybkie":
-                    DodajStacje(kroki);
-                    DodajCeny(kroki);
-                    DodajRekwizyt(kroki);
+                    DodajSzybkie(kroki);
                     break;
                 case "stacje":
                     DodajStacje(kroki);
@@ -113,6 +184,15 @@ namespace ZyweFrakcje
                 case "rekwizyt":
                     DodajRekwizyt(kroki);
                     break;
+                case "kontrakty":
+                    DodajKontrakty(kroki);
+                    break;
+                case "reputacja":
+                    DodajReputacje(kroki);
+                    break;
+                case "okup":
+                    DodajOkup(kroki);
+                    break;
                 case "floty":
                     DodajFloty(kroki);
                     break;
@@ -120,15 +200,13 @@ namespace ZyweFrakcje
                     DodajBoty(kroki);
                     break;
                 case "wszystko":
-                    DodajStacje(kroki);
-                    DodajCeny(kroki);
-                    DodajRekwizyt(kroki);
+                    DodajSzybkie(kroki);
                     DodajFloty(kroki);
                     DodajBoty(kroki);
                     break;
                 default:
                     Powiedz("Nieznana sekcja \"" + sekcja + "\". Dozwolone: szybkie (domyślnie), " +
-                            "stacje, ceny, rekwizyt, floty, boty, wszystko.");
+                            "stacje, ceny, rekwizyt, kontrakty, reputacja, okup, floty, boty, wszystko.");
                     return;
             }
 
@@ -139,12 +217,28 @@ namespace ZyweFrakcje
             _pass = 0;
             _fail = 0;
             _warn = 0;
+            _pominietaGrupa = null;
             Powiedz("=== AUTOTEST [" + sekcja + "]: " + kroki.Count + " sprawdzeń ===");
             if (sekcja == "floty" || sekcja == "boty" || sekcja == "wszystko")
             {
                 Powiedz("UWAGA: ta sekcja spawnuje prawdziwe statki rajdowe — rób ją w KOSMOSIE " +
                         "i na świecie testowym.");
             }
+        }
+
+        /// <summary>
+        /// Zestaw „nic nie zepsuje": stan świata jest przywracany, żadne wrogie statki nie
+        /// lecą. Kontrakty i okup ZMIENIAJĄ świat na chwilę (zlecenie w terminalu, skrzynka
+        /// zrzutu), ale sprzątają po sobie w tym samym przebiegu.
+        /// </summary>
+        private void DodajSzybkie(List<Krok> kroki)
+        {
+            DodajStacje(kroki);
+            DodajCeny(kroki);
+            DodajRekwizyt(kroki);
+            DodajKontrakty(kroki);
+            DodajReputacje(kroki);
+            DodajOkup(kroki);
         }
 
         public void Update(int tick)
@@ -160,6 +254,13 @@ namespace ZyweFrakcje
             }
 
             Krok krok = _kroki[_index];
+            if (!_wystartowal && _pominietaGrupa != null && krok.Grupa == _pominietaGrupa)
+            {
+                Powiedz("POMINIĘTE " + krok.Nazwa + " — warunek konieczny sekcji nie jest spełniony");
+                _warn++;
+                Dalej();
+                return;
+            }
             if (!_wystartowal)
             {
                 _wystartowal = true;
@@ -184,6 +285,27 @@ namespace ZyweFrakcje
             }
             else if (tick - _startTick < krok.CzekajTikow)
             {
+                // Krok monotoniczny wolno zamknąć wcześniej, gdy warunek już zaszedł.
+                // Porażka w trakcie czekania nic nie znaczy — czekamy dalej, do końca okna.
+                if (!krok.Poll || krok.Sprawdz == null || (tick - _startTick) % PollCoTikow != 0)
+                {
+                    return;
+                }
+                string wczesniej;
+                try
+                {
+                    wczesniej = krok.Sprawdz();
+                }
+                catch (Exception)
+                {
+                    return; // jeszcze nie gotowe (np. cel dopiero powstaje) — nie hałasuj
+                }
+                if (!string.IsNullOrEmpty(wczesniej))
+                {
+                    return;
+                }
+                Zglos(krok, "");
+                Dalej();
                 return;
             }
 
@@ -225,32 +347,68 @@ namespace ZyweFrakcje
                 _fail++;
             }
 
+            // Padła bramka — reszta jej grupy nie ma czego sprawdzać.
+            if (!string.IsNullOrEmpty(blad) && krok.Bramka && krok.Grupa != null)
+            {
+                _pominietaGrupa = krok.Grupa;
+            }
+
             Powiedz(wynik + " " + krok.Nazwa + (string.IsNullOrEmpty(blad) ? "" : " — " + blad));
 
             // Ten sam wynik do events.jsonl: konsola brainu ma komplet obok reszty zdarzeń,
             // a plik zostaje jako ślad po przebiegu (do wklejenia w zgłoszeniu).
-            if (_events != null && !_events.Failed)
+            var data = new Dictionary<string, object>
             {
-                var data = new Dictionary<string, object>
-                {
-                    { "sekcja", _sekcja },
-                    { "nazwa", krok.Nazwa },
-                    { "wynik", wynik },
-                    { "opis", blad ?? "" },
-                };
-                var obj = new Dictionary<string, object>
-                {
-                    { "type", "autotest_result" },
-                    { "data", data },
-                };
-                _events.WriteRawEvent(Json.Stringify(obj));
-            }
+                { "sekcja", _sekcja },
+                { "nazwa", krok.Nazwa },
+                { "wynik", wynik },
+                { "opis", blad ?? "" },
+            };
+            Zdarzenie("autotest_result", data);
         }
 
         private void Podsumuj()
         {
             Powiedz("=== AUTOTEST [" + _sekcja + "] koniec: " + _pass + " PASS, " + _fail +
                     " FAIL, " + _warn + " OSTRZEŻEŃ ===");
+
+            // Zbiorczy wynik: bez niego konsola brainu widziała pojedyncze kroki, ale nie
+            // miała jak stwierdzić, że przebieg się SKOŃCZYŁ (ani czy nie urwał się w połowie).
+            // Liczby muszą iść jako double — Json.Stringify nie serializuje int/long.
+            var podsumowanie = new Dictionary<string, object>
+            {
+                { "sekcja", _sekcja },
+                { "pass", (double)_pass },
+                { "fail", (double)_fail },
+                { "warn", (double)_warn },
+                { "krokow", (double)(_kroki == null ? 0 : _kroki.Count) },
+            };
+            Zdarzenie("autotest_summary", podsumowanie);
+
+            Posprzataj();
+            _kroki = null;
+        }
+
+        /// <summary>
+        /// Odwija wszystko, co test zmienił w świecie. Wołane z podsumowania, więc leci także
+        /// po przebiegu, w którym połowa kroków padła — inaczej nieudany test zostawiałby
+        /// wrogą reputację albo skrzynkę zrzutu na stałe.
+        /// </summary>
+        private void Posprzataj()
+        {
+            for (int i = 0; i < _przywrocenia.Count; i++)
+            {
+                try
+                {
+                    _przywrocenia[i]();
+                }
+                catch (Exception e)
+                {
+                    Powiedz("sprzątanie: " + e.GetType().Name + ": " + e.Message);
+                }
+            }
+            _przywrocenia.Clear();
+
             for (int i = 0; i < _doSprzatniecia.Count; i++)
             {
                 if (_doSprzatniecia[i] != null && !_doSprzatniecia[i].MarkedForClose)
@@ -259,7 +417,20 @@ namespace ZyweFrakcje
                 }
             }
             _doSprzatniecia.Clear();
-            _kroki = null;
+        }
+
+        private void Zdarzenie(string typ, Dictionary<string, object> data)
+        {
+            if (_events == null || _events.Failed)
+            {
+                return;
+            }
+            var obj = new Dictionary<string, object>
+            {
+                { "type", typ },
+                { "data", data },
+            };
+            _events.WriteRawEvent(Json.Stringify(obj));
         }
 
         // ================= SEKCJA: STACJE (I1a-I1c) =================
@@ -311,10 +482,44 @@ namespace ZyweFrakcje
                         return "żadna siatka " + tag + " nie ma bloku sklepu";
                     },
                 });
+
+                // I1b. Pełny test („zapisz i wczytaj świat") wymaga reloadu, ale objaw, którego
+                // szukamy, jest widoczny od razu: druga stacja tej samej frakcji w świecie.
+                // Miękki, bo `/zf stacja` (rusztowanie testowe) legalnie robi drugą siatkę.
+                kroki.Add(new Krok
+                {
+                    Nazwa = "stacja " + tag + ": nie zdublowała się (I1b)",
+                    Miekki = true,
+                    Sprawdz = () =>
+                    {
+                        int ile = LiczSiatkiEkonomiczne(tag);
+                        return ile <= 1
+                            ? ""
+                            : "frakcja ma " + ile + " siatek z blokiem ekonomicznym — jeśli żadnej " +
+                              "nie oddałeś przez /zf stacja, StationSpawner postawił duplikat";
+                    },
+                });
             }
         }
 
-        // ================= SEKCJA: CENY (N1-N8) =================
+        /// <summary>Ile siatek frakcji niesie blok kontraktów albo sklepu (I1b).</summary>
+        private static int LiczSiatkiEkonomiczne(string tag)
+        {
+            long ignored;
+            int ile = 0;
+            List<IMyCubeGrid> siatki = FactionEconomy.FactionGrids(tag);
+            for (int g = 0; g < siatki.Count; g++)
+            {
+                if (FactionEconomy.HasBlockOfType(siatki[g], FactionEconomy.ContractType, out ignored) ||
+                    FactionEconomy.HasBlockOfType(siatki[g], FactionEconomy.StoreType, out ignored))
+                {
+                    ile++;
+                }
+            }
+            return ile;
+        }
+
+        // ================= SEKCJA: CENY (N1-N8, N12) =================
         // To jest test rozstrzygający dla całej sekcji N: sygnatury IMyStoreBlock nie były
         // potwierdzone dekompilacją, więc pierwsze pytanie brzmi „czy w ogóle widzimy oferty".
 
@@ -323,12 +528,16 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "ceny: mod widzi oferty w sklepie frakcji (GetStoreItems)",
+                Grupa = "ceny",
+                Bramka = true,
                 Sprawdz = () =>
                 {
                     if (_prices == null)
                     {
                         return "PriceManager nie wstał (BeforeStart) — cennika nie ma czym ruszyć";
                     }
+                    // Punkt kontrolny do N12 bierzemy PRZED pierwszą zmianą mnożnika.
+                    ZapamietajObcySklep();
                     for (int i = 0; i < Tagi.Length; i++)
                     {
                         int ofert;
@@ -336,6 +545,9 @@ namespace ZyweFrakcje
                                            out _cenyIlosc, out ofert) && ofert > 0)
                         {
                             _cenyTag = Tagi[i];
+                            // Cokolwiek pójdzie dalej nie tak, cennik ma wrócić do 1.00 bez embarga.
+                            string tag = _cenyTag;
+                            _przywrocenia.Add(() => Cennik(tag, 1.0, false, 0));
                             Powiedz("  (mierzę na " + _cenyTag + ": " + ofert + " ofert, cena bazowa " +
                                     _cenyBaza + " kr, ilość " + _cenyIlosc + ")");
                             return "";
@@ -349,16 +561,20 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "ceny: PricePerUnit jest zapisywalne (mnożnik 1.5)",
-                Start = () => Cennik(1.5, false, -50),
+                Grupa = "ceny",
+                Start = () => Cennik(_cenyTag, 1.5, false, -50),
                 CzekajTikow = Sekunda,
+                Poll = true,
                 Sprawdz = () => SprawdzCene(1.5),
             });
 
             kroki.Add(new Krok
             {
                 Nazwa = "ceny: mnożnik liczony od BAZY, nie od bieżącej (N5 — brak składania)",
-                Start = () => Cennik(2.0, false, -80),
+                Grupa = "ceny",
+                Start = () => Cennik(_cenyTag, 2.0, false, -80),
                 CzekajTikow = Sekunda,
+                Poll = true,
                 // Gdyby mnożnik składał się z poprzednim, zobaczylibyśmy baza*1.5*2.0.
                 Sprawdz = () => SprawdzCene(2.0),
             });
@@ -366,8 +582,10 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "ceny: embargo zdejmuje towar ze sklepu (Amount = 0)",
-                Start = () => Cennik(2.0, true, -80),
+                Grupa = "ceny",
+                Start = () => Cennik(_cenyTag, 2.0, true, -80),
                 CzekajTikow = Sekunda,
+                Poll = true,
                 Sprawdz = () =>
                 {
                     int cena, ilosc, ofert;
@@ -382,8 +600,10 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "ceny: zniesienie embarga wraca do bazy i do ilości sprzed embarga",
-                Start = () => Cennik(1.0, false, 0),
+                Grupa = "ceny",
+                Start = () => Cennik(_cenyTag, 1.0, false, 0),
                 CzekajTikow = Sekunda,
+                Poll = true,
                 Sprawdz = () =>
                 {
                     int cena, ilosc, ofert;
@@ -402,18 +622,108 @@ namespace ZyweFrakcje
                     return "";
                 },
             });
+
+            // N12 — cudzych sklepów nie ruszamy. Sprawdzane PO wszystkich zmianach mnożnika,
+            // bo dopiero wtedy ewentualny wyciek byłby widoczny.
+            kroki.Add(new Krok
+            {
+                Nazwa = "ceny: sklepy frakcji vanilla/MES nietknięte (N12)",
+                Grupa = "ceny",
+                Miekki = true,
+                Sprawdz = () =>
+                {
+                    if (_obcyBlok == 0)
+                    {
+                        return "w świecie nie ma sklepu obcej frakcji — nie ma czego pilnować " +
+                               "(to nie błąd, po prostu brak próbki)";
+                    }
+                    int cena, ilosc, ofert;
+                    if (!SzukajOfertyWBloku(_obcyBlok, _obcaOferta, out cena, out ilosc, out ofert))
+                    {
+                        return "oferta obcego sklepu zniknęła w trakcie testu — brak rozstrzygnięcia";
+                    }
+                    return cena == _obcaCena
+                        ? ""
+                        : "cena w OBCYM sklepie zmieniła się z " + _obcaCena + " na " + cena +
+                          " kr — mnożnik wycieka poza HEL/KRW/WGR";
+                },
+            });
+        }
+
+        /// <summary>Pierwsza oferta w sklepie frakcji SPOZA moda — punkt kontrolny do N12.</summary>
+        private void ZapamietajObcySklep()
+        {
+            _obcyBlok = 0;
+            _obcaOferta = 0;
+            _obcaCena = 0;
+
+            var pozycje = new List<IMyStoreItem>();
+            var bloki = new List<IMySlimBlock>();
+            List<IMyCubeGrid> siatki = FactionEconomy.FactionGrids(null);
+            for (int g = 0; g < siatki.Count; g++)
+            {
+                if (NaszaFrakcja(siatki[g]))
+                {
+                    continue;
+                }
+                bloki.Clear();
+                siatki[g].GetBlocks(bloki);
+                for (int b = 0; b < bloki.Count; b++)
+                {
+                    var sklep = SklepZBloku(bloki[b]);
+                    if (sklep == null)
+                    {
+                        continue;
+                    }
+                    pozycje.Clear();
+                    sklep.GetStoreItems(pozycje);
+                    for (int i = 0; i < pozycje.Count; i++)
+                    {
+                        if (pozycje[i] == null)
+                        {
+                            continue;
+                        }
+                        _obcyBlok = sklep.EntityId;
+                        _obcaOferta = pozycje[i].Id;
+                        _obcaCena = pozycje[i].PricePerUnit;
+                        return;
+                    }
+                }
+            }
+        }
+
+        private static bool NaszaFrakcja(IMyCubeGrid grid)
+        {
+            List<long> owners = grid.BigOwners;
+            if (owners == null || owners.Count == 0)
+            {
+                return false;
+            }
+            IMyFaction owner = MyAPIGateway.Session.Factions.TryGetPlayerFaction(owners[0]);
+            if (owner == null)
+            {
+                return false;
+            }
+            for (int i = 0; i < Tagi.Length; i++)
+            {
+                if (owner.Tag == Tagi[i])
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>Wysyła do PriceManagera taki sam ładunek, jaki przysłałby brain.</summary>
-        private void Cennik(double mnoznik, bool embargo, double relacja)
+        private void Cennik(string tag, double mnoznik, bool embargo, double relacja)
         {
-            if (_prices == null || string.IsNullOrEmpty(_cenyTag))
+            if (_prices == null || string.IsNullOrEmpty(tag))
             {
                 return;
             }
             var data = new Dictionary<string, object>
             {
-                { "faction", _cenyTag },
+                { "faction", tag },
                 { "modifier", mnoznik },
                 { "embargo", embargo },
                 { "value", relacja },
@@ -476,6 +786,7 @@ namespace ZyweFrakcje
                         SpawningOptions.SetNpcSpawnedGrid, wlasciciel, true, null);
                 },
                 CzekajTikow = 3 * Sekunda,
+                Poll = true,
                 Sprawdz = () =>
                 {
                     if (wynik.Count == 0)
@@ -483,7 +794,10 @@ namespace ZyweFrakcje
                         return "prefab " + RekwizytPrefab + " nie powstał — czy mod/Data/Prefabs się wczytał?";
                     }
                     IMyCubeGrid grid = wynik[0];
-                    _doSprzatniecia.Add(grid);
+                    if (!_doSprzatniecia.Contains(grid))
+                    {
+                        _doSprzatniecia.Add(grid);
+                    }
                     if (!grid.IsNpcSpawnedGrid)
                     {
                         return "grid NIE ma flagi IsNpcSpawnedGrid — zlecenia poszukiwań będą się " +
@@ -494,7 +808,612 @@ namespace ZyweFrakcje
             });
         }
 
-        // ================= SEKCJA: FLOTY (nowe, 2026-08-01) =================
+        // ================= SEKCJA: KONTRAKTY (I2, I13-I19b) =================
+        // Najważniejsza z nowych sekcji. Mod ma przy zleceniach OSTATNIE SŁOWO: gdy nie znajdzie
+        // w świecie celu (wrogiej tożsamości, drugiego bloku, uszkodzonej siatki…), po cichu
+        // wystawia DOSTAWĘ i to ona wraca w contract_created. Zlecenie powstaje, brain je
+        // utrwala, na czacie jest komunikat — i nikt nie zauważa, że zamówiony typ od tygodni
+        // nie działa. Tu każdy typ jest zamawiany po kolei i porównywany z tym, co NAPRAWDĘ
+        // powstało (ContractManager.OstatniTyp).
+
+        private void DodajKontrakty(List<Krok> kroki)
+        {
+            kroki.Add(new Krok
+            {
+                Nazwa = "kontrakty: bramka (ContractSystem, ekonomia świata, blok frakcji)",
+                Grupa = "kontrakty",
+                Bramka = true,
+                Sprawdz = () =>
+                {
+                    if (_contracts == null)
+                    {
+                        return "ContractManager nie wstał (BeforeStart) — zlecenia nie powstaną";
+                    }
+                    if (MyAPIGateway.ContractSystem == null)
+                    {
+                        return "ta wersja gry nie ma ContractSystem";
+                    }
+                    if (MyAPIGateway.Session.SessionSettings != null &&
+                        !MyAPIGateway.Session.SessionSettings.EnableEconomy)
+                    {
+                        return "w ustawieniach świata WYŁĄCZONA jest ekonomia — gra nie przyjmie " +
+                               "żadnego zlecenia";
+                    }
+                    if (FactionEconomy.FindContractBlock("WGR") == null)
+                    {
+                        return "WGR nie ma bloku kontraktów ani sklepu (patrz sekcja stacje)";
+                    }
+                    // Zlecenia z tego przebiegu kasujemy nawet wtedy, gdy sekcja padnie w środku.
+                    _przywrocenia.Add(UsunKontraktyTestowe);
+                    return "";
+                },
+            });
+
+            // dostawa musi wyjść ZAWSZE — to fallback dla wszystkich pozostałych typów.
+            // Jeśli nie wychodzi ona, cała mechanika zleceń leży.
+            DodajKontraktTyp(kroki, "WGR", "dostawa", null, false, 2 * Sekunda);
+
+            // Typy z celem w świecie. Miękkie, bo zejście na dostawę BYWA poprawną odpowiedzią
+            // (np. transport bez drugiej stacji) — chodzi o to, żeby było WIDAĆ, że zeszło,
+            // i z jakiego powodu, zamiast dowiadywać się o tym po miesiącu.
+            DodajKontraktTyp(kroki, "KRW", "nagroda", "HEL", true, 2 * Sekunda);
+            DodajKontraktTyp(kroki, "WGR", "transport", null, true, 2 * Sekunda);
+            DodajKontraktTyp(kroki, "HEL", "eskorta", null, true, 2 * Sekunda);
+            // Te dwa najpierw STAWIAJĄ rekwizyt (SpawnPrefab jest asynchroniczny), stąd
+            // dłuższe okno — kontrakt powstaje dopiero w callbacku spawnu.
+            DodajKontraktTyp(kroki, "WGR", "naprawa", null, true, 12 * Sekunda);
+            DodajKontraktTyp(kroki, "WGR", "poszukiwania", null, true, 12 * Sekunda);
+            // wlasne ma wagę 0 w configu (typ bez warunku wykonania) — sprawdzamy tylko, czy
+            // definicja z ContractTypes.sbc w ogóle się wczytała.
+            DodajKontraktTyp(kroki, "KRW", "wlasne", null, true, 2 * Sekunda);
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "kontrakty: Duration jest w MINUTACH, a zlecenie wisi na bloku frakcji",
+                Grupa = "kontrakty",
+                Sprawdz = () =>
+                {
+                    if (_kontraktyDoUsuniecia.Count == 0)
+                    {
+                        return "żadne zlecenie nie powstało — nie ma czego sprawdzić";
+                    }
+                    long id = _kontraktyDoUsuniecia[_kontraktyDoUsuniecia.Count - 1];
+                    EconomyBlock blok = FactionEconomy.FindContractBlock("KRW");
+                    if (blok == null)
+                    {
+                        blok = FactionEconomy.FindContractBlock("WGR");
+                    }
+                    if (blok == null)
+                    {
+                        return "nie ma bloku, na którym można by odczytać zlecenie";
+                    }
+                    List<IMyContract> naBloku =
+                        MyAPIGateway.ContractSystem.GetAvailableContractsForBlock(blok.BlockId);
+                    foreach (IMyContract kontrakt in naBloku)
+                    {
+                        if (kontrakt.Id != id)
+                        {
+                            continue;
+                        }
+                        // 45 zamówione i 45 odczytane = gra bierze MINUTY. Gdy kiedyś wrócimy
+                        // do sekund (durationMin * 60), zobaczymy tu 2700 i test krzyknie.
+                        return kontrakt.Duration == KontraktCzasMin
+                            ? ""
+                            : "Duration = " + kontrakt.Duration + ", a zamawialiśmy " +
+                              KontraktCzasMin + " (jednostka się rozjechała)";
+                    }
+                    // Zlecenie mogło powstać na bloku innej frakcji niż zgadywana — to nie błąd
+                    // jednostki czasu, więc nie zgłaszamy FAIL-a o Duration.
+                    return "zlecenia #" + id + " nie ma na bloku " + (blok.GridName ?? "?") +
+                           " — sprawdź /zf kontrakty (powstało na innej stacji?)";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "kontrakty: sprzątanie (kasowanie zleceń i rekwizytów autotestu)",
+                Start = () =>
+                {
+                    UsunKontraktyTestowe();
+                    ZbierzRekwizytDoSprzatniecia(NazwaZgubki);
+                    ZbierzRekwizytDoSprzatniecia(NazwaWraku);
+                },
+                Sprawdz = () => "",
+            });
+        }
+
+        /// <summary>
+        /// Jeden typ zlecenia: zamów u frakcji, odczekaj na rozstrzygnięcie, porównaj typ
+        /// zamówiony z tym, który NAPRAWDĘ powstał.
+        /// </summary>
+        private void DodajKontraktTyp(List<Krok> kroki, string tag, string typ, string cel,
+                                      bool miekki, int okno)
+        {
+            kroki.Add(new Krok
+            {
+                Nazwa = "zlecenie " + tag + " \"" + typ + "\": powstaje i NIE schodzi po cichu na dostawę",
+                Grupa = "kontrakty",
+                Miekki = miekki,
+                Start = () =>
+                {
+                    if (_contracts == null)
+                    {
+                        return;
+                    }
+                    _kontraktLicznik = _contracts.LicznikRozstrzygniec;
+                    _contracts.Create(tag, typ, KontraktNagroda, KontraktCzasMin, cel);
+                },
+                CzekajTikow = okno,
+                Poll = true,
+                Sprawdz = () => SprawdzKontrakt(typ),
+            });
+        }
+
+        private string SprawdzKontrakt(string zadany)
+        {
+            if (_contracts == null)
+            {
+                return "ContractManager nie wstał (BeforeStart)";
+            }
+            if (_contracts.LicznikRozstrzygniec == _kontraktLicznik)
+            {
+                return "brak rozstrzygnięcia — Create() nie doszedł do końca (rekwizyt się nie " +
+                       "postawił i callback spawnu nigdy nie przyszedł?)";
+            }
+            if (_contracts.OstatnieId != 0 && !_kontraktyDoUsuniecia.Contains(_contracts.OstatnieId))
+            {
+                _kontraktyDoUsuniecia.Add(_contracts.OstatnieId);
+            }
+            if (_contracts.OstatniTyp == null)
+            {
+                return "zlecenie NIE powstało: " + (_contracts.OstatniPowod ?? "gra odmówiła bez powodu");
+            }
+            if (_contracts.OstatniTyp != zadany)
+            {
+                return "zeszło na \"" + _contracts.OstatniTyp + "\" (" +
+                       (_contracts.OstatniPowod ?? "bez podanego powodu") + ")";
+            }
+            return "";
+        }
+
+        private void UsunKontraktyTestowe()
+        {
+            if (_contracts == null)
+            {
+                return;
+            }
+            for (int i = 0; i < _kontraktyDoUsuniecia.Count; i++)
+            {
+                _contracts.UsunSledzony(_kontraktyDoUsuniecia[i]);
+            }
+            _kontraktyDoUsuniecia.Clear();
+        }
+
+        /// <summary>
+        /// Rekwizyty postawione w trakcie testu idą do sprzątania razem z resztą. Zbieramy
+        /// WSZYSTKIE pasujące siatki, nie najbliższą: jedno wywołanie `poszukiwania` gubi moduł
+        /// 8 km stąd, a sekcja „rekwizyt" stawia drugi 300 m przed graczem — <c>TryFindProp</c>
+        /// zwróciłby tylko jeden z nich i ten dalszy zostałby w świecie na zawsze.
+        /// </summary>
+        private void ZbierzRekwizytDoSprzatniecia(string nazwa)
+        {
+            var entities = new HashSet<VRage.ModAPI.IMyEntity>();
+            MyAPIGateway.Entities.GetEntities(entities, e => e is IMyCubeGrid);
+            foreach (VRage.ModAPI.IMyEntity entity in entities)
+            {
+                var grid = entity as IMyCubeGrid;
+                if (grid == null || grid.MarkedForClose || grid.DisplayName == null ||
+                    !grid.DisplayName.StartsWith(nazwa, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                if (!_doSprzatniecia.Contains(grid))
+                {
+                    _doSprzatniecia.Add(grid);
+                }
+            }
+        }
+
+        // ================= SEKCJA: REPUTACJA (M1-M3, M5, M7) =================
+        // Hybryda: brain liczy relację, mod przepisuje ją na natywną reputację SE. Cała
+        // sekcja M była dotąd wyłącznie ręczna, a to czysta arytmetyka na API — nie ma
+        // powodu, żeby człowiek klikał okno frakcji i porównywał liczby.
+
+        private void DodajReputacje(List<Krok> kroki)
+        {
+            const string tag = "HEL";
+            const int celWrogi = -600;   // poniżej progu gry (-500): etykieta „wróg"
+            const int celSojusz = 700;   // powyżej progu gry (+500): etykieta „sojusznik"
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "reputacja: bramka (jest frakcja, gracz i ReputationSync)",
+                Grupa = "reputacja",
+                Bramka = true,
+                Sprawdz = () =>
+                {
+                    if (_reputation == null)
+                    {
+                        return "ReputationSync nie wstał (BeforeStart)";
+                    }
+                    if (MyAPIGateway.Session.Player == null)
+                    {
+                        return "brak sesji gracza";
+                    }
+                    if (MyAPIGateway.Session.Factions == null ||
+                        MyAPIGateway.Session.Factions.TryGetFactionByTag(tag) == null)
+                    {
+                        return "nie ma frakcji " + tag + " w świecie (NOWY świat jest wymagany — " +
+                               "frakcje IsDefault powstają przy generowaniu)";
+                    }
+                    // Zapamiętaj, co miał brain, i oddaj to po teście. Gdy brain nie działa,
+                    // celu nie było — wtedy po prostu przestajemy pilnować naszego.
+                    int bylVanilla;
+                    double bylaWartosc;
+                    bool byl = _reputation.TryGetCel(tag, "", out bylVanilla, out bylaWartosc);
+                    int przedTestem = ReputacjaWGrze(tag);
+                    _przywrocenia.Add(() =>
+                    {
+                        if (byl)
+                        {
+                            Reputacja(tag, "", bylVanilla, bylaWartosc);
+                        }
+                        else
+                        {
+                            _reputation.Zapomnij(tag, "");
+                            UstawReputacjeWprost(tag, przedTestem);
+                        }
+                    });
+                    ZapamietajObceReputacje();
+                    return "";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "reputacja: cel z brainu ląduje w grze i daje etykietę WRÓG (M2/M3)",
+                Grupa = "reputacja",
+                Start = () => Reputacja(tag, "", celWrogi, -60),
+                CzekajTikow = Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    int wGrze = ReputacjaWGrze(tag);
+                    if (wGrze != celWrogi)
+                    {
+                        return "gra ma " + wGrze + ", a cel to " + celWrogi +
+                               " — SetReputationBetweenPlayerAndFaction nie zadziałało";
+                    }
+                    return wGrze <= -500
+                        ? ""
+                        : "wartość zapisana, ale powyżej progu wroga (-500) — okno frakcji " +
+                          "pokaże neutralność mimo naszej wojny";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "reputacja: dodatnia strona skali i etykieta SOJUSZNIK",
+                Grupa = "reputacja",
+                Start = () => Reputacja(tag, "", celSojusz, 60),
+                CzekajTikow = Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    int wGrze = ReputacjaWGrze(tag);
+                    if (wGrze != celSojusz)
+                    {
+                        return "gra ma " + wGrze + ", a cel to " + celSojusz;
+                    }
+                    return wGrze >= 500 ? "" : "wartość zapisana, ale poniżej progu sojusznika (+500)";
+                },
+            });
+
+            // SEDNO hybrydy (M5). Gra sama rusza reputację (nagrody kontraktów vanilla);
+            // bez tego przywracania to samo zdarzenie liczyłoby się dwa razy — raz u nas,
+            // raz w ekonomii gry. ReputationSync sprawdza cele co ~5 s, więc okno musi być
+            // dłuższe niż jeden taki cykl.
+            kroki.Add(new Krok
+            {
+                Nazwa = "reputacja: mod przywraca cel, gdy gra ruszy wartość po swojemu (M5)",
+                Grupa = "reputacja",
+                Start = () =>
+                {
+                    Reputacja(tag, "", celWrogi, -60);
+                    UstawReputacjeWprost(tag, 0); // udajemy nagrodę reputacyjną z kontraktu vanilla
+                },
+                CzekajTikow = 8 * Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    int wGrze = ReputacjaWGrze(tag);
+                    return wGrze == celWrogi
+                        ? ""
+                        : "po 8 s gra dalej ma " + wGrze + " zamiast " + celWrogi +
+                          " — cel nie jest pilnowany, nasza liczba i okno frakcji się rozjadą";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "reputacja: polityka frakcja↔frakcja (SetReputation)",
+                Grupa = "reputacja",
+                Start = () =>
+                {
+                    // Wartości początkowe są konieczne: przy _reputation == null wyrażenie
+                    // zwiera się przed wywołaniem i kompilator nie uzna out-parametrów
+                    // za przypisane.
+                    int bylVanilla = 0;
+                    double bylaWartosc = 0;
+                    bool byl = _reputation != null &&
+                               _reputation.TryGetCel("HEL", "KRW", out bylVanilla, out bylaWartosc);
+                    int przed = bylVanilla;
+                    double przedW = bylaWartosc;
+                    _przywrocenia.Add(() =>
+                    {
+                        if (byl)
+                        {
+                            Reputacja("HEL", "KRW", przed, przedW);
+                        }
+                        else if (_reputation != null)
+                        {
+                            _reputation.Zapomnij("HEL", "KRW");
+                        }
+                    });
+                    Reputacja("HEL", "KRW", -900, -70);
+                },
+                CzekajTikow = Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    IMyFactionCollection frakcje = MyAPIGateway.Session.Factions;
+                    IMyFaction hel = frakcje.TryGetFactionByTag("HEL");
+                    IMyFaction krw = frakcje.TryGetFactionByTag("KRW");
+                    if (hel == null || krw == null)
+                    {
+                        return "brak HEL albo KRW w świecie";
+                    }
+                    int wGrze = frakcje.GetReputationBetweenFactions(hel.FactionId, krw.FactionId);
+                    return wGrze == -900
+                        ? ""
+                        : "gra ma " + wGrze + " zamiast -900 — polityka frakcji nie doszła";
+                },
+            });
+
+            // M7 — reputacji frakcji vanilla nie wolno nam ruszać.
+            kroki.Add(new Krok
+            {
+                Nazwa = "reputacja: frakcje vanilla (SPRT/UNIV/…) nietknięte (M7)",
+                Grupa = "reputacja",
+                Miekki = true,
+                Sprawdz = SprawdzObceReputacje,
+            });
+        }
+
+        // Reputacje frakcji spoza moda sprzed testu — punkt kontrolny do M7.
+        private readonly Dictionary<string, int> _obceReputacje = new Dictionary<string, int>();
+
+        private void ZapamietajObceReputacje()
+        {
+            _obceReputacje.Clear();
+            for (int i = 0; i < TagiVanilla.Length; i++)
+            {
+                if (MyAPIGateway.Session.Factions.TryGetFactionByTag(TagiVanilla[i]) == null)
+                {
+                    continue;
+                }
+                _obceReputacje[TagiVanilla[i]] = ReputacjaWGrze(TagiVanilla[i]);
+            }
+        }
+
+        private string SprawdzObceReputacje()
+        {
+            if (_obceReputacje.Count == 0)
+            {
+                return "w świecie nie ma żadnej znanej frakcji vanilla — nie ma czego pilnować";
+            }
+            foreach (KeyValuePair<string, int> kv in _obceReputacje)
+            {
+                int teraz = ReputacjaWGrze(kv.Key);
+                if (teraz != kv.Value)
+                {
+                    return kv.Key + ": reputacja zmieniła się z " + kv.Value + " na " + teraz +
+                           " — synchronizujemy tylko HEL/KRW/WGR, coś wycieka";
+                }
+            }
+            return "";
+        }
+
+        /// <summary>Wysyła do ReputationSync taki sam ładunek, jaki przysłałby brain.</summary>
+        private void Reputacja(string tag, string other, int vanilla, double wartosc)
+        {
+            if (_reputation == null)
+            {
+                return;
+            }
+            var data = new Dictionary<string, object>
+            {
+                { "faction", tag },
+                { "other", other ?? "" },
+                { "vanilla", (double)vanilla },
+                { "value", wartosc },
+            };
+            _reputation.Handle(data);
+        }
+
+        private static int ReputacjaWGrze(string tag)
+        {
+            IMyFactionCollection frakcje = MyAPIGateway.Session.Factions;
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (frakcje == null || gracz == null)
+            {
+                return 0;
+            }
+            IMyFaction fac = frakcje.TryGetFactionByTag(tag);
+            return fac == null
+                ? 0
+                : frakcje.GetReputationBetweenPlayerAndFaction(gracz.IdentityId, fac.FactionId);
+        }
+
+        /// <summary>Zapis z pominięciem ReputationSync — udajemy grę ruszającą reputację sama.</summary>
+        private static void UstawReputacjeWprost(string tag, int wartosc)
+        {
+            IMyFactionCollection frakcje = MyAPIGateway.Session.Factions;
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (frakcje == null || gracz == null)
+            {
+                return;
+            }
+            IMyFaction fac = frakcje.TryGetFactionByTag(tag);
+            if (fac != null)
+            {
+                frakcje.SetReputationBetweenPlayerAndFaction(gracz.IdentityId, fac.FactionId, wartosc);
+            }
+        }
+
+        // ================= SEKCJA: OKUP (K2, K5, K6) =================
+        // Żądanie trybutu w surowcach. Samej DOSTAWY towaru autotest nie zrobi (to gracz
+        // przekłada ładunek do skrzynki), ale wszystko dookoła — powstanie skrzynki, GPS,
+        // odporność na sprzątacz śmieci i skasowanie żądania przy pokoju — jest sprawdzalne.
+
+        private void DodajOkup(List<Krok> kroki)
+        {
+            const string tag = "KRW";
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "okup: żądanie trybutu stawia skrzynkę zrzutu (K2)",
+                Grupa = "okup",
+                Bramka = true,
+                Start = () =>
+                {
+                    if (_ransom == null || MyAPIGateway.Session.Player == null)
+                    {
+                        return;
+                    }
+                    // Cokolwiek pójdzie dalej nie tak, żądanie ma zniknąć razem ze skrzynką.
+                    _przywrocenia.Add(() => _ransom.Cancel(tag));
+                    var data = new Dictionary<string, object>
+                    {
+                        { "faction", tag },
+                        { "item", "Nickel" },
+                        { "amount", 700.0 },
+                        { "deadline_s", 900.0 },
+                    };
+                    _ransom.HandleDemand(data, _startTick);
+                },
+                CzekajTikow = 8 * Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    if (_ransom == null)
+                    {
+                        return "RansomManager nie wstał (BeforeStart)";
+                    }
+                    bool skrzynkaStoi;
+                    if (!_ransom.MaPending(tag, out skrzynkaStoi))
+                    {
+                        return "żądanie nie zostało przyjęte (brak gracza? nieznany surowiec?)";
+                    }
+                    return skrzynkaStoi
+                        ? ""
+                        : "żądanie wisi, ale skrzynka nie powstała — sprawdź prefab ZF_DropCrate";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "okup: skrzynka stoi w świecie i ma GPS (K6 — nie zjadł jej sprzątacz)",
+                Grupa = "okup",
+                Sprawdz = () =>
+                {
+                    IMyPlayer gracz = MyAPIGateway.Session.Player;
+                    if (gracz == null)
+                    {
+                        return "brak sesji gracza";
+                    }
+                    long gridId;
+                    string gridName;
+                    if (!FactionEconomy.TryFindProp(NazwaSkrzynki, gracz.GetPosition(), 0,
+                                                    out gridId, out gridName))
+                    {
+                        return "w świecie nie ma siatki \"" + NazwaSkrzynki + "\" — prefab jest " +
+                               "statyczny i ma baterię, więc sprzątacz śmieci nie powinien jej ruszyć";
+                    }
+                    return MaGps("ZRZUT " + tag)
+                        ? ""
+                        : "skrzynka stoi, ale nie ma punktu GPS \"ZRZUT " + tag +
+                          "\" — gracz jej nie znajdzie";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "okup: pokój kasuje żądanie — skrzynka i GPS znikają (K5)",
+                Grupa = "okup",
+                Start = () =>
+                {
+                    if (_ransom != null)
+                    {
+                        _ransom.Cancel(tag);
+                    }
+                },
+                CzekajTikow = 3 * Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    if (_ransom == null)
+                    {
+                        return "RansomManager nie wstał (BeforeStart)";
+                    }
+                    bool skrzynkaStoi;
+                    if (_ransom.MaPending(tag, out skrzynkaStoi))
+                    {
+                        return "żądanie dalej wisi po Cancel — po deadline przyjdzie kara za " +
+                               "złamaną obietnicę mimo zawartego pokoju";
+                    }
+                    if (MaGps("ZRZUT " + tag))
+                    {
+                        return "GPS \"ZRZUT " + tag + "\" został na mapie";
+                    }
+                    IMyPlayer gracz = MyAPIGateway.Session.Player;
+                    long gridId;
+                    string gridName;
+                    if (gracz != null &&
+                        FactionEconomy.TryFindProp(NazwaSkrzynki, gracz.GetPosition(), 0,
+                                                   out gridId, out gridName))
+                    {
+                        return "skrzynka zrzutu została w świecie";
+                    }
+                    return "";
+                },
+            });
+        }
+
+        private static bool MaGps(string nazwa)
+        {
+            IMyPlayer gracz = MyAPIGateway.Session == null ? null : MyAPIGateway.Session.Player;
+            if (gracz == null)
+            {
+                return false;
+            }
+            List<IMyGps> lista = MyAPIGateway.Session.GPS.GetGpsList(gracz.IdentityId);
+            if (lista == null)
+            {
+                return false;
+            }
+            for (int i = 0; i < lista.Count; i++)
+            {
+                if (lista[i] != null && lista[i].Name != null &&
+                    lista[i].Name.StartsWith(nazwa, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ================= SEKCJA: FLOTY (O1-O5) =================
 
         private void DodajFloty(List<Krok> kroki)
         {
@@ -506,6 +1425,7 @@ namespace ZyweFrakcje
                     Nazwa = "flota " + tag + ": rajd faktycznie staje w świecie",
                     Start = () => TestSpawner.SpawnForFaction(tag, "raid"),
                     CzekajTikow = 8 * Sekunda,
+                    Poll = true,
                     Sprawdz = () =>
                     {
                         List<IMyCubeGrid> siatki = TestSpawner.SledzoneSiatki(tag);
@@ -548,6 +1468,19 @@ namespace ZyweFrakcje
                 });
             }
 
+            // O3 — obecność bloku zdalnego sterowania to dopiero POŁOWA odpowiedzi. Pytanie,
+            // które naprawdę bolało (dryfujące konwoje), brzmi: czy RivalAI tego bloku UŻYWA.
+            // Widać to wyłącznie po tym, że kadłub zmienia pozycję. Statek KRW już stoi
+            // w świecie po krokach wyżej — mierzymy jego, bez nowego spawnu.
+            DodajRuch(kroki, "KRW", "raid", false,
+                      "rajdowy statek KRW LECI (RivalAI prowadzi, nie dryf)");
+
+            // O5 — konwój na zachowaniu ZF_Konwoj ma jechać trasą, a nie dryfować po prostej.
+            // Tu spawn jest KONIECZNY: w śledzonych siatkach WGR wisi już rajd z kroków wyżej,
+            // a to jego zmierzylibyśmy zamiast konwoju.
+            DodajRuch(kroki, "WGR", "convoy", true,
+                      "konwój WGR jedzie trasą (ZF_Konwoj + autopilot MES)");
+
             kroki.Add(new Krok
             {
                 Nazwa = "flota: sprzątanie (stand_down wszystkich rajdów autotestu)",
@@ -562,7 +1495,82 @@ namespace ZyweFrakcje
             });
         }
 
-        // ================= SEKCJA: BOTY (nowe, 2026-08-01) =================
+        /// <summary>
+        /// Czy statek tej frakcji faktycznie się przemieszcza. Dryfujący kadłub też zmienia
+        /// pozycję, więc próg jest wysoki (200 m w oknie 30 s) — tyle nie da się „przypadkiem"
+        /// przelecieć z samej bezwładności po spawnie.
+        /// <paramref name="spawnuj"/> mówi, czy zamówić NOWY kadłub (konwój), czy zmierzyć ten,
+        /// który stoi już w świecie po wcześniejszych krokach sekcji (rajd).
+        /// </summary>
+        private void DodajRuch(List<Krok> kroki, string tag, string rodzaj, bool spawnuj, string nazwa)
+        {
+            const double ProgMetrow = 200;
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "flota: " + nazwa,
+                Miekki = true, // bez MES albo na planecie nie ma czego mierzyć
+                Start = () =>
+                {
+                    _flotaGrid = 0;
+                    _flotaPrzed = TestSpawner.SledzoneSiatki(tag).Count;
+                    if (spawnuj)
+                    {
+                        // Nowy kadłub złapiemy dopiero, gdy lista śledzonych urośnie —
+                        // inaczej mierzylibyśmy statek z poprzednich kroków sekcji.
+                        TestSpawner.SpawnForFaction(tag, rodzaj);
+                        return;
+                    }
+                    if (_flotaPrzed == 0)
+                    {
+                        return;
+                    }
+                    IMyCubeGrid grid = TestSpawner.SledzoneSiatki(tag)[_flotaPrzed - 1];
+                    if (grid != null)
+                    {
+                        _flotaGrid = grid.EntityId;
+                        _flotaPozycja = grid.GetPosition();
+                    }
+                },
+                CzekajTikow = 30 * Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    // Statek zamówiony dopiero w Start — złap go przy pierwszym sprawdzeniu.
+                    if (_flotaGrid == 0)
+                    {
+                        List<IMyCubeGrid> siatki = TestSpawner.SledzoneSiatki(tag);
+                        if (siatki.Count <= (spawnuj ? _flotaPrzed : 0))
+                        {
+                            return "statek " + tag + " (" + rodzaj + ") się nie pojawił — patrz " +
+                                   "poprzednie kroki sekcji";
+                        }
+                        IMyCubeGrid swiezy = siatki[siatki.Count - 1];
+                        if (swiezy == null)
+                        {
+                            return "statek zniknął zaraz po spawnie";
+                        }
+                        _flotaGrid = swiezy.EntityId;
+                        _flotaPozycja = swiezy.GetPosition();
+                        return "dopiero co złapany — mierzę dystans od teraz";
+                    }
+                    var grid2 = MyAPIGateway.Entities.GetEntityById(_flotaGrid) as IMyCubeGrid;
+                    if (grid2 == null || grid2.MarkedForClose)
+                    {
+                        // Konwój, który doleciał do końca trasy i zdespawnował, ZDAŁ ten test.
+                        return "";
+                    }
+                    double dystans = Vector3D.Distance(_flotaPozycja, grid2.GetPosition());
+                    return dystans >= ProgMetrow
+                        ? ""
+                        : "przebył " + (int)dystans + " m w oknie obserwacji (próg " +
+                          (int)ProgMetrow + " m) — kadłub stoi albo dryfuje, autopilot go " +
+                          "nie prowadzi";
+                },
+            });
+        }
+
+        // ================= SEKCJA: BOTY (P1-P3, P6) =================
 
         private void DodajBoty(List<Krok> kroki)
         {
@@ -571,6 +1579,7 @@ namespace ZyweFrakcje
                 Nazwa = "boty: załoga na stacji frakcji (zależność miękka — AiEnabled)",
                 Miekki = true,
                 CzekajTikow = 5 * Sekunda,
+                Poll = true,
                 Sprawdz = () =>
                 {
                     for (int i = 0; i < Tagi.Length; i++)
@@ -591,12 +1600,45 @@ namespace ZyweFrakcje
                 },
             });
 
+            // P3 — SEDNO integracji z AiEnabled: bot musi NALEŻEĆ do frakcji, bo tylko wtedy
+            // jego wrogość leci po natywnej reputacji, czyli po naszej hybrydzie. Bezpański
+            // NPC nigdy nie zmieni nastawienia po zmianie relacji.
+            kroki.Add(new Krok
+            {
+                Nazwa = "boty: załoga należy do frakcji, a nie jest bezpańska (P3)",
+                Miekki = true,
+                Sprawdz = () =>
+                {
+                    for (int i = 0; i < Tagi.Length; i++)
+                    {
+                        EconomyBlock stacja = FactionEconomy.FindContractBlock(Tagi[i]);
+                        if (stacja == null)
+                        {
+                            continue;
+                        }
+                        int wszystkie, weFrakcji;
+                        PoliczZaloge(stacja.Position, 150, Tagi[i], out wszystkie, out weFrakcji);
+                        if (wszystkie == 0)
+                        {
+                            continue;
+                        }
+                        return weFrakcji > 0
+                            ? ""
+                            : "przy stacji " + Tagi[i] + " jest " + wszystkie + " postaci NPC, ale " +
+                              "ŻADNA nie należy do frakcji — MES/AiEnabled nie zawołało " +
+                              "SetPlayersFaction, więc bot nie zareaguje na zmianę relacji";
+                    }
+                    return "nie ma przy stacjach żadnej postaci NPC do sprawdzenia (brak AiEnabled?)";
+                },
+            });
+
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na statku rajdowym (trigger PlayerNear 1,5 km)",
                 Miekki = true,
                 Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
                 CzekajTikow = 20 * Sekunda,
+                Poll = true,
                 Sprawdz = () =>
                 {
                     List<IMyCubeGrid> siatki = TestSpawner.SledzoneSiatki("KRW");
@@ -612,6 +1654,29 @@ namespace ZyweFrakcje
                     int ile = PoliczPostacie(grid.GetPosition(), 200);
                     return ile > 0 ? "" : "na pokładzie nie ma nikogo (profil ZF_Bot_KRW_* / akcja " +
                                           "AddBotsToGrid / trigger PlayerNear — podejdź bliżej niż 1,5 km)";
+                },
+            });
+
+            // P6 — załoga nie może się mnożyć przy każdym przebiegu CrewSpawnera. Idempotencja
+            // jest liczona po POSTACIACH w promieniu, nie po zapisie w storage, więc jedyny
+            // sposób, by to sprawdzić, to policzyć dwa razy w odstępie dłuższym niż jego cykl.
+            kroki.Add(new Krok
+            {
+                Nazwa = "boty: załoga się nie mnoży przy kolejnych przebiegach (P6)",
+                Miekki = true,
+                Start = () => { _zalogaPrzed = PoliczZalogeStacji(); },
+                CzekajTikow = 12 * Sekunda,
+                Sprawdz = () =>
+                {
+                    if (_zalogaPrzed == 0)
+                    {
+                        return "nie ma przy stacjach załogi do policzenia (brak AiEnabled?)";
+                    }
+                    int teraz = PoliczZalogeStacji();
+                    return teraz <= _zalogaPrzed
+                        ? ""
+                        : "załoga urosła z " + _zalogaPrzed + " do " + teraz +
+                          " bez powodu — CrewSpawner dosypuje botów przy każdym przebiegu";
                 },
             });
 
@@ -641,6 +1706,34 @@ namespace ZyweFrakcje
                                 out ilosc, out ofert);
         }
 
+        /// <summary>Oferta w KONKRETNYM bloku, bez wiedzy o frakcji — do kontroli obcych sklepów.</summary>
+        private static bool SzukajOfertyWBloku(long blokId, long ofertaId, out int cena, out int ilosc,
+                                               out int ofert)
+        {
+            cena = 0;
+            ilosc = 0;
+            ofert = 0;
+            var sklep = MyAPIGateway.Entities.GetEntityById(blokId) as IMyStoreBlock;
+            if (sklep == null)
+            {
+                return false;
+            }
+            var pozycje = new List<IMyStoreItem>();
+            sklep.GetStoreItems(pozycje);
+            ofert = pozycje.Count;
+            for (int i = 0; i < pozycje.Count; i++)
+            {
+                if (pozycje[i] == null || pozycje[i].Id != ofertaId)
+                {
+                    continue;
+                }
+                cena = pozycje[i].PricePerUnit;
+                ilosc = pozycje[i].Amount;
+                return true;
+            }
+            return false;
+        }
+
         // Ten sam sposób dobierania się do ofert co PriceManager: MODOWY IMyStoreBlock
         // (ten z Ingame ma tylko Insert/Cancel/GetPlayerStoreItems i nie widzi ofert gry).
         private static bool SzukajOferty(string tag, long szukanyBlok, long szukanaOferta,
@@ -666,18 +1759,7 @@ namespace ZyweFrakcje
                 siatki[g].GetBlocks(bloki);
                 for (int b = 0; b < bloki.Count; b++)
                 {
-                    IMyCubeBlock fat = bloki[b].FatBlock;
-                    if (fat == null)
-                    {
-                        continue;
-                    }
-                    string typeId = fat.BlockDefinition.TypeIdString;
-                    if (typeId == null ||
-                        typeId.IndexOf(FactionEconomy.StoreType, StringComparison.OrdinalIgnoreCase) < 0)
-                    {
-                        continue;
-                    }
-                    var sklep = fat as IMyStoreBlock;
+                    IMyStoreBlock sklep = SklepZBloku(bloki[b]);
                     if (sklep == null)
                     {
                         continue;
@@ -711,6 +1793,22 @@ namespace ZyweFrakcje
             return false;
         }
 
+        private static IMyStoreBlock SklepZBloku(IMySlimBlock slim)
+        {
+            IMyCubeBlock fat = slim == null ? null : slim.FatBlock;
+            if (fat == null)
+            {
+                return null;
+            }
+            string typeId = fat.BlockDefinition.TypeIdString;
+            if (typeId == null ||
+                typeId.IndexOf(FactionEconomy.StoreType, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return null;
+            }
+            return fat as IMyStoreBlock;
+        }
+
         private static bool MaBlok<T>(IMyCubeGrid grid) where T : class
         {
             if (grid == null)
@@ -732,18 +1830,57 @@ namespace ZyweFrakcje
         /// <summary>Postacie NPC (nie gracz) w promieniu — tak samo liczy je CrewSpawner.</summary>
         private static int PoliczPostacie(Vector3D srodek, double promien)
         {
+            int wszystkie, ignored;
+            PoliczZaloge(srodek, promien, null, out wszystkie, out ignored);
+            return wszystkie;
+        }
+
+        /// <summary>
+        /// Postacie NPC w promieniu, z podziałem na „w ogóle" i „należące do frakcji"
+        /// <paramref name="tag"/>. Przynależność idzie przez tożsamość kontrolera — tą samą
+        /// drogą, którą atrybucja bojowa rozpoznaje właściciela (CombatEvents.cs).
+        /// </summary>
+        private static void PoliczZaloge(Vector3D srodek, double promien, string tag,
+                                         out int wszystkie, out int weFrakcji)
+        {
+            wszystkie = 0;
+            weFrakcji = 0;
             var kula = new BoundingSphereD(srodek, promien);
             List<VRage.ModAPI.IMyEntity> encje = MyAPIGateway.Entities.GetEntitiesInSphere(ref kula);
-            int ile = 0;
             for (int i = 0; i < encje.Count; i++)
             {
                 var postac = encje[i] as IMyCharacter;
-                if (postac != null && !postac.IsPlayer)
+                if (postac == null || postac.IsPlayer)
                 {
-                    ile++;
+                    continue;
+                }
+                wszystkie++;
+                if (tag == null || postac.ControllerInfo == null)
+                {
+                    continue;
+                }
+                IMyFaction fac = MyAPIGateway.Session.Factions.TryGetPlayerFaction(
+                    postac.ControllerInfo.ControllingIdentityId);
+                if (fac != null && fac.Tag == tag)
+                {
+                    weFrakcji++;
                 }
             }
-            return ile;
+        }
+
+        /// <summary>Łączna załoga przy wszystkich stacjach naszych frakcji (P6).</summary>
+        private static int PoliczZalogeStacji()
+        {
+            int razem = 0;
+            for (int i = 0; i < Tagi.Length; i++)
+            {
+                EconomyBlock stacja = FactionEconomy.FindContractBlock(Tagi[i]);
+                if (stacja != null)
+                {
+                    razem += PoliczPostacie(stacja.Position, 150);
+                }
+            }
+            return razem;
         }
 
         private static void Powiedz(string tekst)

@@ -108,6 +108,13 @@ void log_event(const zf::Event& ev) {
             std::cout << " — " << str("opis");
         }
         std::cout << "\n";
+    } else if (ev.type == "autotest_summary") {
+        // Domknięcie przebiegu. Bez tej linii z logu nie dało się odróżnić testu, który
+        // przeszedł w całości, od takiego, który urwał się w połowie sekcji — widać było
+        // tylko pojedyncze kroki i nie wiadomo było, ile ich miało być.
+        std::cout << "[brain] autotest [" << str("sekcja") << "] KONIEC: " << num("pass")
+                  << " PASS, " << num("fail") << " FAIL, " << num("warn") << " OSTRZEŻEŃ (z "
+                  << num("krokow") << " kroków)\n";
     }
     // heartbeat celowo bez logu — od Etapu 3 tylko zaśmiecał konsolę.
 }
