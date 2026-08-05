@@ -1044,7 +1044,9 @@ namespace ZyweFrakcje
             {
                 Nazwa = "zlecenie " + tag + " \"" + typ + "\": powstaje i NIE schodzi po cichu na dostawę",
                 Grupa = "kontrakty",
-                Miekki = miekki,
+                // Łagodzimy WYŁĄCZNIE zejście typu na dostawę; „zlecenie w ogóle nie powstało"
+                // jest zawsze twarde, niezależnie od typu.
+                MiekkiGdy = () => miekki && !_kontraktNiePowstal,
                 Start = () =>
                 {
                     if (_contracts == null)
@@ -1060,8 +1062,20 @@ namespace ZyweFrakcje
             });
         }
 
+        /// <summary>
+        /// Czy OSTATNIE sprawdzenie zlecenia skończyło się tym, że zlecenie w ogóle nie
+        /// powstało. Flaga `miekki` przy typie zlecenia miała łagodzić JEDNĄ rzecz: zejście
+        /// typu na dostawę, gdy w świecie nie ma celu (I15 — dopuszczalne i opisane).
+        /// Łagodziła jednak wszystko, co zwróci <see cref="SprawdzKontrakt"/>, więc gdy gra
+        /// odrzucała kontrakt CAŁKOWICIE, sześć z siedmiu typów meldowało OSTRZEŻENIE, a
+        /// „dostawa" (jedyna z miekki=false) FAIL — ten sam powód, dwie różne barwy w tym
+        /// samym przebiegu. Stąd wrażenie, że wynik autotestu jest losowy (2026-08-05).
+        /// </summary>
+        private bool _kontraktNiePowstal;
+
         private string SprawdzKontrakt(string zadany)
         {
+            _kontraktNiePowstal = false;
             if (_contracts == null)
             {
                 return "ContractManager nie wstał (BeforeStart)";
@@ -1077,6 +1091,9 @@ namespace ZyweFrakcje
             }
             if (_contracts.OstatniTyp == null)
             {
+                // To NIE jest przypadek, który wolno łagodzić flagą `miekki` — patrz komentarz
+                // przy _kontraktNiePowstal.
+                _kontraktNiePowstal = true;
                 return "zlecenie NIE powstało: " + (_contracts.OstatniPowod ?? "gra odmówiła bez powodu");
             }
             if (_contracts.OstatniTyp != zadany)
@@ -1616,6 +1633,13 @@ namespace ZyweFrakcje
         private void DodajRuch(List<Krok> kroki, string tag, string rodzaj, bool spawnuj, string nazwa)
         {
             const double ProgMetrow = 200;
+            // Okno 90 s, nie 30 (2026-08-05). Ten sam krok dał PASS w jednym przebiegu i 96 m
+            // w następnym — nie dlatego, że coś się zepsuło, tylko dlatego, że RivalAI musi
+            // najpierw namierzyć cel i rozpędzić kadłub, a 30 s bywało krótsze niż ten rozruch.
+            // Wydłużenie NIC nie kosztuje, gdy statek leci: krok jest monotoniczny i pollowany,
+            // więc zamyka się w chwili przekroczenia progu. Dłużej czekamy tylko wtedy, gdy
+            // faktycznie jest na co czekać.
+            const int OknoTikow = 90 * Sekunda;
 
             kroki.Add(new Krok
             {
@@ -1643,7 +1667,7 @@ namespace ZyweFrakcje
                         _flotaPozycja = grid.GetPosition();
                     }
                 },
-                CzekajTikow = 30 * Sekunda,
+                CzekajTikow = OknoTikow,
                 Poll = true,
                 Sprawdz = () =>
                 {
@@ -1674,9 +1698,9 @@ namespace ZyweFrakcje
                     double dystans = Vector3D.Distance(_flotaPozycja, grid2.GetPosition());
                     return dystans >= ProgMetrow
                         ? ""
-                        : "przebył " + (int)dystans + " m w oknie obserwacji (próg " +
-                          (int)ProgMetrow + " m) — kadłub stoi albo dryfuje, autopilot go " +
-                          "nie prowadzi";
+                        : "przebył " + (int)dystans + " m w oknie " + (OknoTikow / Sekunda) +
+                          " s (próg " + (int)ProgMetrow + " m) — kadłub stoi albo dryfuje, " +
+                          "autopilot go nie prowadzi";
                 },
             });
         }
