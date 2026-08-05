@@ -47,6 +47,14 @@ namespace ZyweFrakcje
         // Co ile tików ponawiać sprawdzenie monotoniczne (patrz Krok.Poll).
         private const int PollCoTikow = 15;
 
+        // Meldunek „nadal czekam" dla kroków z długim oknem. Bez tego przebieg wygląda na
+        // ZAWIESZONY: kroki czekające na stację frakcji mają okno 150 s, więc czat milczał
+        // po kilka minut i nie było jak odróżnić pracy od zwisu (2026-08-02).
+        // Meldujemy tylko przy oknach dłuższych niż PostepOdProgu — krótkie zamykają się
+        // same, zanim ktokolwiek zdąży się zaniepokoić, a komunikat byłby szumem.
+        private const int PostepCoTikow = 10 * Sekunda;
+        private const int PostepOdProgu = 15 * Sekunda;
+
         // Stała, a nie literał w kodzie: tools/waliduj_sbc.py sprawdza, czy nazwa prefabu
         // spawnowanego przez mod naprawdę istnieje w mod/Data/Prefabs.
         private const string RekwizytPrefab = "ZF_Zgubka";
@@ -95,6 +103,10 @@ namespace ZyweFrakcje
             // (stacje wstają ~30 s) sekcja kontraktów przepalała na to ponad pół minuty
             // czekania i wypluwała siedem identycznych porażek zamiast jednej wymownej.
             public bool Bramka;
+            // Jak Miekki, ale rozstrzygane DOPIERO przy zgłaszaniu wyniku. Potrzebne tam, gdzie
+            // „to tylko ostrzeżenie" zależy od stanu świata, którego przy budowaniu listy kroków
+            // jeszcze nie znamy (np. czy AiEnabled zdążyło odpowiedzieć na rejestrację).
+            public Func<bool> MiekkiGdy;
         }
 
         private readonly EventWriter _events;
@@ -102,6 +114,19 @@ namespace ZyweFrakcje
         private readonly ContractManager _contracts;
         private readonly ReputationSync _reputation;
         private readonly RansomManager _ransom;
+        private readonly CrewSpawner _crew;
+
+        /// <summary>
+        /// Czy AiEnabled jest w świecie. Rozstrzyga, czy brak botów to OSTRZEŻENIE (zależność
+        /// miękka — moda po prostu nie ma), czy BŁĄD (mod jest, a boty i tak się nie pojawiają).
+        /// Bez tego rozróżnienia sekcja P zawsze świeciła na żółto i przebieg z 2026-08-02
+        /// zaraportował „bez AiEnabled to normalne" na świecie, w którym AiEnabled v1.9 BYŁO
+        /// załadowane — czyli cztery prawdziwe porażki przebrane za łagodne ostrzeżenia.
+        /// </summary>
+        private bool AiEnabledObecny
+        {
+            get { return _crew != null && _crew.AiEnabledObecny; }
+        }
 
         private List<Krok> _kroki;
         private string _sekcja;
@@ -145,13 +170,14 @@ namespace ZyweFrakcje
         private readonly List<Action> _przywrocenia = new List<Action>();
 
         public Autotest(EventWriter events, PriceManager prices, ContractManager contracts,
-                        ReputationSync reputation, RansomManager ransom)
+                        ReputationSync reputation, RansomManager ransom, CrewSpawner crew)
         {
             _events = events;
             _prices = prices;
             _contracts = contracts;
             _reputation = reputation;
             _ransom = ransom;
+            _crew = crew;
         }
 
         public bool Trwa { get { return _kroki != null; } }
@@ -165,7 +191,13 @@ namespace ZyweFrakcje
             }
             if (Trwa)
             {
-                Powiedz("autotest już trwa (sekcja " + _sekcja + ") — poczekaj na podsumowanie.");
+                // Zapytanie o status, nie tylko odmowa: przy długich krokach (stacje, floty)
+                // to jedyny sposób, żeby na żądanie odróżnić „pracuje" od „zwisł".
+                string gdzie = _index < _kroki.Count ? _kroki[_index].Nazwa : "kończę";
+                Powiedz("autotest TRWA (sekcja " + _sekcja + "): krok " + (_index + 1) + "/" +
+                        _kroki.Count + " — " + gdzie);
+                Powiedz("  dotąd: " + _pass + " PASS, " + _fail + " FAIL, " + _warn +
+                        " OSTRZEŻEŃ. Koniec poznasz po linii \"=== AUTOTEST … koniec\".");
                 return;
             }
 
@@ -256,8 +288,7 @@ namespace ZyweFrakcje
             Krok krok = _kroki[_index];
             if (!_wystartowal && _pominietaGrupa != null && krok.Grupa == _pominietaGrupa)
             {
-                Powiedz("POMINIĘTE " + krok.Nazwa + " — warunek konieczny sekcji nie jest spełniony");
-                _warn++;
+                ZglosPominiete(krok);
                 Dalej();
                 return;
             }
@@ -285,9 +316,18 @@ namespace ZyweFrakcje
             }
             else if (tick - _startTick < krok.CzekajTikow)
             {
+                int czekam = tick - _startTick;
+
+                // Znak życia: bez niego długie okno wygląda jak zawieszony mod.
+                if (krok.CzekajTikow >= PostepOdProgu && czekam > 0 && czekam % PostepCoTikow == 0)
+                {
+                    Powiedz("… czekam (" + (czekam / Sekunda) + " z " +
+                            (krok.CzekajTikow / Sekunda) + " s): " + krok.Nazwa);
+                }
+
                 // Krok monotoniczny wolno zamknąć wcześniej, gdy warunek już zaszedł.
                 // Porażka w trakcie czekania nic nie znaczy — czekamy dalej, do końca okna.
-                if (!krok.Poll || krok.Sprawdz == null || (tick - _startTick) % PollCoTikow != 0)
+                if (!krok.Poll || krok.Sprawdz == null || czekam % PollCoTikow != 0)
                 {
                     return;
                 }
@@ -328,6 +368,29 @@ namespace ZyweFrakcje
             _wystartowal = false;
         }
 
+        /// <summary>
+        /// Krok pominięty, bo bramka jego grupy padła wcześniej. Liczy się do OSTRZEŻEŃ
+        /// (jak dawniej), ale TERAZ trafia też do events.jsonl — dawniej szedł tylko na czat,
+        /// więc audyt samego pliku (bez czatu pod ręką) widział 6 z 19 ostrzeżeń i wyglądał
+        /// na niekompletny, choć CLAUDE.md obiecuje autotest_result "per krok" (2026-08-02).
+        /// </summary>
+        private void ZglosPominiete(Krok krok)
+        {
+            const string wynik = "OSTRZEŻENIE";
+            _warn++;
+            string opis = "POMINIĘTE — warunek konieczny sekcji (" + krok.Grupa + ") nie jest spełniony";
+            Powiedz(wynik + " " + krok.Nazwa + " — " + opis);
+
+            var data = new Dictionary<string, object>
+            {
+                { "sekcja", _sekcja },
+                { "nazwa", krok.Nazwa },
+                { "wynik", wynik },
+                { "opis", opis },
+            };
+            Zdarzenie("autotest_result", data);
+        }
+
         private void Zglos(Krok krok, string blad)
         {
             string wynik;
@@ -336,7 +399,7 @@ namespace ZyweFrakcje
                 wynik = "PASS";
                 _pass++;
             }
-            else if (krok.Miekki)
+            else if (krok.Miekki || (krok.MiekkiGdy != null && krok.MiekkiGdy()))
             {
                 wynik = "OSTRZEŻENIE";
                 _warn++;
@@ -443,6 +506,12 @@ namespace ZyweFrakcje
                 kroki.Add(new Krok
                 {
                     Nazwa = "stacja " + tag + ": frakcja ma gdzie wystawiać zlecenia",
+                    // StationSpawner stawia stacje PO KOLEI, jedną na ~30 s (CheckEveryTicks),
+                    // więc ostatnia frakcja w kolejce (WGR) potrafi czekać na swoją turę nawet
+                    // ~90 s od wczytania świata + czas na async SpawnPrefab. Bez pollowania ten
+                    // krok fałszywie krzyczał FAIL, gdy autotest po prostu wystartował za wcześnie.
+                    Poll = true,
+                    CzekajTikow = 150 * Sekunda,
                     Sprawdz = () =>
                     {
                         if (MyAPIGateway.Session.Factions.TryGetFactionByTag(tag) == null)
@@ -454,7 +523,7 @@ namespace ZyweFrakcje
                         if (blok == null)
                         {
                             return "BRAK bloku kontraktów i sklepu — StationSpawner jeszcze nie " +
-                                   "postawił stacji (czekaj ~30 s) albo spawn się nie udał";
+                                   "postawił stacji (czekaj do 150 s) albo spawn się nie udał";
                         }
                         if (!blok.IsContractBlock)
                         {
@@ -468,6 +537,8 @@ namespace ZyweFrakcje
                 kroki.Add(new Krok
                 {
                     Nazwa = "stacja " + tag + ": ma sklep (bez niego cennik nie ma na czym usiąść)",
+                    Poll = true,
+                    CzekajTikow = 150 * Sekunda,
                     Sprawdz = () =>
                     {
                         long ignored;
@@ -530,6 +601,15 @@ namespace ZyweFrakcje
                 Nazwa = "ceny: mod widzi oferty w sklepie frakcji (GetStoreItems)",
                 Grupa = "ceny",
                 Bramka = true,
+                // Świeżo dołożony StoreBlock startuje pusty. Asortyment dokłada MOD
+                // (StationSpawner.ZatowarujSklep, z paru sekund opóźnienia, żeby nie wołać
+                // CreateStoreItem na dopiero co powstałym bloku) — gra tego NIE zrobi nigdy,
+                // bo jej generator chodzi wyłącznie po faction.Stations, a nasza stacja to
+                // zwykły grid. Sprostowanie 2026-08-04: poprzedni komentarz twierdził tu coś
+                // odwrotnego i kazał czekać na cykl gry, którego nie ma.
+                // Okno zostaje długie, bo stacja potrafi dopiero wstawać, gdy sekcja rusza.
+                Poll = true,
+                CzekajTikow = 200 * Sekunda,
                 Sprawdz = () =>
                 {
                     if (_prices == null)
@@ -783,7 +863,10 @@ namespace ZyweFrakcje
                     MyAPIGateway.PrefabManager.SpawnPrefab(
                         wynik, RekwizytPrefab, pozycja, (Vector3)widok.Forward, (Vector3)widok.Up,
                         Vector3.Zero, Vector3.Zero, null,
-                        SpawningOptions.SetNpcSpawnedGrid, wlasciciel, true, null);
+                        // SetAuthorship musi lecieć razem z SetNpcSpawnedGrid — patrz komentarz
+                        // przy identycznym wywołaniu w Contracts.cs.SpawnProp (2026-08-02).
+                        SpawningOptions.SetNpcSpawnedGrid | SpawningOptions.SetAuthorship,
+                        wlasciciel, true, null);
                 },
                 CzekajTikow = 3 * Sekunda,
                 Poll = true,
@@ -887,7 +970,7 @@ namespace ZyweFrakcje
                     {
                         return "nie ma bloku, na którym można by odczytać zlecenie";
                     }
-                    List<IMyContract> naBloku =
+                    var naBloku =
                         MyAPIGateway.ContractSystem.GetAvailableContractsForBlock(blok.BlockId);
                     foreach (IMyContract kontrakt in naBloku)
                     {
@@ -1577,7 +1660,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na stacji frakcji (zależność miękka — AiEnabled)",
-                Miekki = true,
+                MiekkiGdy = () => !AiEnabledObecny,
                 CzekajTikow = 5 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
@@ -1594,9 +1677,12 @@ namespace ZyweFrakcje
                             return "";
                         }
                     }
-                    return "na żadnej stacji nie ma postaci NPC. Bez moda AiEnabled (2596208372) " +
-                           "to normalne. Z nim: pierwsze podejrzane jest [BotType] w Crew.cs / " +
-                           "ZF_Boty.sbc — wiki MES mówi, że to pole Name z SBC, a nie SubtypeId";
+                    return "na żadnej stacji nie ma postaci NPC. " + (AiEnabledObecny
+                        ? "AiEnabled JEST w świecie, więc to BŁĄD: pierwsze podejrzane jest " +
+                          "[BotType] w Crew.cs / ZF_Boty.sbc — wiki MES mówi, że to pole Name " +
+                          "z SBC, a nie SubtypeId"
+                        : "Moda AiEnabled (2596208372) nie ma w świecie — to zależność miękka " +
+                          "i taki wynik jest normalny");
                 },
             });
 
@@ -1606,7 +1692,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga należy do frakcji, a nie jest bezpańska (P3)",
-                Miekki = true,
+                MiekkiGdy = () => !AiEnabledObecny,
                 Sprawdz = () =>
                 {
                     for (int i = 0; i < Tagi.Length; i++)
@@ -1628,14 +1714,15 @@ namespace ZyweFrakcje
                               "ŻADNA nie należy do frakcji — MES/AiEnabled nie zawołało " +
                               "SetPlayersFaction, więc bot nie zareaguje na zmianę relacji";
                     }
-                    return "nie ma przy stacjach żadnej postaci NPC do sprawdzenia (brak AiEnabled?)";
+                    return "nie ma przy stacjach żadnej postaci NPC do sprawdzenia" +
+                           (AiEnabledObecny ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
                 },
             });
 
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na statku rajdowym (trigger PlayerNear 1,5 km)",
-                Miekki = true,
+                MiekkiGdy = () => !AiEnabledObecny,
                 Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
                 CzekajTikow = 20 * Sekunda,
                 Poll = true,
@@ -1663,14 +1750,15 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga się nie mnoży przy kolejnych przebiegach (P6)",
-                Miekki = true,
+                MiekkiGdy = () => !AiEnabledObecny,
                 Start = () => { _zalogaPrzed = PoliczZalogeStacji(); },
                 CzekajTikow = 12 * Sekunda,
                 Sprawdz = () =>
                 {
                     if (_zalogaPrzed == 0)
                     {
-                        return "nie ma przy stacjach załogi do policzenia (brak AiEnabled?)";
+                        return "nie ma przy stacjach załogi do policzenia" +
+                               (AiEnabledObecny ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
                     }
                     int teraz = PoliczZalogeStacji();
                     return teraz <= _zalogaPrzed

@@ -9,10 +9,12 @@ SpawnGroups.sbc, RivalAiBehaviors.sbc, ZF_Manipulations.sbc i ZF_Boty.sbc trafia
 w coś, co naprawdę istnieje, oraz czy trzymają się reguł MES spisanych w CLAUDE.md.
 
 CZEGO NIE SPRAWDZA. Nie wie, czy vanillowy prefab (C33_Military_Enforcer itd.)
-istnieje w grze ani czy `[BotType:Police_Bot]` to prawidłowa nazwa w AiEnabled —
-tego nie da się ustalić bez plików gry. Zamiast zgadywać, trzyma jawną tabelę
-ZNANE_PREFABY: prefab spoza niej to błąd z prośbą o dopisanie, więc założenie
-przestaje być niewidoczne i wchodzi do przeglądu kodu.
+istnieje w grze — tego nie da się ustalić bez plików gry. Zamiast zgadywać, trzyma
+jawną tabelę ZNANE_PREFABY: prefab spoza niej to błąd z prośbą o dopisanie, więc
+założenie przestaje być niewidoczne i wchodzi do przeglądu kodu. Tak samo działa
+ZNANE_POSTACIE dla [BotType] — 2026-08-02 okazało się, że wpisane tam z opisu na
+Workshopie „Police_Bot" i „Space_Skeleton" NIE ISTNIEJĄ, a AiEnabled przerywa wtedy
+spawn po cichu (ostrzeżenie idzie tylko do jego własnego logu).
 
 Użycie: python3 tools/waliduj_sbc.py [--korzen <katalog moda>]
 Kod wyjścia: 0 = czysto, 1 = błędy.
@@ -54,6 +56,31 @@ NASZE_TAGI = ("HEL", "KRW", "WGR")
 ZACHOWANIA_MES = {
     "CargoShip", "Escort", "Fighter", "HorseFighter", "Horsefly",
     "Hunter", "Nautical", "Passive", "Patrol", "Strike",
+}
+
+# Postacie, które [BotType] może wskazać. AiEnabled buduje AllowedBotSubtypes z
+# MyDefinitionManager.Static.Characters (`charDef.Name ?? SubtypeId`), więc lista musi
+# odpowiadać definicjom postaci W GRZE — spisane 2026-08-02 z Characters.sbc
+# i Characters_Npc.sbc. Wartość True = Skeleton Humanoid (bot chodzi i używa narzędzi);
+# pająki i wilk zostawione świadomie, ale oznaczone, bo do załogi się nie nadają.
+ZNANE_POSTACIE = {
+    "Default_Astronaut": True,
+    "Default_Astronaut_Female": True,
+    "NPC_Astronaut": True,
+    "NPC_Astronaut_Female": True,
+    "Space_spider": False,
+    "Space_spider_black": False,
+    "Space_spider_brown": False,
+    "Space_spider_green": False,
+    "Space_Wolf": False,
+}
+
+# Suma enumów BotRoleFriendly/BotRoleEnemy/BotRoleNeutral z AiEnabled (BotFactory.cs).
+# AiEnabled porównuje przez ToUpperInvariant(), więc i my porównujemy bez wielkości liter.
+ROLE_AIENABLED = {
+    "REPAIR", "SCAVENGER", "COMBAT", "CREW",
+    "ZOMBIE", "SOLDIER", "BRUISER", "GRINDER", "GHOST", "CREATURE",
+    "NOMAD", "ENFORCER", "PATRON",
 }
 
 TAG_RE = re.compile(r"\[([A-Za-z0-9_]+):([^\]]*)\]")
@@ -216,6 +243,32 @@ def sprawdz_referencje(grupy, komponenty, wynik):
                                        "{}: [{}:{}] wskazuje na profil rodzaju \"{}\", "
                                        "a powinien na \"{}\"".format(nazwa, tag, cel, rodzaj, chciany))
 
+    # [BotType] / [BotBehavior] w profilach botów. Gra ich NIE waliduje: AiEnabled przerywa
+    # spawn dla nieznanego podtypu i pisze o tym wyłącznie do własnego logu, więc objawem
+    # jest pusty pokład bez śladu w logu SE (tak przepadły „Police_Bot" i „Space_Skeleton").
+    for nazwa, dane in sorted(komponenty.items()):
+        if dane["rodzaj"] != "bot":
+            continue
+        for wartosc in dane["tagi"].get("BotType", []):
+            postac = wartosc.strip()
+            if postac not in ZNANE_POSTACIE:
+                wynik.blad(dane["plik"],
+                           "{}: [BotType:{}] nie jest postacią znaną w grze — AiEnabled "
+                           "przerwie spawn po cichu. Dozwolone: {} (albo dopisz nową do "
+                           "ZNANE_POSTACIE w tools/waliduj_sbc.py)"
+                           .format(nazwa, postac, ", ".join(sorted(ZNANE_POSTACIE))))
+            elif not ZNANE_POSTACIE[postac]:
+                wynik.ostrzez(dane["plik"],
+                              "{}: [BotType:{}] to postać nie-humanoidalna — do załogi "
+                              "stacji/statku raczej się nie nadaje".format(nazwa, postac))
+        for wartosc in dane["tagi"].get("BotBehavior", []):
+            rola = wartosc.strip()
+            if rola.upper() not in ROLE_AIENABLED:
+                wynik.blad(dane["plik"],
+                           "{}: [BotBehavior:{}] nie jest rolą AiEnabled — spawn zostanie "
+                           "odrzucony. Dozwolone: {}"
+                           .format(nazwa, rola, ", ".join(sorted(ROLE_AIENABLED))))
+
     # <Behaviour> prefaba → profil zachowania RivalAI.
     for nazwa, grupa in sorted(grupy.items()):
         for prefab in grupa["prefaby"]:
@@ -293,14 +346,23 @@ def sprawdz_grupy(grupy, prefaby_wlasne, wynik):
 
         # Sedno awarii „konwoje dryfują": RivalAI poprowadzi grid tylko z blokiem
         # zdalnego sterowania, a [RivalAiReplaceRemoteControl] go PODMIENIA, nie dodaje.
-        if prawda(tagi, "UseRivalAi") and not tagi.get("ManipulationGroups"):
+        # [ManipulationGroups] NIE JEST rozwiązaniem (dekompilacja MES 2026-08-02,
+        # patrz ZF_Manipulations.sbc): ArmorModuleReplacement wstawia tylko bloki z
+        # zamkniętej listy modułów, RemoteControl na niej nie ma. Dla DUŻYCH siatek pilota
+        # dokłada TestSpawner.EnsurePilot na żywej siatce po spawnie (dowolny duży kadłub
+        # bez zdalnego sterowania, niezależnie od tagów w tym pliku) — więc to już nie jest
+        # błąd danych. Ostrzegamy tylko dla MAŁYCH siatek: EnsurePilot celowo je pomija
+        # (małe drony mają własne zdalne sterowanie w prefabie), więc brak RC na małej
+        # siatce naprawdę zostawia statek bez pilota.
+        if prawda(tagi, "UseRivalAi"):
             for prefab in grupa["prefaby"]:
                 dane = ZNANE_PREFABY.get(prefab["subtype"])
-                if dane and not dane[1]:
+                if dane and dane[0] == "Small" and not dane[1]:
                     wynik.blad(plik,
-                               "{}: prefab {} nie ma bloku zdalnego sterowania, a grupa liczy na "
-                               "[RivalAiReplaceRemoteControl] — dodaj [ManipulationGroups:...] "
-                               "z blokiem pilota, inaczej statek będzie dryfował"
+                               "{}: prefab {} (mała siatka) nie ma bloku zdalnego sterowania — "
+                               "TestSpawner.EnsurePilot obsługuje tylko DUŻE siatki, więc ten "
+                               "statek będzie dryfował. Dodaj RC do prefabu albo rozszerz "
+                               "EnsurePilot o mały wariant (RivalAIRemoteControlSmall)"
                                .format(nazwa, prefab["subtype"]))
 
 
@@ -358,6 +420,71 @@ def sprawdz_kod(korzen_skryptow, grupy, prefaby_wlasne, wynik):
                 wynik.blad("mod/Data/SpawnGroups.sbc",
                            "TestSpawner.GroupForKind może zażądać grupy {}, a jej nie ma"
                            .format(nazwa))
+
+    # EnsurePilot musi ODTWORZYĆ profil, który grupa wskazuje w <Behaviour>.
+    # Duże kadłuby nie mają bloku zdalnego sterowania, więc MES nie ma gdzie zapisać
+    # zachowania i całą treść CustomData pisze nasz TestSpawner.EnsurePilot. Jeśli grupa
+    # mówi ZF_Fighter_HEL (wariant z załogą), a kod wpisuje goły ZF_Fighter, to statek
+    # lata i strzela, ale jest PUSTY — i nic tego nie zgłasza, bo obie nazwy istnieją.
+    # Dokładnie ten błąd popełniono 2026-08-02 przy naprawie pilota.
+    for nazwa_grupy in sorted(grupy):
+        for prefab in grupy[nazwa_grupy]["prefaby"]:
+            zachowanie = prefab.get("zachowanie")
+            dane_prefabu = ZNANE_PREFABY.get(prefab["subtype"])
+            # Dotyczy wyłącznie kadłubów, którym pilota dokłada kod (duże, bez własnego RC).
+            if not zachowanie or not dane_prefabu or dane_prefabu[0] != "Large" or dane_prefabu[1]:
+                continue
+            m = re.match(r"^ZF_Fighter_({})$".format("|".join(NASZE_TAGI)), zachowanie)
+            if not m:
+                continue
+            trigger = "ZF_Trigger_Zaloga_" + m.group(1)
+            # Kod może wpisać nazwę wprost ALBO skleić ją z tagiem w czasie działania
+            # (\"ZF_Trigger_Zaloga_\" + tag) — obie formy są poprawne.
+            #
+            # POPRAWKA 2026-08-04: drugi warunek brzmiał `"ZF_Trigger_Zaloga_" not in zrodlo`
+            # i był ZAWSZE fałszywy, gdy kod sklejał nazwę — czyli reguła wykrywała wyłącznie
+            # całkowity zanik prefiksu. Wpisanie na sztywno JEDNEGO tagu dla wszystkich frakcji
+            # (np. zawsze ZF_Trigger_Zaloga_HEL) przechodziło na zielono, a to najbardziej
+            # prawdopodobna pomyłka przy tej nazwie. Teraz sklejanie uznajemy tylko wtedy, gdy
+            # kod naprawdę dokleja ZMIENNĄ, a nie stały tag.
+            # Uwaga na kształt literału: prefiks stoi na KOŃCU dłuższego napisu
+            # ("\n[Triggers:ZF_Trigger_Zaloga_"), więc nie wolno wymagać cudzysłowu przed nim.
+            sklejane = re.search(
+                r'ZF_Trigger_Zaloga_"\s*\+\s*(?!")', zrodlo) is not None
+            if trigger not in zrodlo and not sklejane:
+                wynik.blad("TestSpawner.cs",
+                           "grupa {} używa zachowania {} (z załogą), ale EnsurePilot nie wpisuje "
+                           "\"{}\" — statek powstanie bez załogi. Kod musi odtworzyć profil "
+                           "z ZF_Boty.sbc, bo MES nie ma go gdzie zapisać"
+                           .format(nazwa_grupy, zachowanie, trigger))
+
+    # Crew.cs stawia boty PROGRAMOWO (stacje nie przechodzą przez profile MES), więc ta
+    # sama pomyłka co w ZF_Boty.sbc może siedzieć w tablicach C#. Sprawdzamy je tak samo —
+    # dokładnie tu żył „Police_Bot", którego nie ma w grze.
+    plik_zalogi = os.path.join(korzen_skryptow, "Crew.cs")
+    try:
+        with open(plik_zalogi, encoding="utf-8") as f:
+            zrodlo_zalogi = f.read()
+    except OSError:
+        zrodlo_zalogi = None
+    if zrodlo_zalogi is not None:
+        m = re.search(r"string\[\]\s+BotType\s*=\s*\{([^}]*)\}", zrodlo_zalogi, re.S)
+        if not m:
+            wynik.ostrzez("Crew.cs",
+                          "nie znalazłem tablicy BotType — walidator wymaga aktualizacji")
+        else:
+            for postac in re.findall(r'"([^"]+)"', m.group(1)):
+                if postac not in ZNANE_POSTACIE:
+                    wynik.blad("Crew.cs",
+                               "BotType \"{}\" nie jest postacią znaną w grze — AiEnabled "
+                               "przerwie spawn po cichu (patrz ZNANE_POSTACIE)".format(postac))
+        m = re.search(r"string\[\]\s+Role\s*=\s*\{([^}]*)\}", zrodlo_zalogi, re.S)
+        if m:
+            for rola in re.findall(r'"([^"]+)"', m.group(1)):
+                if rola.upper() not in ROLE_AIENABLED:
+                    wynik.blad("Crew.cs",
+                               "Role \"{}\" nie jest rolą AiEnabled — spawn zostanie odrzucony"
+                               .format(rola))
 
     # Prefaby rekwizytów i skrzynki zrzutu: const string ...Prefab = "...".
     for plik in sorted(os.listdir(korzen_skryptow)):

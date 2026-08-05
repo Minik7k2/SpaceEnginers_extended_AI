@@ -10,16 +10,21 @@
      C22_Trade_Merchant, C42_Pirate_SalvageCarrier, C10_Mining_Carriage) NIE mają go wcale.
      Przez to konwoje tylko dryfowały po prostej, a na rajdy szły wyłącznie małe drony.
 
-     ROZWIĄZANIE bez kopiowania prefabów: [ReplaceArmorBlocksWithModules] zamienia kostkę
-     pancerza w dowolny blok — „For every value provided in this tag, one armor cube is
-     replaced with the provided block type". Zamieniamy więc jedną kostkę na
-     RivalAIRemoteControlLarge (blok z MES, TypeId=RemoteControl, 1x1x1, duża siatka)
-     i dowolny kadłub staje się sterowalny przez RivalAI. Alternatywa — własne kopie
-     prefabów Keena z dołożonym blokiem — oznaczałaby kilka MB XML-a w modzie na każdy
-     statek i ręczne szukanie wolnej kratki w siatce.
+     PORAŻKA TEGO PODEJŚCIA (dekompilacja MES 2026-08-02, patrz TestSpawner.EnsurePilot):
+     [ReplaceArmorBlocksWithModules] NIE zamienia kostki w dowolny blok, mimo że tak sugeruje
+     wiki MES. ArmorModuleReplacement.cs (ModularEncountersSystems/Spawning/Manipulation)
+     filtruje [ModulesForArmorReplacement] przez zamkniętą listę LargeModules/SmallModules
+     (anteny MES-Suppressor-*, DefensiveCombat, FlightMovement) — RemoteControl NIE jest na
+     tej liście, więc `ReplaceArmorWithModule` po cichu nic nie robi (ciągły `continue`, zero
+     logu, zero wyjątku). Profil poniżej zostaje w SBC jako udokumentowana ślepa uliczka
+     (żeby nikt nie próbował drugi raz), ale [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
+     NIE JEST już podpięty pod żaden SpawnGroup — zamiast tego TestSpawner.EnsurePilot
+     (mod/Data/Scripts/ZyweFrakcje/TestSpawner.cs) dokłada RivalAIRemoteControlLarge na już
+     żywej siatce po spawnie (ten sam wzorzec co Stations.cs: podmiana kostki pancerza przez
+     grid.RemoveBlock+AddBlock, sprawdzony w kodzie samego MES — GridEntity.cs).
 
-     UWAGA: profil jest dla DUŻYCH siatek. Nasze małe drony bojowe (DS_Pirate_Scimitar,
-     DS_Assault_Support itd.) mają własne zdalne sterowanie i tej manipulacji nie potrzebują.
+     UWAGA: mechanizm jest dla DUŻYCH siatek. Nasze małe drony bojowe (DS_Pirate_Scimitar,
+     DS_Assault_Support itd.) mają własne zdalne sterowanie i tej podmiany nie potrzebują.
      Gdyby kiedyś było trzeba, mały odpowiednik to RivalAIRemoteControlSmall. -->
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <EntityComponents>

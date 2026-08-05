@@ -580,7 +580,13 @@ namespace ZyweFrakcje
                 // w ModAPI (IMyCubeGrid.IsNpcSpawnedGrid { get; }) — da się ją ustawić
                 // WYŁĄCZNIE tu, przy spawnie. Vanilla stawia swój rekwizyt poszukiwań
                 // dokładnie tak samo (MyContractWithSpawnableGrid.SpawnPrefab).
-                SpawningOptions.SetNpcSpawnedGrid,
+                // DOPISEK 2026-08-02 (dekompilacja MyCubeGrid.Init): SAMO SetNpcSpawnedGrid
+                // NIE WYSTARCZY — silnik zaraz po ustawieniu flagi skanuje bloki i jeśli ŻADEN
+                // nie ma BuiltBy ustawionego na tożsamość NPC, cofa flagę na false
+                // (`if (Sync.IsServer && !flag && m_isNpcSpawnedGrid.Value) m_isNpcSpawnedGrid.Value
+                // = false;`). BuiltBy ustawia dopiero SetAuthorship (`cubeBlock.BuiltBy = ownerId`),
+                // więc obie flagi muszą lecieć razem, a ownerId (niżej) musi być tożsamością NPC.
+                SpawningOptions.SetNpcSpawnedGrid | SpawningOptions.SetAuthorship,
                 owner,
                 true,
                 () =>

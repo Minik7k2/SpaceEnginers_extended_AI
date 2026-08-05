@@ -14,11 +14,22 @@
      ZALEŻNOŚĆ MIĘKKA: bez moda AiEnabled (Workshop 2596208372) MES po prostu nie stawia
      botów — wszystko inne działa jak dotąd. Nie robimy z tego twardego wymogu.
 
-     DO WERYFIKACJI W GRZE: wartości [BotType] i [BotBehavior] wzięte są z opisu moda na
-     Workshopie, a nie z jego plików (nie było go na dysku, gdy to powstawało). Wiki MES
-     mówi wprost, że BotType to pole `Name` z SBC, a NIE SubtypeId — jeśli bot się nie
-     pojawi, to jest pierwsze miejsce do sprawdzenia. Boty NIE chodzą po małych siatkach,
-     więc profile podpięte są wyłącznie pod duże kadłuby rajdowe. -->
+     ZWERYFIKOWANE W KODZIE AiEnabled (2026-08-02, mod odczytany z dysku — wcześniej te
+     wartości pochodziły z opisu na Workshopie i BYŁY BŁĘDNE):
+       * [BotType] musi być na liście AllowedBotSubtypes, którą AiEnabled buduje z
+         MyDefinitionManager.Static.Characters jako `charDef.Name ?? SubtypeId`.
+         BotFactory.CreateBotObject przerywa spawn dla podtypu spoza listy i pisze
+         ostrzeżenie TYLKO do własnego logu AiEnabled — w grze wygląda to jak cisza.
+         Poprzednie „Police_Bot" i „Space_Skeleton" NIE ISTNIEJĄ w tej wersji gry
+         (sprawdzone grepem po Content i po plikach AiEnabled) — stąd puste pokłady.
+         Dostępne postacie: Default_Astronaut(_Female), NPC_Astronaut(_Female),
+         Space_spider*, Space_Wolf. Bierzemy Default_Astronaut: Skeleton=Humanoid
+         (bot chodzi i używa narzędzi) i to jego AiEnabled samo podstawia za pusty subType.
+       * [BotBehavior] jest OK: AllowedBotRoles to suma enumów BotRoleFriendly/Enemy/Neutral
+         (REPAIR, SCAVENGER, COMBAT, CREW, ZOMBIE, SOLDIER, BRUISER, GRINDER, GHOST,
+         CREATURE, NOMAD, ENFORCER, PATRON), a porównanie idzie po ToUpperInvariant().
+     Boty NIE chodzą po małych siatkach, więc profile podpięte są wyłącznie pod duże
+     kadłuby rajdowe. -->
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <EntityComponents>
 
@@ -34,7 +45,7 @@
 
         [MES Bot Spawn]
 
-        [BotType:Police_Bot]
+        [BotType:Default_Astronaut]
         [BotBehavior:Soldier]
         [BotDisplayName:Ochrona Helionu]
         [Color:{X:40 Y:90 Z:160}]
@@ -57,7 +68,7 @@
 
         [MES Bot Spawn]
 
-        [BotType:Police_Bot]
+        [BotType:Default_Astronaut]
         [BotBehavior:Soldier]
         [BotDisplayName:Krwawa Ręka]
         [Color:{X:150 Y:30 Z:30}]
@@ -80,7 +91,7 @@
 
         [MES Bot Spawn]
 
-        [BotType:Space_Skeleton]
+        [BotType:Default_Astronaut]
         [BotBehavior:Grinder]
         [BotDisplayName:Lupiezca]
         [Color:{X:120 Y:40 Z:40}]
@@ -101,7 +112,7 @@
 
         [MES Bot Spawn]
 
-        [BotType:Police_Bot]
+        [BotType:Default_Astronaut]
         [BotBehavior:Soldier]
         [BotDisplayName:Wolni Gornicy]
         [Color:{X:190 Y:150 Z:40}]
