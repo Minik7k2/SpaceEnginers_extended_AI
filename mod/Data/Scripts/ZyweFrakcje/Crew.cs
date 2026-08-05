@@ -317,12 +317,70 @@ namespace ZyweFrakcje
                 {
                     continue;
                 }
-                _nextTry[stacja.GridId] = tick + RetryTicks;
-                Uzupelnij(i, stacja);
-                return; // jedna stacja na przebieg
+                // CAŁY KOMPLEKS, NIE TYLKO SIATKA Z BLOKIEM KONTRAKTÓW (2026-08-05).
+                // Vanillowe stacje to prefaby z KILKU siatek (GE_LogisticsFacility ma 11:
+                // główny kadłub, cumy, kontenery, przekaźnik). Blok kontraktów dokładamy do
+                // największej, ale to nie ona musi mieć wnętrze, po którym bot ma chodzić —
+                // `/zf zaloga` postawił pierwszego bota dopiero na 57-blokowym kontenerze,
+                // gdy główny kadłub nie dawał węzłów. Próbujemy więc po kolei: najpierw grid
+                // z blokiem kontraktów, potem pozostałe duże siatki tej frakcji w zasięgu.
+                // Każda ma własną karencję, więc nieudana nie blokuje kolejnych.
+                if (SprobujKompleks(i, stacja, tick, pozycjaGracza))
+                {
+                    return; // jedna próba na przebieg
+                }
             }
 
             ZalogaNaStatkach(tick, pozycjaGracza);
+        }
+
+        /// <summary>
+        /// Próbuje obsadzić kolejno siatki kompleksu stacji tej frakcji. true = któraś siatka
+        /// dostała próbę w tym przebiegu (i nie ma co robić nic więcej).
+        /// </summary>
+        private bool SprobujKompleks(int index, EconomyBlock stacja, int tick, Vector3D pozycjaGracza)
+        {
+            var kolejka = new List<IMyCubeGrid>();
+            var glowna = MyAPIGateway.Entities.GetEntityById(stacja.GridId) as IMyCubeGrid;
+            if (glowna != null)
+            {
+                kolejka.Add(glowna);
+            }
+            foreach (IMyCubeGrid grid in FactionEconomy.FactionGrids(Tags[index]))
+            {
+                if (grid == null || grid.MarkedForClose || grid.GridSizeEnum != MyCubeSize.Large)
+                {
+                    continue;
+                }
+                if (glowna != null && grid.EntityId == glowna.EntityId)
+                {
+                    continue;
+                }
+                if (Vector3D.DistanceSquared(pozycjaGracza, grid.GetPosition()) > PlayerRange * PlayerRange)
+                {
+                    continue;
+                }
+                kolejka.Add(grid);
+            }
+
+            for (int k = 0; k < kolejka.Count; k++)
+            {
+                IMyCubeGrid grid = kolejka[k];
+                int next;
+                if (_nextTry.TryGetValue(grid.EntityId, out next) && tick < next)
+                {
+                    continue;
+                }
+                _nextTry[grid.EntityId] = tick + RetryTicks;
+                Uzupelnij(index, new EconomyBlock
+                {
+                    GridId = grid.EntityId,
+                    Position = grid.GetPosition(),
+                    GridName = grid.DisplayName,
+                });
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
