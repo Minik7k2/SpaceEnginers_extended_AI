@@ -83,6 +83,36 @@ namespace ZyweFrakcje
         private readonly List<Zamowienie> _doZatowarowania = new List<Zamowienie>();
         private int _tick;
 
+        // Rytm rozruchu: dopóki któraś frakcja nie ma stacji, budzimy się co ~2 s.
+        private const int RozruchTicks = 120;
+
+        /// <summary>
+        /// Czy KAŻDA nasza frakcja ma już gdzie wystawiać zlecenia. Pyta o to samo, o co pyta
+        /// <see cref="ContractManager"/>, więc „wszystkie mają" znaczy tu dokładnie tyle, że
+        /// kontrakty mają na czym usiąść — a nie tylko że w świecie stoi jakaś siatka.
+        /// </summary>
+        private static bool WszystkieMajaStacje()
+        {
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                if (MyAPIGateway.Session.Factions.TryGetFactionByTag(Tags[i]) == null)
+                {
+                    continue; // frakcji nie ma w świecie — nie ma na co czekać
+                }
+                if (FactionEconomy.FindContractBlock(Tags[i]) == null)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>Czy frakcje są gotowe przyjmować zlecenia (czyta autotest i tick).</summary>
+        public static bool StacjeGotowe
+        {
+            get { return WszystkieMajaStacje(); }
+        }
+
         public void Update(int tick)
         {
             _tick = tick;
@@ -98,7 +128,18 @@ namespace ZyweFrakcje
                 MyAPIGateway.Utilities.ShowMessage("ZF",
                     "Spawn stacji nie zgłosił zakończenia — próbuję dalej");
             }
-            if (tick % CheckEveryTicks != 0)
+            // ROZRUCH ŚWIATA IDZIE SZYBKO (2026-08-05). Dotąd spawner budził się raz na ~30 s
+            // i stawiał JEDNĄ stację na przebieg, więc na świeżym świecie trzecia frakcja
+            // dostawała swoją dopiero po ~1,5 minuty. Tick brainu i `/zf autotest` przychodzą
+            // wcześniej i widzą frakcję bez bloku — w logu wyglądało to tak, jakby kontrakty
+            // powstawały PRZED stacjami:
+            //     16:42:42  Kontrakt KRW pominięty: frakcja nie ma bloku kontraktów
+            //     16:43:02  KRW postawiła stację 8.2 km stąd
+            //     16:43:32  WGR postawiła stację 11.9 km stąd
+            // Dopóki któraś frakcja czeka na stację, sprawdzamy co ~2 s. Gdy wszystkie mają,
+            // wracamy do leniwego rytmu — to nie jest kod, który ma chodzić w kółko.
+            int co = WszystkieMajaStacje() ? CheckEveryTicks : RozruchTicks;
+            if (tick % co != 0)
             {
                 return;
             }

@@ -97,6 +97,44 @@ namespace ZyweFrakcje
             get { return _api != null && _api.Valid && _api.CanSpawn; }
         }
 
+        /// <summary>Zasięg gracza, w którym w ogóle stawiamy załogę (metry).</summary>
+        public static double ZasiegZalogi { get { return PlayerRange; } }
+
+        /// <summary>
+        /// Dystans do NAJBLIŻSZEJ stacji frakcji, albo -1 gdy żadna nie stoi.
+        ///
+        /// Potrzebne autotestowi, bo tu leży pułapka, która przez trzy przebiegi udawała błąd
+        /// nazw botów (2026-08-05): StationSpawner stawia stacje 8–15 km od gracza, a załogę
+        /// dokładamy tylko w promieniu <see cref="ZasiegZalogi"/> (3 km). Świeżo postawiona
+        /// stacja jest więc ZAWSZE poza zasięgiem załogi, dopóki gracz do niej nie doleci —
+        /// i to jest zachowanie zamierzone (nie stawiamy botów, których nikt nie zobaczy).
+        /// Autotest nie umie tam polecieć, więc nie wolno mu z tego robić FAIL-a.
+        /// </summary>
+        public static double DystansDoNajblizszejStacji()
+        {
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (gracz == null || gracz.Character == null)
+            {
+                return -1;
+            }
+            Vector3D pozycja = gracz.GetPosition();
+            double best = -1;
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                EconomyBlock stacja = FactionEconomy.FindContractBlock(Tags[i]);
+                if (stacja == null)
+                {
+                    continue;
+                }
+                double d = Vector3D.Distance(pozycja, stacja.Position);
+                if (best < 0 || d < best)
+                {
+                    best = d;
+                }
+            }
+            return best;
+        }
+
         public void Dispose()
         {
             if (_api != null)

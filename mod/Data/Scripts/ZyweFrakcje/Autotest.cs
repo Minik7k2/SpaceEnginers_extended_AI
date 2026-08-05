@@ -156,6 +156,34 @@ namespace ZyweFrakcje
             get { return _crew != null && _crew.ApiZarejestrowane; }
         }
 
+        /// <summary>
+        /// Czy gracz stoi dość blisko którejkolwiek stacji, żeby załoga miała prawo tam być.
+        /// Bez tego sekcja P zgłaszała FAIL za coś, czego autotest nie mógł spełnić: stacje
+        /// stają 8–15 km od gracza, a załogę dokładamy tylko w promieniu 3 km — więc dopóki
+        /// nikt tam nie doleci, botów NIE MA i to jest zachowanie zamierzone (2026-08-05).
+        /// </summary>
+        private static bool StacjaWZasieguZalogi
+        {
+            get
+            {
+                double d = CrewSpawner.DystansDoNajblizszejStacji();
+                return d >= 0 && d <= CrewSpawner.ZasiegZalogi;
+            }
+        }
+
+        /// <summary>Wymówka dla kroków sekcji P, gdy gracz jest za daleko od stacji.</summary>
+        private static string PowodPozaZasiegiem()
+        {
+            double d = CrewSpawner.DystansDoNajblizszejStacji();
+            string gdzie = d < 0
+                ? "w świecie nie ma jeszcze żadnej stacji frakcji"
+                : "najbliższa stacja jest " + (int)(d / 1000) + " km stąd, a załogę stawiamy " +
+                  "tylko w promieniu " + (int)(CrewSpawner.ZasiegZalogi / 1000) + " km";
+            return "NIE DA SIĘ SPRAWDZIĆ STĄD: " + gdzie + ". To nie jest błąd — botów, " +
+                   "których nikt nie widzi, celowo nie stawiamy. Dolec do stacji i powtórz " +
+                   "`/zf autotest boty`.";
+        }
+
         private List<Krok> _kroki;
         private string _sekcja;
         private int _index;
@@ -1712,7 +1740,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na stacji frakcji (zależność miękka — AiEnabled)",
-                MiekkiGdy = () => !AiEnabledWSwiecie,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 CzekajTikow = 5 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
@@ -1739,11 +1767,22 @@ namespace ZyweFrakcje
                     // wysyłalibyśmy szukającego w stronę [BotType], choć problem leży piętro
                     // niżej: AiEnabled nie odpowiedziało na rejestrację, więc żadne wywołanie
                     // API nie miało prawa zadziałać.
+                    if (!StacjaWZasieguZalogi)
+                    {
+                        return PowodPozaZasiegiem();
+                    }
                     return "na żadnej stacji nie ma postaci NPC, a AiEnabled JEST w świecie. " +
                            (ApiBotowGotowe
-                               ? "API odpowiedziało na rejestrację, więc pierwsze podejrzane " +
-                                 "jest [BotType] w Crew.cs / ZF_Boty.sbc — wiki MES mówi, że " +
-                                 "to pole Name z SBC, a nie SubtypeId"
+                               // NAZWY SĄ JUŻ SPRAWDZONE (2026-08-05) i NIE są przyczyną:
+                               // `Default_Astronaut` figuruje w Characters.sbc z Name równym
+                               // SubtypeId, a AiEnabled buduje RobotSubtypes właśnie z pola
+                               // Name; `Soldier` jest w BotRoleEnemy. Zostaje więc droga
+                               // spawnu na stacji, nie słownik nazw.
+                               ? "API odpowiedziało na rejestrację, a [BotType] i rola są " +
+                                 "poprawne (sprawdzone w plikach gry i AiEnabled). Szukaj " +
+                                 "dalej w Crew.cs: IsValidForPathfinding / IsGridMapReady / " +
+                                 "GetAvailableGridNodes — stacja musi mieć mapę siatki i wolne " +
+                                 "węzły w środku, inaczej SpawnBotQueued nie ma gdzie postawić bota"
                                : "API NIE odpowiedziało na rejestrację (RemoteBotAPI.Valid == " +
                                  "false): to jest przyczyna, a nie nazwy botów. Sprawdź " +
                                  "kolejność modów i czy AiEnabled wstało bez błędu w logu SE");
@@ -1756,7 +1795,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga należy do frakcji, a nie jest bezpańska (P3)",
-                MiekkiGdy = () => !AiEnabledWSwiecie,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 Sprawdz = () =>
                 {
                     for (int i = 0; i < Tagi.Length; i++)
@@ -1778,15 +1817,17 @@ namespace ZyweFrakcje
                               "ŻADNA nie należy do frakcji — MES/AiEnabled nie zawołało " +
                               "SetPlayersFaction, więc bot nie zareaguje na zmianę relacji";
                     }
-                    return "nie ma przy stacjach żadnej postaci NPC do sprawdzenia" +
-                           (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
+                    return StacjaWZasieguZalogi
+                        ? "nie ma przy stacjach żadnej postaci NPC do sprawdzenia" +
+                          (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)")
+                        : PowodPozaZasiegiem();
                 },
             });
 
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na statku rajdowym (trigger PlayerNear 1,5 km)",
-                MiekkiGdy = () => !AiEnabledWSwiecie,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
                 CzekajTikow = 20 * Sekunda,
                 Poll = true,
@@ -1814,15 +1855,17 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga się nie mnoży przy kolejnych przebiegach (P6)",
-                MiekkiGdy = () => !AiEnabledWSwiecie,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 Start = () => { _zalogaPrzed = PoliczZalogeStacji(); },
                 CzekajTikow = 12 * Sekunda,
                 Sprawdz = () =>
                 {
                     if (_zalogaPrzed == 0)
                     {
-                        return "nie ma przy stacjach załogi do policzenia" +
-                               (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
+                        return StacjaWZasieguZalogi
+                            ? "nie ma przy stacjach załogi do policzenia" +
+                              (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)")
+                            : PowodPozaZasiegiem();
                     }
                     int teraz = PoliczZalogeStacji();
                     return teraz <= _zalogaPrzed
