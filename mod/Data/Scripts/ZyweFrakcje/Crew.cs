@@ -139,6 +139,121 @@ namespace ZyweFrakcje
             return best;
         }
 
+        /// <summary>
+        /// `/zf zaloga` — przechodzi tę samą ścieżkę co <see cref="Uzupelnij"/> i MELDUJE każdy
+        /// warunek. Powstało 2026-08-05: boty nie pojawiały się także na stacji, przy graczu
+        /// w zasięgu, a wszystkie gałęzie odmowy były ciche albo prawie ciche — nie było jak
+        /// odróżnić „API milczy" od „brak mapy siatki" od „brak wolnych węzłów".
+        /// Bierze NAJBLIŻSZĄ siatkę frakcji: stację albo statek, co akurat jest pod ręką.
+        /// </summary>
+        public void Diagnostyka()
+        {
+            Powiedz("=== diagnostyka załogi ===");
+            Powiedz("AiEnabled API: Valid=" + (_api != null && _api.Valid) +
+                    ", CanSpawn=" + (_api != null && _api.Valid && _api.CanSpawn));
+            if (_api == null || !_api.Valid)
+            {
+                Powiedz("KONIEC: bez zarejestrowanego API nie ma o czym mówić.");
+                return;
+            }
+
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (gracz == null || gracz.Character == null)
+            {
+                Powiedz("KONIEC: brak gracza.");
+                return;
+            }
+            Vector3D pozycjaGracza = gracz.GetPosition();
+
+            IMyCubeGrid cel = null;
+            string celTag = null;
+            double celDystans = -1;
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                var kandydaci = new List<IMyCubeGrid>(FactionEconomy.FactionGrids(Tags[i]));
+                foreach (IMyCubeGrid g in kandydaci)
+                {
+                    if (g == null || g.MarkedForClose || g.GridSizeEnum != MyCubeSize.Large)
+                    {
+                        continue;
+                    }
+                    double d = Vector3D.Distance(pozycjaGracza, g.GetPosition());
+                    if (celDystans < 0 || d < celDystans)
+                    {
+                        cel = g; celTag = Tags[i]; celDystans = d;
+                    }
+                }
+            }
+            if (cel == null)
+            {
+                Powiedz("KONIEC: w świecie nie ma ŻADNEJ dużej siatki naszych frakcji.");
+                return;
+            }
+            Powiedz("cel: " + (cel.DisplayName ?? "?") + " (" + celTag + "), " +
+                    (int)celDystans + " m stąd, bloków=" + LiczBloki(cel));
+
+            var duza = cel as MyCubeGrid;
+            if (duza == null)
+            {
+                Powiedz("STOP: siatka nie jest MyCubeGrid (nie da się zbudować mapy).");
+                return;
+            }
+            bool pathfinding = _api.IsValidForPathfinding(cel);
+            Powiedz("IsValidForPathfinding: " + pathfinding);
+            if (!pathfinding)
+            {
+                Powiedz("STOP: AiEnabled uważa tę siatkę za nienadającą się pod boty.");
+                return;
+            }
+            bool mapa = _api.IsGridMapReady(duza);
+            Powiedz("IsGridMapReady: " + mapa);
+            if (!mapa)
+            {
+                _api.CreateGridMap(duza);
+                Powiedz("Zamówiłem budowę mapy siatki — poczekaj kilkanaście sekund " +
+                        "i powtórz `/zf zaloga`.");
+                return;
+            }
+
+            var wezly = new List<Vector3D>();
+            _api.GetAvailableGridNodes(duza, CrewPerStation, wezly, null, false);
+            Powiedz("GetAvailableGridNodes: " + wezly.Count + " wolnych węzłów");
+            if (wezly.Count == 0)
+            {
+                Powiedz("STOP: nie ma gdzie postawić bota (brak wnętrza / węzłów).");
+                return;
+            }
+
+            string ignored;
+            long wlasciciel = FactionEconomy.FindTargetIdentity(celTag, out ignored);
+            Powiedz("właściciel dla botów: " + wlasciciel);
+            if (wlasciciel == 0)
+            {
+                Powiedz("STOP: brak tożsamości właściciela — bot byłby bezpański.");
+                return;
+            }
+
+            int index = Array.IndexOf(Tags, celTag);
+            Powiedz("próbuję postawić 1 bota: typ=" + BotType[index] + ", rola=" + Role[index]);
+            _api.SpawnBotQueued(BotType[index], "ZF Test",
+                                new MyPositionAndOrientation(wezly[0], Vector3.Forward, Vector3.Up),
+                                duza, Role[index], wlasciciel, null, null);
+            Powiedz("Zlecenie wysłane do AiEnabled. Jeśli bot się nie pojawi w ~10 s, powód " +
+                    "będzie w Storage/2596208372.sbm_AiEnabled/AiEnabled.log");
+        }
+
+        private static int LiczBloki(IMyCubeGrid grid)
+        {
+            var b = new List<IMySlimBlock>();
+            grid.GetBlocks(b);
+            return b.Count;
+        }
+
+        private static void Powiedz(string tekst)
+        {
+            MyAPIGateway.Utilities.ShowMessage("ZAŁOGA", tekst);
+        }
+
         public void Dispose()
         {
             if (_api != null)

@@ -423,6 +423,25 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Diagnostyka załogi: przechodzi krok po kroku tę samą ścieżkę co CrewSpawner
+            // i MELDUJE, na którym warunku staje. Powstało 2026-08-05, gdy okazało się, że
+            // boty nie pojawiają się także na stacji, przy graczu w zasięgu — a wszystkie
+            // gałęzie odmowy w Crew.cs były do tej pory ciche albo prawie ciche.
+            const string zalogaPrefix = "/zf zaloga";
+            if (messageText.StartsWith(zalogaPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                if (_crew == null)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "CrewSpawner nie wstał (patrz log SE)");
+                }
+                else
+                {
+                    _crew.Diagnostyka();
+                }
+                return;
+            }
+
             // Oddanie siatki frakcji NPC — bez tego nie ma gdzie wystawić kontraktu (Etap 6).
             const string stacjaPrefix = "/zf stacja";
             if (messageText.StartsWith(stacjaPrefix, StringComparison.OrdinalIgnoreCase))
