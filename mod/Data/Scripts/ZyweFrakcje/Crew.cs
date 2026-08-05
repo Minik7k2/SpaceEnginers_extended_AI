@@ -235,11 +235,26 @@ namespace ZyweFrakcje
 
             int index = Array.IndexOf(Tags, celTag);
             Powiedz("próbuję postawić 1 bota: typ=" + BotType[index] + ", rola=" + Role[index]);
+            // CALLBACK jest tu najważniejszy (2026-08-05). AiEnabled przyjął już zlecenie bez
+            // jednego wpisu w swoim logu — czyli nie odmawia GŁOŚNO. `SpawnBotQueued` oddaje
+            // postać właśnie tędy, a `null` znaczy „nie udało się" i to jedyny sposób, żeby
+            // odróżnić „bot powstał, tylko go nie widzisz" od „AiEnabled zwrócił nic".
+            Powiedz("wysyłam zlecenie… (odpowiedź przyjdzie asynchronicznie)");
             _api.SpawnBotQueued(BotType[index], "ZF Test",
                                 new MyPositionAndOrientation(wezly[0], Vector3.Forward, Vector3.Up),
-                                duza, Role[index], wlasciciel, null, null);
-            Powiedz("Zlecenie wysłane do AiEnabled. Jeśli bot się nie pojawi w ~10 s, powód " +
-                    "będzie w Storage/2596208372.sbm_AiEnabled/AiEnabled.log");
+                                duza, Role[index], wlasciciel, null,
+                                postac =>
+                                {
+                                    if (postac == null)
+                                    {
+                                        Powiedz("ODPOWIEDŹ: AiEnabled zwrócił NULL — bot NIE powstał. " +
+                                                "Powód szukaj w Storage/2596208372.sbm_AiEnabled/" +
+                                                "AiEnabled.log");
+                                        return;
+                                    }
+                                    Powiedz("ODPOWIEDŹ: bot POWSTAŁ — \"" + postac.DisplayName +
+                                            "\", id=" + postac.EntityId + ". Rozejrzyj się dookoła.");
+                                });
         }
 
         private static int LiczBloki(IMyCubeGrid grid)
