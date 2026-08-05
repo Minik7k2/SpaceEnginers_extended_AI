@@ -1,5 +1,10 @@
 # brain (C++)
 brain/configs/*.local.toml
+# Configi doraźnych harnessów (np. rules.test.toml pod ręczny test promptu na Bieliku):
+# wskazują ścieżki z KONKRETNEJ maszyny i katalogi scratchpad, więc nie mają czego szukać
+# w repo. Reguła wyżej łapała tylko *.local.toml, przez co `git add -A` wciągał je razem
+# z cudzymi ścieżkami (2026-08-04).
+brain/configs/rules.test.toml
 brain/build/
 brain/cmake-build-*/
 brain/models/

@@ -41,8 +41,22 @@ namespace ZyweFrakcje
 
         // Rola AiEnabled per frakcja. „Soldier" to rola wroga — bot jest członkiem frakcji,
         // więc do gracza strzela dopiero wtedy, gdy reputacja jest wroga (patrz ZF_Boty.sbc).
+        // Role są WERYFIKOWANE (2026-08-02, kod AiEnabled): AllowedBotRoles to suma enumów
+        // BotRoleFriendly/Enemy/Neutral, a porównanie idzie przez role.ToUpperInvariant(),
+        // więc „Soldier" trafia w SOLDIER, a „Grinder" w GRINDER.
         private static readonly string[] Role = { "Soldier", "Soldier", "Soldier" };
-        private static readonly string[] BotType = { "Police_Bot", "Police_Bot", "Police_Bot" };
+
+        // PUŁAPKA (naprawione 2026-08-02): było tu „Police_Bot" — nazwa wzięta z opisu moda
+        // na Workshopie. TAKIEJ POSTACI NIE MA ani w grze, ani w AiEnabled (sprawdzone
+        // grepem po Content i po plikach moda). AiEnabled buduje AllowedBotSubtypes z
+        // MyDefinitionManager.Static.Characters (`charDef.Name ?? SubtypeId`), a
+        // BotFactory.CreateBotObject przerywa spawn dla podtypu spoza tej listy —
+        // zapisując ostrzeżenie WYŁĄCZNIE do własnego logu AiEnabled. Stąd „nikogo nie ma
+        // na pokładzie" bez śladu w logu SE.
+        // Default_Astronaut to domyślny wybór samego AiEnabled (CreateBotObject podstawia
+        // go za pusty subType) i Skeleton=Humanoid, czyli bot chodzi i używa narzędzi.
+        private static readonly string[] BotType =
+            { "Default_Astronaut", "Default_Astronaut", "Default_Astronaut" };
 
         // Kolory frakcji — te same, co w Factions.sbc.
         private static readonly Color[] Kolor =
@@ -63,6 +77,16 @@ namespace ZyweFrakcje
             _api = new RemoteBotAPI();
         }
 
+        /// <summary>
+        /// Czy AiEnabled odpowiedziało na rejestrację, czyli czy mod jest w świecie.
+        /// Czyta to autotest, żeby odróżnić „nie ma moda" (ostrzeżenie) od „mod jest,
+        /// a botów nie ma" (błąd) — patrz <see cref="Autotest"/>.
+        /// </summary>
+        public bool AiEnabledObecny
+        {
+            get { return _api != null && _api.Valid; }
+        }
+
         public void Dispose()
         {
             if (_api != null)
@@ -80,6 +104,13 @@ namespace ZyweFrakcje
             if (_api == null || !_api.Valid)
             {
                 return; // brak AiEnabled — cicho, to jest zależność opcjonalna
+            }
+            if (!_api.CanSpawn)
+            {
+                // AiEnabled bywa zarejestrowane, ale jeszcze nie gotowe stawiać botów
+                // (LocalBotAPI.SpawnBot loguje wtedy „received SpawnBot command before mod
+                // was ready" i zwraca null). Poczekamy do następnego przebiegu.
+                return;
             }
             IMyPlayer player = MyAPIGateway.Session.Player;
             if (player == null || player.Character == null)

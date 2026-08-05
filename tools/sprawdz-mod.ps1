@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Sprawdza mod (C#) BEZ wchodzenia do gry: składnia i typy przez Roslyn + zestawy z Bin64.
 
@@ -43,14 +43,28 @@ function Znajdz-Bin64 {
         "${env:ProgramFiles}\Steam\steamapps\common\SpaceEngineers\Bin64"
     )
     # Steam trzyma dodatkowe biblioteki w libraryfolders.vdf — przeszukujemy je też,
-    # bo gra rzadko stoi na dysku systemowym.
-    $vdf = "${env:ProgramFiles(x86)}\Steam\steamapps\libraryfolders.vdf"
-    if (Test-Path $vdf) {
+    # bo gra rzadko stoi na dysku systemowym. Sam plik potrafi leżeć w kilku miejscach
+    # (instalacja 32- i 64-bitowa, przeniesiony klient), więc sprawdzamy wszystkie.
+    $vdfy = @(
+        "${env:ProgramFiles(x86)}\Steam\steamapps\libraryfolders.vdf",
+        "${env:ProgramFiles}\Steam\steamapps\libraryfolders.vdf",
+        "$env:LOCALAPPDATA\..\..\Steam\steamapps\libraryfolders.vdf"
+    )
+    foreach ($vdf in $vdfy) {
+        if (-not (Test-Path $vdf)) { continue }
         foreach ($linia in Get-Content $vdf) {
             if ($linia -match '"path"\s+"(.+?)"') {
                 $sciezka = $Matches[1] -replace '\\\\', '\'
                 $kandydaci += Join-Path $sciezka "steamapps\common\SpaceEngineers\Bin64"
             }
+        }
+    }
+    # Ostatnia deska ratunku: biblioteka Steam bez własnego libraryfolders.vdf (tak stoi
+    # gra na maszynie deweloperskiej — D:\SteamLibrary) nie trafiłaby tu nigdy, a skrypt
+    # kończył się wtedy „Nie znalazłem Bin64" mimo zainstalowanej gry (2026-08-04).
+    foreach ($dysk in (Get-PSDrive -PSProvider FileSystem)) {
+        foreach ($katalog in @("SteamLibrary", "Steam", "Games\SteamLibrary")) {
+            $kandydaci += Join-Path $dysk.Root "$katalog\steamapps\common\SpaceEngineers\Bin64"
         }
     }
     foreach ($k in $kandydaci) {
@@ -106,11 +120,15 @@ foreach ($wzorzec in $wzorce) {
         if ($natywne -notcontains $dll.Name) { $referencje += $dll.FullName }
     }
 }
-$netstandard = Join-Path $Gra "Facades\netstandard.dll"
-if (Test-Path $netstandard) {
+$netstandardKandydaci = @(
+    (Join-Path $Gra "Facades\netstandard.dll"),
+    (Join-Path $Gra "netstandard.dll")
+)
+$netstandard = $netstandardKandydaci | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($netstandard) {
     $referencje += $netstandard
 } else {
-    Write-Host "UWAGA: brak $netstandard — spodziewaj się CS0012 na ValueType." -ForegroundColor Yellow
+    Write-Host "UWAGA: brak netstandard.dll (szukano: $($netstandardKandydaci -join ', ')) — spodziewaj się CS0012 na ValueType." -ForegroundColor Yellow
 }
 
 $wyjscie = Join-Path ([System.IO.Path]::GetTempPath()) ("zf_mod_" + [Guid]::NewGuid().ToString("N") + ".dll")

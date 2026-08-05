@@ -323,6 +323,28 @@ budowli frakcji NPC, a bez tego I2-I10 nie da się ruszyć. Droga na skróty:
 Od 2026-08-01 nie jest to już konieczne — frakcje stawiają sobie stacje same (I1a-I1d
 niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
 
+**PUŁAPKA — `result[0]` ze `SpawnPrefab` to NIE JEST stacja (znalezione 2026-08-04).**
+Vanillowe prefaby encounterów wożą po kilka siatek i pierwsza bywa dekoracją:
+
+| prefab | `CubeGrid[0]` | prawdziwa stacja |
+|---|---|---|
+| `GE_LogisticsFacility` (HEL) | „Factorum Logistics Facility", 2666 bloków | ta sama siatka |
+| `RE19_PirateDepot` (KRW) | **„Debris", 18 bloków** | `[2]` „Pirate Depot", 425 bloków |
+| `RE05_StagingStation` (WGR) | **„Dead Engineer", 1 blok** | `[2]` „Staging Station", 549 bloków |
+
+Mod dokładał więc terminal zleceń KRW do kawałka gruzu, a WGR do zwłok inżyniera — obok
+stała nietknięta stacja. Zgadza się to co do bloku z zapisem świata (18+3=21 i 1+3=4, gdzie
+3 to nasze bloki). HEL działał wyłącznie dlatego, że u niego siatka zerowa jest tą właściwą,
+czyli **przez przypadek**. Objawy: `/zf stations` → „BRAK bloku kontraktów/sklepu", martwa
+bramka sekcji kontraktów w autoteście i stacje mnożące się co karencję. Poprawka: bierzemy
+NAJWIĘKSZĄ siatkę z `result` (indeksy per prefab zmieniają się z aktualizacjami gry).
+
+Druga połowa tej samej awarii: `ChangeGridOwnership` leciało PRZED dołożeniem bloków, więc
+świeży terminal, sklep i bateria nie przechodziły przez nadanie własności. `BigOwners` — wg
+dekompilacji `MyCubeGridOwnershipManager` to właściciele o maksymalnej liczbie FUNKCJONALNYCH
+bloków — na gruzie nie miały się z czego przeliczyć, a `FactionGrids` szuka właśnie po nich.
+Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
+
 - [ ] **I1a. Stacja powstaje sama:** NOWY świat, nie ruszaj `/zf stacja` → w ciągu ~30 s
   na czacie `HEL/KRW/WGR postawiła stację X km stąd`, jedna frakcja na przebieg.
   `/zf stations` pokazuje dla każdej `blok kontraktów: Stacja <TAG>`.
@@ -330,6 +352,9 @@ niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
   to stan świata: frakcja z blokiem ekonomicznym jest pomijana). To samo po `/zf stacja`
   — frakcja z ręcznie oddaną siatką nie dostaje drugiej stacji.
   Automat (bez reloadu): `/zf autotest stacje` — wykrywa dwie stacje tej samej frakcji.
+  Wariant bez reloadu zweryfikowany w grze 2026-08-02 (HEL/KRW/WGR: PASS, po jednej
+  stacji na frakcję) — PEŁNY wariant (zapisz i wczytaj świat) wciąż otwarty, checkbox
+  celowo zostaje odznaczony do czasu tamtego testu.
 - [ ] **I1c. Stacja działa jak stacja:** dolec do niej → terminal zleceń pokazuje kontrakty
   tej frakcji (`/zf kontrakt <TAG>`), a `/zf ceny` widzi jej sklep (`ofert: N`).
   Jeśli `ofert: 0`, sklep NPC nie dostał asortymentu — patrz sekcja N, to osobny problem.
@@ -416,7 +441,7 @@ niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
 - [x] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
   `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
   niż +20 z dostawy. Kwota nagrody też jest przemnożona.
-- [x] **I19a. Poszukiwania stawiają rekwizyt:** `/zf kontrakt WGR poszukiwania` →
+- [ ] **I19a. Poszukiwania stawiają rekwizyt:** `/zf kontrakt WGR poszukiwania` →
   ~8 km od gracza powstaje mały grid „Zgubiony modul" (beacon ZGUBA na HUD), a kontrakt
   celuje w NIEGO, nie w stację. Sprawdź w terminalu, że zlecenie da się wykonać:
   dolatujesz, łapiesz podwoziem magnetycznym, wieziesz pod stację frakcji.
@@ -452,6 +477,13 @@ niżej), a `/zf stacja` zostaje wyłącznie jako rusztowanie do testów.
   z `ProducerEnabled`), zły `gridId` (`TryFindProp` zwraca `grid.EntityId`).
   `MyContractRepair` tego warunku NIE MA, więc `naprawa` (I19b) działała mimo braku flagi.
   DO POWTÓRZENIA W GRZE: I19a i I6 na nowym buildzie moda.
+
+  **UZUPEŁNIENIE 2026-08-02 — sama `SetNpcSpawnedGrid` NIE WYSTARCZA.** `MyCubeGrid.Init`
+  cofa flagę na `false`, gdy żaden blok nie ma `BuiltBy` ustawionego na tożsamość NPC, więc
+  opcja musi lecieć razem z `SetAuthorship` (tak jak w vanillowym `MyContractWithSpawnableGrid
+  .SpawnPrefab`). Poprawione w `Contracts.cs.SpawnProp` i w rekwizycie autotestu. Checkbox
+  I19a wraca do ODZNACZONYCH: poprzednie „zaliczenie" opisywało poprawkę, która sama z siebie
+  nie działała, a `/zf autotest rekwizyt` sprawdza samą flagę, nie wykonanie zlecenia.
 - [x] **I19b. Naprawa stawia wrak tylko w razie potrzeby:** przy nieuszkodzonych
   siatkach WGR `/zf kontrakt WGR naprawa` → 2,5 km od stacji pojawia się „Uszkodzony
   modul frakcji" (beacon AWARIA) z niepełnymi blokami i to on jest celem. Gdy jakaś
@@ -511,22 +543,23 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
   MyObjectBuilder_Ingot/Nickel (w inwentarzu: 700)`, sztabki widać w plecaku.
   Warianty: `/zf daj Ore/Ice 100`, `/zf daj Component/SteelPlate 50`, samo
   `/zf daj` → podpowiedź składni, `/zf daj bzdura 5` → „nic nie weszło".
-- [ ] **K2. Żądanie trybutu:** `/zf raid KRW`, potem `/zf okup-surowce KRW` →
+- [x] **K2. Żądanie trybutu:** `/zf raid KRW`, potem `/zf okup-surowce KRW` →
   `[KRW] Trybut za pokój: dostarcz N …` + GPS `ZRZUT KRW`, w świecie stoi skrzynka
   z beaconem ZRZUT, statki KRW wstrzymują ogień.
   Automat: `/zf autotest okup` — skrzynka, GPS i wstrzymanie ognia.
+  Zweryfikowane automatem w grze 2026-08-02 (`/zf autotest wszystko`): PASS.
 - [ ] **K3. Dostawa:** `/zf daj <żądany surowiec> <żądana ilość>`, przełóż towar do
   skrzynki → `[KRW] Trybut dostarczony`, `ransom_paid` w events.jsonl, relacja +20,
   skrzynka i GPS znikają, statki odlatują.
 - [ ] **K4. Deadline:** to samo bez dostawy → po `deadline_s` `[KRW] Czas na trybut
   minął`, `ransom_expired`, skrzynka i GPS znikają, ataki wracają.
-- [ ] **K5. Pokój kasuje trybut (regresja 2026-07-28):** przy wiszącym żądaniu
+- [x] **K5. Pokój kasuje trybut (regresja 2026-07-28):** przy wiszącym żądaniu
   `/zf okup KRW` → `[KRW] Żądanie trybutu odwołane — skrzynka zrzutu znika`,
   skrzynka i GPS znikają od razu, a po upływie deadline'u NIE ma `ransom_expired`
   ani kary za złamaną obietnicę. Wcześniej skrzynka wisiała do końca okna i pokój
   kończył się karą.
-  Automat: `/zf autotest okup`.
-- [ ] **K6. Skrzynka NIE znika sama (regresja 2026-07-28):** po `/zf okup-surowce KRW`
+  Automat: `/zf autotest okup`. Zweryfikowane w grze 2026-08-02: PASS.
+- [x] **K6. Skrzynka NIE znika sama (regresja 2026-07-28):** po `/zf okup-surowce KRW`
   skrzynka stoi ~120 m przed graczem i **zostaje** — wcześniej zjadał ją sprzątacz śmieci
   SE (świat: `TrashRemovalEnabled=true`, `BlockCountThreshold=20`, `PlayerDistanceThreshold=500`;
   2-blokowy, niestatyczny, bezpański grid dalej niż 500 m = podręcznikowy śmieć). Teraz
@@ -534,6 +567,7 @@ postaci. Nie wymaga trybu eksperymentalnego ani narzędzi kreatywnych.
   Kontrtest: gdyby mimo to przepadła, ma przyjść `[KRW] Skrzynka zrzutu przepadła —
   żądanie trybutu anulowane (bez kary)` i BRAK kary w konsoli braina.
   Automat: `/zf autotest okup` sprawdza, że skrzynka stoi i ma GPS.
+  Zweryfikowane w grze 2026-08-02: PASS.
 - [ ] **K7. Frakcja wie, ile zostało czasu:** przy wiszącym żądaniu napisz
   `@krw ile mi zostało czasu?` → odpowiedź podaje realną liczbę minut i ilość surowca
   (brain wstrzykuje to do promptu). Wcześniej model zmyślał.
@@ -597,9 +631,19 @@ do naszej frakcji — najprościej `/zf stacja <frakcja>` na siatce z blokiem sk
 (patrz sekcja I). Kontrola przez `/zf ceny` i przez terminal sklepu.
 
 Kod opiera się na MODOWYM `Sandbox.ModAPI.IMyStoreBlock.GetStoreItems` i zapisywalnym
-`VRage.Game.ModAPI.IMyStoreItem.PricePerUnit`/`Amount`. Sygnatury wzięte z dokumentacji
-ModAPI, ale — w odróżnieniu od kontraktów — NIE zostały potwierdzone dekompilacją, więc
-pierwszy test rozstrzyga, czy w ogóle mamy dostęp do ofert.
+`VRage.Game.ModAPI.IMyStoreItem.PricePerUnit`/`Amount`.
+
+**GŁÓWNE PYTANIE SEKCJI JEST JUŻ ROZSTRZYGNIĘTE (przebieg w grze 2026-08-02).**
+`/zf autotest wszystko` przeszedł pięć kroków cennika: `GetStoreItems` **zwraca** oferty,
+`PricePerUnit` **jest zapisywalne** (mnożnik 1.5 wszedł), mnożnik liczy się od bazy i się
+NIE składa, embargo zeruje `Amount`, a jego zniesienie wraca do ilości sprzed embarga. To
+pokrywa grę po stronie N1, N3, N5, N7 i N8 — checkboxy zostają odznaczone, bo autotest
+robi to na ładunkach podanych wprost, a nie na cenie odczytanej okiem w terminalu, i nie
+sprawdza wariantów z wczytaniem świata (N9). Wątpliwość „mnożnik może lecieć w próżnię"
+jest natomiast zamknięta.
+
+Uwaga na zależność: bez działającej stacji frakcji ze sklepem cała sekcja jest martwa —
+patrz pułapka `result[0]` w sekcji I.
 
 - [ ] **N1. Sklep w zasięgu:** `/zf ceny` → dla frakcji ze stacją ma być `ofert: N` (N>0).
   `BRAK bloku sklepu frakcji` = mod nie widzi sklepu; sprawdź `/zf stations`.
@@ -657,18 +701,27 @@ check MES, planeta), nie literówki. Wszystko testuj w KOSMOSIE.
   `/zf raid WGR` → trzy RÓŻNE kadłuby (HEL wojskowy, KRW piracki, WGR górniczy), nie
   trzy razy ten sam dron. Komunikat mówi, która grupa poszła (`ZF_Raid_<TAG>`).
   Automat: `/zf autotest floty` sprawdza, że statek staje i ma pilota — sylwetkę oceniasz okiem.
-- [ ] **O2. Prefaby vanilli istnieją:** żaden spawn nie kończy się „prefab nie powstał".
+- [x] **O2. Prefaby vanilli istnieją:** żaden spawn nie kończy się „prefab nie powstał".
   Podejrzane nazwy: `C33_Military_Enforcer`, `C22_Trade_Merchant`, `C40_Pirate_Vulture`,
   `C42_Pirate_SalvageCarrier`, `C12_Mining_Armed_Tender`, `C10_Mining_Carriage` — wzięte
   ze skanu prefabów, nie potwierdzone uruchomieniem.
+  Zweryfikowane w grze 2026-08-02 (`/zf autotest floty`): rajd HEL/KRW/WGR i konwój WGR
+  wszystkie „faktycznie stają w świecie" — PASS, żaden „prefab nie powstał".
 - [ ] **O3. Pilot w dużym kadłubie:** duży rajdowy statek (HEL/KRW) **leci na gracza**,
-  a nie dryfuje po prostej. To sprawdza, czy manipulacja podmieniła kostkę pancerza na
-  `RivalAIRemoteControlLarge`. `/zf autotest floty` mówi tylko, czy blok JEST — czy
-  RivalAI go używa, widać dopiero po zachowaniu statku.
-  Automat: `/zf autotest floty` mierzy teraz DYSTANS przebyty w 30 s (próg 200 m), nie tylko obecność bloku.
-- [ ] **O4. Manipulacja nie trafia w małą siatkę:** patrole (małe drony) mają swoje
-  zdalne sterowanie i NIE dostają dodatkowego bloku; żadna grupa patrolowa nie ma
-  `[ManipulationGroups]`. Objaw błędu: blok o złym rozmiarze wtopiony w kadłub.
+  a nie dryfuje po prostej. Sprawdza to, czy `TestSpawner.EnsurePilot` podmienił kostkę
+  pancerza na `RivalAIRemoteControlLarge` — od 2026-08-02 robi to KOD, a nie manipulacja
+  MES (`[ReplaceArmorBlocksWithModules]` ma zamkniętą listę modułów i bloku zdalnego
+  sterowania wstawić nie potrafi; profil `ZF_ManipulacjaGrupa_Pilot` został w SBC jako
+  opisana ślepa uliczka). `/zf autotest floty` mówi tylko, czy blok JEST i czy kadłub
+  przebył 200 m w 30 s — czy RivalAI naprawdę go prowadzi, widać dopiero po zachowaniu.
+  **Otwarte pytanie, na które odpowiada dopiero ten test:** czy RivalAI w ogóle podłączy
+  zachowanie do bloku dodanego PO spawnie (MES zapisuje CustomData w trakcie spawnu).
+  Ostatni przebieg (2026-08-02) dał 122 m przy progu 200 m, czyli kadłub NIE leciał.
+- [ ] **O4. Podmiana nie trafia w małą siatkę:** patrole (małe drony) mają swoje
+  zdalne sterowanie i NIE dostają dodatkowego bloku — `EnsurePilot` wychodzi od razu,
+  gdy siatka ma już `IMyRemoteControl`. Objaw błędu: blok o złym rozmiarze wtopiony
+  w kadłub. Uwaga: `[ManipulationGroups]` nie ma już ŻADNA grupa, więc sprawdzanie
+  samych danych niczego tu nie dowodzi — liczy się zachowanie w grze.
 - [ ] **O5. Konwój jedzie trasą:** `/zf raid WGR convoy` → frachtowiec **leci trasą
   i po niej znika**, zamiast dryfować po prostej z nadaną prędkością. To był powód
   podpięcia `BehaviorName:CargoShip` + gotowego autopilota MES.
@@ -685,10 +738,20 @@ Zależność MIĘKKA: bez moda AiEnabled (Workshop 2596208372) nikt się nie poj
 NIE jest błąd — reszta ma działać bez zmian. Dwie drogi: deklaratywna dla statków
 (`ZF_Boty.sbc` przez MES) i programowa dla stacji (`Crew.cs` przez API).
 
-**Najbardziej podejrzane miejsce:** wartości `[BotType]` (`Police_Bot`, `Space_Skeleton`)
-i `[BotBehavior]` (`Soldier`, `Grinder`) wzięto z opisu moda na Workshopie, a nie z jego
-plików. Wiki MES mówi wprost, że `BotType` to pole `Name` z SBC, a NIE SubtypeId — jeśli
-boty się nie pojawiają, zacznij od tego.
+**ROZSTRZYGNIĘTE 2026-08-02:** `Police_Bot` i `Space_Skeleton` — nazwy wzięte z opisu moda
+na Workshopie — **nie istnieją ani w grze, ani w AiEnabled** (`Characters.sbc` +
+`Characters_Npc.sbc` mają dokładnie 9 postaci). AiEnabled przerywał wtedy spawn, pisząc
+tylko do własnego logu, więc w grze objawem był pusty pokład i cisza w logu SE. Teraz
+wszędzie idzie `Default_Astronaut`, a `tools/waliduj_sbc.py` pilnuje, żeby `[BotType]`
+i `[BotBehavior]` (oraz tablice `BotType`/`Role` w `Crew.cs`) zostały w zbiorze nazw,
+które gra zna. Do weryfikacji w grze zostaje, czy przy poprawnych nazwach boty naprawdę
+wstają.
+
+**UWAGA na wynik autotestu (poprawione 2026-08-04):** sekcja P raportuje brak botów jako
+OSTRZEŻENIE tylko wtedy, gdy AiEnabled NIE MA w świecie. Gdy mod jest załadowany, brak
+załogi to **BŁĄD**. Wcześniej było to zawsze ostrzeżenie i przebieg z 2026-08-02
+zameldował „bez AiEnabled to normalne" na świecie, w którym AiEnabled v1.9 było aktywne —
+czyli cztery prawdziwe porażki przebrane za łagodne żółte linijki.
 
 - [ ] **P1. Załoga na stacji:** dolec bliżej niż 3 km do stacji frakcji → po ~1 min po
   pokładzie chodzą postacie NPC. Automat: `/zf autotest boty` (OSTRZEŻENIE bez AiEnabled).

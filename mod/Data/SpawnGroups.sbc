@@ -98,15 +98,18 @@
         [UseRivalAi:true]
         [RivalAiReplaceRemoteControl:true]
 
-        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
-
       </Description>
       <IsPirate>true</IsPirate>
       <Frequency>1.0</Frequency>
       <Prefabs>
         <!-- 769 bloków, 3 wieżyczki: korporacja nie przysyła roju, tylko jeden okręt,
-             który ma załatwić sprawę. Własnego zdalnego sterowania nie ma — dostaje je
-             z manipulacji (kostka pancerza → RivalAIRemoteControlLarge). -->
+             który ma załatwić sprawę. Własnego zdalnego sterowania nie ma — [ManipulationGroups]
+             NIC by mu nie dało (dekompilacja MES 2026-08-02: ArmorModuleReplacement filtruje
+             przez zamkniętą listę modułów, RemoteControl nie jest na niej), więc blok dokłada
+             TestSpawner.EnsurePilot na żywej siatce po spawnie.
+             UWAGA: ZF_Fighter_HEL (z ZF_Boty.sbc) to NIE to samo co ZF_Fighter — niesie
+             [Triggers:ZF_Trigger_Zaloga_HEL], czyli załogę. EnsurePilot musi odtworzyć
+             DOKŁADNIE ten profil, bo MES nie ma na czym go zapisać (brak RC przy manipulacji). -->
         <Prefab SubtypeId="C33_Military_Enforcer">
           <Position>
             <X>0.0</X>
@@ -140,8 +143,6 @@
 
         [UseRivalAi:true]
         [RivalAiReplaceRemoteControl:true]
-
-        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
 
       </Description>
       <IsPirate>true</IsPirate>
@@ -222,8 +223,6 @@
         [UseRivalAi:true]
         [RivalAiReplaceRemoteControl:true]
 
-        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
-
       </Description>
       <IsPirate>true</IsPirate>
       <Frequency>1.0</Frequency>
@@ -264,8 +263,6 @@
 
         [UseRivalAi:true]
         [RivalAiReplaceRemoteControl:true]
-
-        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
 
       </Description>
       <IsPirate>true</IsPirate>
@@ -347,14 +344,13 @@
         [UseRivalAi:true]
         [RivalAiReplaceRemoteControl:true]
 
-        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
-
       </Description>
       <IsPirate>true</IsPirate>
       <Frequency>1.0</Frequency>
       <Prefabs>
         <!-- Koniec kompromisu: górnicy nie latają już pożyczonym „Assault Support",
-             tylko własnym zbrojnym tendrem (716 bloków). Zdalne sterowanie z manipulacji. -->
+             tylko własnym zbrojnym tendrem (716 bloków). Zdalne sterowanie dokłada
+             TestSpawner.EnsurePilot po spawnie — [ManipulationGroups] tego nie potrafi. -->
         <Prefab SubtypeId="C12_Mining_Armed_Tender">
           <Position>
             <X>0.0</X>
@@ -388,8 +384,6 @@
 
         [UseRivalAi:true]
         [RivalAiReplaceRemoteControl:true]
-
-        [ManipulationGroups:ZF_ManipulacjaGrupa_Pilot]
 
       </Description>
       <IsPirate>true</IsPirate>

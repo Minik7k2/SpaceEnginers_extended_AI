@@ -212,6 +212,18 @@ docs/protocol.md                # spec mostka JSONL
   wylądować kilkaset metrów od siebie. Warunek postawienia jest STANEM ŚWIATA, nie zapisem
   w storage — stąd idempotencja po wczytaniu świata i samodzielna odbudowa po zburzeniu
   (karencja ~5 min). `/zf stacja` zostaje jako rusztowanie testowe, ale nie jest konieczne.
+  **PUŁAPKA — `result[0]` ze `SpawnPrefab` to nie stacja (2026-08-04).** Prefaby encounterów
+  wożą po kilka siatek i pierwsza bywa dekoracją: `RE19_PirateDepot[0]` to „Debris" (18 bloków,
+  stacja jest pod `[2]`, 425 bloków), `RE05_StagingStation[0]` to „Dead Engineer" (1 blok,
+  stacja pod `[2]`, 549). Mod przykręcał więc terminal zleceń KRW do gruzu, a WGR do zwłok —
+  potwierdzone co do bloku w zapisie świata (18+3=21, 1+3=4). HEL działał PRZEZ PRZYPADEK, bo
+  u niego `[0]` jest tą właściwą siatką. Bierzemy NAJWIĘKSZĄ siatkę z `result`; indeksów per
+  prefab nie wpisujemy, bo zmieniają się z aktualizacjami gry, a błąd byłby znów cichy.
+  Tamże: `ChangeGridOwnership` musi lecieć PO `AddBlock`, nie przed — `BigOwners` (wg
+  dekompilacji `MyCubeGridOwnershipManager`: właściciele o maksymalnej liczbie FUNKCJONALNYCH
+  bloków) inaczej nie mają się z czego przeliczyć i `FactionGrids` nie widzi stacji, choć
+  bloki na niej stoją. Objaw: `/zf stations` mówi „BRAK bloku kontraktów", a spawner w kółko
+  melduje „stacja istnieje, ale była niekompletna".
   **Cennik (`price_update`, 2026-07-31):** relacja rusza nie tylko liczbę w oknie frakcji,
   ale i to, ile płacisz przy ladzie. Brain liczy mnożnik (`[ceny]` w rules.toml, odcinkowo
   liniowo: -100 → `mnoznik_wrog`, 0 → dokładnie 1.0, +100 → `mnoznik_sojusznik`), mod
