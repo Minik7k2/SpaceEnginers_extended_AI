@@ -499,7 +499,21 @@ namespace ZyweFrakcje
             if (!result.Success)
             {
                 contractId = 0;
-                powod = "gra odrzuciła kontrakt frakcji " + faction;
+                // NAJCZĘSTSZA PRZYCZYNA, ustalona dekompilacją + logiem SE (2026-08-05):
+                // tożsamość właściciela bloku NIE MA KONTA w banku gry. `MyBankingSystem
+                // .GetBalance` zwraca wtedy -1 (a nie 0), więc warunek gry
+                //     GetBalance(startBlock.OwnerId) < MoneyReward
+                // jest spełniony ZAWSZE i leci Fail_NotEnoughFunds — niezależnie od tego,
+                // ile frakcja ma na swoim koncie i ile jej dosypiemy. Nasze dosypanie też
+                // przepada po cichu: ChangeBalanceInternal na brakującym koncie tylko loguje
+                // „Target Identifier <id> does not contain account" i zwraca false.
+                // Konta zakłada gra przy tworzeniu tożsamości NPC i przy WCZYTYWANIU świata
+                // (MyPlayerCollection.LoadIdentities), więc świeżo wygenerowane frakcje
+                // z Factions.sbc bywają bez konta aż do pierwszego zapisu i wczytania.
+                // Z ModAPI konta założyć się nie da (MyBankingSystem poza whitelistą).
+                powod = "gra odrzuciła kontrakt frakcji " + faction +
+                        " (najpewniej właściciel bloku nie ma konta w banku — zapisz i wczytaj " +
+                        "świat, potem powtórz; w logu SE szukaj \"does not contain account\")";
                 return false;
             }
             contractId = result.ContractId;
