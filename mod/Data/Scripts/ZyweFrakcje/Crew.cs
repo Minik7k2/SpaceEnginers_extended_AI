@@ -28,7 +28,11 @@ namespace ZyweFrakcje
     /// </summary>
     internal sealed class CrewSpawner
     {
-        private const int CheckEveryTicks = 3600;  // ~60 s — boty są drogie, nie ma pośpiechu
+        // 15 s, nie 60: statek rajdowy potrafi zostać wycofany (stand_down) szybciej, niż
+        // doczekałby się załogi, a autotest daje na to okno 40 s.
+        private const int CheckEveryTicks = 900;
+        // Zasięg dla STATKÓW — ten sam próg co trigger PlayerNear w ZF_Boty.sbc (1,5 km).
+        private const double StatekRange = 1500;
         private const int RetryTicks = 36000;      // ~10 min karencji na stację
         private const int CrewPerStation = 3;
         private const double CrewRadius = 150;     // w tym promieniu liczymy „załogę tej stacji"
@@ -186,6 +190,68 @@ namespace ZyweFrakcje
                 _nextTry[stacja.GridId] = tick + RetryTicks;
                 Uzupelnij(i, stacja);
                 return; // jedna stacja na przebieg
+            }
+
+            ZalogaNaStatkach(tick, pozycjaGracza);
+        }
+
+        /// <summary>
+        /// Załoga na statkach rajdowych — PROGRAMOWO, tak samo jak na stacjach (2026-08-05).
+        ///
+        /// Dlaczego nie przez MES, skoro `ZF_Boty.sbc` ma komplet profili, akcji i triggerów:
+        /// bo ta droga nie działa dla NASZYCH kadłubów i wiemy dlaczego. Duże prefaby vanilli
+        /// (Vulture, Enforcer, Armed Tender…) NIE MAJĄ bloku zdalnego sterowania, więc w chwili
+        /// spawnu MES nie ma gdzie zapisać zachowania ani podpiąć triggerów. Blok dokłada nasz
+        /// `TestSpawner.EnsurePilot` DOPIERO w callbacku po spawnie — RivalAI odczytuje z niego
+        /// `[BehaviorName:Fighter]` (statek faktycznie leci, mamy to potwierdzone w autoteście),
+        /// ale `[Triggers:...]` jest już wtedy po herbacie: lista triggerów zachowania została
+        /// zamknięta wcześniej. Objaw: w logu AiEnabled NIE MA ANI JEDNEJ próby spawnu bota —
+        /// czyli nikt o nią nie prosi, a nie że AiEnabled odmawia.
+        ///
+        /// Zamiast walczyć z kolejnością faz w cudzym modzie, prosimy sami. Uchwyt do AiEnabled
+        /// już mamy i już działa (patrz <see cref="ApiZarejestrowane"/>), a `Uzupelnij` jest ten
+        /// sam co dla stacji — buduje mapę siatki, znajduje wolne węzły i stawia załogę.
+        /// Profile w `ZF_Boty.sbc` zostają: są poprawne, kosztują tyle co nic i zadziałają same,
+        /// gdyby kiedyś trafił się kadłub z własnym blokiem zdalnego sterowania.
+        /// </summary>
+        private void ZalogaNaStatkach(int tick, Vector3D pozycjaGracza)
+        {
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                List<IMyCubeGrid> statki = TestSpawner.SledzoneSiatki(Tags[i]);
+                for (int s = 0; s < statki.Count; s++)
+                {
+                    IMyCubeGrid grid = statki[s];
+                    if (grid == null || grid.MarkedForClose)
+                    {
+                        continue;
+                    }
+                    // Boty nie chodzą po małych siatkach — patrole odpadają z definicji.
+                    if (grid.GridSizeEnum != MyCubeSize.Large)
+                    {
+                        continue;
+                    }
+                    Vector3D pozycja = grid.GetPosition();
+                    // Ten sam próg co trigger PlayerNear w ZF_Boty.sbc, żeby zachowanie było
+                    // jedno, niezależnie od tego, która droga bota postawi.
+                    if (Vector3D.DistanceSquared(pozycjaGracza, pozycja) > StatekRange * StatekRange)
+                    {
+                        continue;
+                    }
+                    int next;
+                    if (_nextTry.TryGetValue(grid.EntityId, out next) && tick < next)
+                    {
+                        continue;
+                    }
+                    _nextTry[grid.EntityId] = tick + RetryTicks;
+                    Uzupelnij(i, new EconomyBlock
+                    {
+                        GridId = grid.EntityId,
+                        Position = pozycja,
+                        GridName = grid.DisplayName,
+                    });
+                    return; // jeden statek na przebieg
+                }
             }
         }
 
