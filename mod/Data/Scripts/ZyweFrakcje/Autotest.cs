@@ -1827,7 +1827,12 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na statku rajdowym (trigger PlayerNear 1,5 km)",
-                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
+                // UWAGA: ten krok NIE zależy od odległości do STACJI (poprawka 2026-08-05).
+                // Załogę na statku stawia MES przez trigger PlayerNear 1500 m na samym
+                // kadłubie, więc liczy się dystans do STATKU. Podpięcie tu bramki
+                // stacyjnej ukrywałoby prawdziwą porażkę: gracz stojący 200 m od rajdu
+                // ma prawo oczekiwać załogi niezależnie od tego, gdzie stoją stacje.
+                MiekkiGdy = () => !AiEnabledWSwiecie,
                 Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
                 CzekajTikow = 20 * Sekunda,
                 Poll = true,
