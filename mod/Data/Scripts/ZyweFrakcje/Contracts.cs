@@ -185,6 +185,16 @@ namespace ZyweFrakcje
                 return;
             }
 
+            // Raz odrzucone = odrzucane do końca sesji (patrz _brakKonta). Nie ma sensu
+            // powtarzać próby przy każdym ticku i przy każdym przebiegu autotestu — poza
+            // zasypaniem czatu nic to nie daje, a prawdziwy komunikat ginie w powtórkach.
+            if (_brakKonta)
+            {
+                Rozstrzygniete(zadany, null, 0,
+                    "gra odrzuca zlecenia w tej sesji (brak konta w banku — wymaga wczytania świata)");
+                return;
+            }
+
             // Gra na odmowę zwraca samo Success=false — MyAddContractResultWrapper ma tylko
             // { Success, ContractId, ContractConditionId }, żadnego powodu. Dwa warunki, które
             // wywracają AddContract najczęściej, sprawdzamy więc sami i mówimy o nich wprost.
@@ -492,6 +502,20 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// Czy gra odrzuciła choć raz zlecenie w tej sesji. Ustalone 2026-08-05: praktycznie
+        /// zawsze znaczy to „tożsamość właściciela bloku nie ma konta w banku", a ten stan
+        /// NIE ZMIENI SIĘ do końca sesji — konta zakłada gra przy WCZYTYWANIU świata
+        /// (MyPlayerCollection.LoadIdentities robi to dla każdej tożsamości z zapisu, która
+        /// konta nie ma), a z ModAPI założyć go nie można. Dalsze próby są więc pewną stratą:
+        /// dotąd każdy tick i każdy przebieg autotestu wypluwał tę samą ścianę tekstu na czat.
+        /// Mówimy o tym RAZ, konkretnie, i przestajemy próbować.
+        /// </summary>
+        private static bool _brakKonta;
+
+        /// <summary>Czy w tej sesji gra odrzucała zlecenia (podgląd dla autotestu i diagnostyki).</summary>
+        public static bool BrakKontaWBanku { get { return _brakKonta; } }
+
         /// <summary>Wynik AddContract na nasze out-paramy (gra potrafi odrzucić zlecenie bez podania powodu).</summary>
         private static bool Added(MyAddContractResultWrapper result, string faction, out long contractId,
                                   out string powod)
@@ -499,6 +523,7 @@ namespace ZyweFrakcje
             if (!result.Success)
             {
                 contractId = 0;
+                _brakKonta = true;
                 // NAJCZĘSTSZA PRZYCZYNA, ustalona dekompilacją + logiem SE (2026-08-05):
                 // tożsamość właściciela bloku NIE MA KONTA w banku gry. `MyBankingSystem
                 // .GetBalance` zwraca wtedy -1 (a nie 0), więc warunek gry
@@ -511,9 +536,13 @@ namespace ZyweFrakcje
                 // (MyPlayerCollection.LoadIdentities), więc świeżo wygenerowane frakcje
                 // z Factions.sbc bywają bez konta aż do pierwszego zapisu i wczytania.
                 // Z ModAPI konta założyć się nie da (MyBankingSystem poza whitelistą).
-                powod = "gra odrzuciła kontrakt frakcji " + faction +
-                        " (najpewniej właściciel bloku nie ma konta w banku — zapisz i wczytaj " +
-                        "świat, potem powtórz; w logu SE szukaj \"does not contain account\")";
+                powod = "gra odrzuciła kontrakt frakcji " + faction + " — właściciel bloku nie ma " +
+                        "konta w banku";
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "ZLECENIA WYŁĄCZONE DO KOŃCA TEJ SESJI: tożsamości frakcji nie mają kont " +
+                    "w banku gry, a gra zakłada je tylko przy WCZYTYWANIU świata. ZAPISZ ŚWIAT " +
+                    "I WCZYTAJ GO PONOWNIE — wtedy zlecenia ruszą. (Na świeżo utworzonym świecie " +
+                    "to normalne; w logu SE widać \"does not contain account\".)");
                 return false;
             }
             contractId = result.ContractId;
