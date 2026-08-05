@@ -362,17 +362,36 @@ namespace ZyweFrakcje
                 case "transport":
                 {
                     EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
-                    if (target == null)
+                    MyContractHauling c;
+                    if (target != null)
                     {
-                        powod = "w świecie nie ma drugiej stacji z blokiem kontraktów/sklepem";
-                        return false;
-                    }
-                    var c = new MyContractHauling(start.BlockId, money, collateral, durationSeconds,
+                        c = new MyContractHauling(start.BlockId, money, collateral, durationSeconds,
                                                   target.BlockId);
+                        opis = "transport ładunku do " + (target.GridName ?? "innej stacji");
+                    }
+                    else
+                    {
+                        // DRUGA DROGA (2026-08-05): celem jest STACJA FRAKCJI, nie drugi blok.
+                        // Nasz spawner stawia frakcji dokładnie JEDNĄ stację, więc warunek
+                        // „dwa bloki tego samego właściciela" w normalnej grze nie miał szans —
+                        // transport schodził na dostawę zawsze, a nie tylko wyjątkowo.
+                        // Generator gry sprawdza właściciela WYŁĄCZNIE wtedy, gdy cel jest
+                        // blokiem (`endBlock != null`); przy EndFactionStationId ta kontrola
+                        // w ogóle się nie wykonuje, a frakcje mają po kilka stacji vanilla
+                        // (WGR w świecie testowym: 7).
+                        long stacja = FactionEconomy.FirstFactionStationId(faction);
+                        if (stacja == 0)
+                        {
+                            powod = "frakcja nie ma ani drugiego bloku, ani własnej stacji vanilla";
+                            return false;
+                        }
+                        c = new MyContractHauling(start.BlockId, money, collateral, durationSeconds, 0);
+                        c.EndFactionStationId = stacja;
+                        opis = "transport ładunku do stacji frakcji";
+                    }
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
                     c.OnContractAcquired = onTaken;
-                    opis = "transport ładunku do " + (target.GridName ?? "innej stacji");
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
 

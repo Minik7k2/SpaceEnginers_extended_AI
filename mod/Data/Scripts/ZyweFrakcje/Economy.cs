@@ -236,6 +236,33 @@ namespace ZyweFrakcje
             return null;
         }
 
+        /// <summary>
+        /// Pierwsza stacja vanillowej ekonomii należąca do tej frakcji (0 = frakcja nie ma
+        /// żadnej). To NIE jest nasza stacja ze StationSpawnera — to wpis w
+        /// <c>IMyFaction.Stations</c>, który gra rozpoznaje jako punkt docelowy zlecenia.
+        /// Używa tego transport, gdy nie ma drugiego bloku tego samego właściciela.
+        /// </summary>
+        public static long FirstFactionStationId(string factionTag)
+        {
+            IMyFaction faction = string.IsNullOrEmpty(factionTag)
+                ? null
+                : MyAPIGateway.Session.Factions.TryGetFactionByTag(factionTag);
+            // faction.Stations to DictionaryValuesReader (struktura), więc porównanie z null
+            // się nie kompiluje — wystarczy sprawdzić samą frakcję.
+            if (faction == null)
+            {
+                return 0;
+            }
+            foreach (IMyFactionStation station in faction.Stations)
+            {
+                if (station.Id != 0)
+                {
+                    return station.Id;
+                }
+            }
+            return 0;
+        }
+
         /// <summary>Właściciel bloku po jego EntityId (0 = nie znaleziono albo niczyj).</summary>
         public static long BlockOwner(long blockId)
         {
