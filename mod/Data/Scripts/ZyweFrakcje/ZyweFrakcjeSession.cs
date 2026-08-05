@@ -66,6 +66,28 @@ namespace ZyweFrakcje
         /// </summary>
         public override void LoadData()
         {
+            // Załoga na stacjach przez AiEnabled. Zależność MIĘKKA: bez tamtego moda API
+            // zgłasza się jako niegotowe i nikogo nie stawiamy — reszta działa bez zmian.
+            //
+            // MUSI BYĆ W LoadData, NIE W BeforeStart (ustalone 2026-08-05 z kodu AiEnabled).
+            // Kontrakt tego API jest niesymetryczny i obie strony piszą go wprost w nagłówku:
+            // odbiorca (`RemoteBotAPI`) rejestruje handler w LoadData, a nadawca (`LocalBotAPI`
+            // w AiEnabled `AISession.BeforeStart`) rozsyła słownik metod DOKŁADNIE RAZ przez
+            // `SendModMessage`. To wywołanie jest synchroniczne, więc handler zarejestrowany
+            // dopiero w naszym BeforeStart mógł się spóźnić o całą fazę — i tak było: AiEnabled
+            // nadawał, zanim ktokolwiek słuchał, `Valid` zostawało `false` na zawsze i ŻADNE
+            // wywołanie API nie miało prawa zadziałać. Objawem był pusty pokład przy
+            // zasubskrybowanym modzie, bez jednego błędu w logu SE. To NIE była kwestia
+            // [BotType] ani nazw botów, na które wskazywały dotychczasowe tropy.
+            try
+            {
+                _crew = new CrewSpawner();
+            }
+            catch (Exception e)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "BŁĄD startu załóg: " + e.GetType().Name + ": " + e.Message);
+            }
             // EventWriter z założenia NIE rzuca: przy błędzie storage wyłącza się sam (Failed),
             // więc reszta moda zawsze ma z czym rozmawiać i nigdzie nie trzeba sprawdzać null.
             _events = new EventWriter(typeof(ZyweFrakcjeSession), RotateBytes);
@@ -130,17 +152,6 @@ namespace ZyweFrakcje
             // Bez własnych stacji frakcje nie mają gdzie wystawiać zleceń ani handlować —
             // do 2026-08-01 trzeba było oddawać im siatkę ręcznie przez `/zf stacja`.
             _stations = new StationSpawner();
-            // Załoga na stacjach przez AiEnabled. Zależność MIĘKKA: bez tamtego moda API
-            // zgłasza się jako niegotowe i nikogo nie stawiamy — reszta działa bez zmian.
-            try
-            {
-                _crew = new CrewSpawner();
-            }
-            catch (Exception e)
-            {
-                MyAPIGateway.Utilities.ShowMessage("ZF",
-                    "BŁĄD startu załóg: " + e.GetType().Name + ": " + e.Message);
-            }
             // Samosprawdzanie w grze (/zf autotest) — dopiero tu, bo bierze wszystkie mechaniki,
             // które sprawdza: cennik, kontrakty, hybrydę reputacji i żądania okupu. Autotest
             // podaje im dokładnie takie ładunki, jakie przysłałby brain, więc sekcje działają
@@ -409,6 +420,25 @@ namespace ZyweFrakcje
                 // wisi na naszym bloku i na stacjach frakcji — to rozstrzyga, czy problem
                 // jest po stronie tworzenia, czy tylko wyświetlania w terminalu.
                 _contracts.Report();
+                return;
+            }
+
+            // Diagnostyka załogi: przechodzi krok po kroku tę samą ścieżkę co CrewSpawner
+            // i MELDUJE, na którym warunku staje. Powstało 2026-08-05, gdy okazało się, że
+            // boty nie pojawiają się także na stacji, przy graczu w zasięgu — a wszystkie
+            // gałęzie odmowy w Crew.cs były do tej pory ciche albo prawie ciche.
+            const string zalogaPrefix = "/zf zaloga";
+            if (messageText.StartsWith(zalogaPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                sendToOthers = false;
+                if (_crew == null)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "CrewSpawner nie wstał (patrz log SE)");
+                }
+                else
+                {
+                    _crew.Diagnostyka();
+                }
                 return;
             }
 

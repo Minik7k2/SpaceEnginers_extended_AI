@@ -193,8 +193,13 @@ docs/protocol.md                # spec mostka JSONL
   dopiero teraz wyrusza, cel nagrody dostaje ochronę, a każdy WRÓG wystawcy traci do
   gracza `kontrakt_przyjety_u_wroga` (-3). Kara raz na kontrakt (status `taken`
   w SQLite, liczy się do `max_otwartych` jak `open`).
-  **Wagi 0 do czasu testów w grze:** `nagroda` (vanilla liczy zabicia GRACZY, nie NPC)
-  i `eskorta` (typ usunięty z gry w 2026) — kod kompletny, wystarczy wpisać wagę.
+  **`eskorta` — TYP MARTWY, potwierdzone 2026-08-05.** Gra nie ma już definicji
+  `ContractTypeEscort`: `Content/Data` wozi osiem typów (Deliver, Find, GridHauling, Hunt,
+  ObtainAndDeliver, PvEBounty, Repair, Salvage). `CreateCustomEscortContract` wychodzi na
+  pierwszym warunku (`GetDefinition() is MyContractTypeEscortDefinition`) i zwraca `Error`
+  BEZ WPISU DO LOGU — stąd „gra odrzuciła kontrakt" bez śladu, którego szukaliśmy trzy
+  przebiegi. Mod nie próbuje już tego typu wystawiać. Waga 0, kod kompletny na wypadek
+  przywrócenia. `nagroda` ma wagę 0 z innego powodu (vanilla liczy zabicia GRACZY, nie NPC).
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
   nie ma zdarzenia transakcji. UWAGA: kaucję ściąganą przy PRZYJĘCIU zlecenia ta sama
   heurystyka brała za zakup (darmowe +1..+3 relacji), stąd `_trade.Suppress()` także

@@ -28,7 +28,11 @@ namespace ZyweFrakcje
     /// </summary>
     internal sealed class CrewSpawner
     {
-        private const int CheckEveryTicks = 3600;  // ~60 s — boty są drogie, nie ma pośpiechu
+        // 15 s, nie 60: statek rajdowy potrafi zostać wycofany (stand_down) szybciej, niż
+        // doczekałby się załogi, a autotest daje na to okno 40 s.
+        private const int CheckEveryTicks = 900;
+        // Zasięg dla STATKÓW — ten sam próg co trigger PlayerNear w ZF_Boty.sbc (1,5 km).
+        private const double StatekRange = 1500;
         private const int RetryTicks = 36000;      // ~10 min karencji na stację
         private const int CrewPerStation = 3;
         private const double CrewRadius = 150;     // w tym promieniu liczymy „załogę tej stacji"
@@ -78,13 +82,191 @@ namespace ZyweFrakcje
         }
 
         /// <summary>
-        /// Czy AiEnabled odpowiedziało na rejestrację, czyli czy mod jest w świecie.
-        /// Czyta to autotest, żeby odróżnić „nie ma moda" (ostrzeżenie) od „mod jest,
-        /// a botów nie ma" (błąd) — patrz <see cref="Autotest"/>.
+        /// Czy AiEnabled ODPOWIEDZIAŁO na rejestrację (odesłało słownik API).
+        ///
+        /// UWAGA — to NIE jest to samo co „mod jest w świecie" (2026-08-05). `Valid` ustawia
+        /// się dopiero w odpowiedzi na nasz komunikat rejestracyjny, więc `false` znaczy albo
+        /// „moda nie ma", albo „mod jest, ale uścisk dłoni nie doszedł do skutku" — a to drugie
+        /// jest właśnie najciekawsze, bo oznacza, że botów nie będzie mimo zasubskrybowanego
+        /// moda. Obecność samego moda sprawdza <see cref="Autotest"/> po liście modów świata.
         /// </summary>
-        public bool AiEnabledObecny
+        public bool ApiZarejestrowane
         {
             get { return _api != null && _api.Valid; }
+        }
+
+        /// <summary>Czy API zgłasza gotowość do stawiania botów (osobny etap po rejestracji).</summary>
+        public bool ApiGotowe
+        {
+            get { return _api != null && _api.Valid && _api.CanSpawn; }
+        }
+
+        /// <summary>Zasięg gracza, w którym w ogóle stawiamy załogę (metry).</summary>
+        public static double ZasiegZalogi { get { return PlayerRange; } }
+
+        /// <summary>
+        /// Dystans do NAJBLIŻSZEJ stacji frakcji, albo -1 gdy żadna nie stoi.
+        ///
+        /// Potrzebne autotestowi, bo tu leży pułapka, która przez trzy przebiegi udawała błąd
+        /// nazw botów (2026-08-05): StationSpawner stawia stacje 8–15 km od gracza, a załogę
+        /// dokładamy tylko w promieniu <see cref="ZasiegZalogi"/> (3 km). Świeżo postawiona
+        /// stacja jest więc ZAWSZE poza zasięgiem załogi, dopóki gracz do niej nie doleci —
+        /// i to jest zachowanie zamierzone (nie stawiamy botów, których nikt nie zobaczy).
+        /// Autotest nie umie tam polecieć, więc nie wolno mu z tego robić FAIL-a.
+        /// </summary>
+        public static double DystansDoNajblizszejStacji()
+        {
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (gracz == null || gracz.Character == null)
+            {
+                return -1;
+            }
+            Vector3D pozycja = gracz.GetPosition();
+            double best = -1;
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                EconomyBlock stacja = FactionEconomy.FindContractBlock(Tags[i]);
+                if (stacja == null)
+                {
+                    continue;
+                }
+                double d = Vector3D.Distance(pozycja, stacja.Position);
+                if (best < 0 || d < best)
+                {
+                    best = d;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// `/zf zaloga` — przechodzi tę samą ścieżkę co <see cref="Uzupelnij"/> i MELDUJE każdy
+        /// warunek. Powstało 2026-08-05: boty nie pojawiały się także na stacji, przy graczu
+        /// w zasięgu, a wszystkie gałęzie odmowy były ciche albo prawie ciche — nie było jak
+        /// odróżnić „API milczy" od „brak mapy siatki" od „brak wolnych węzłów".
+        /// Bierze NAJBLIŻSZĄ siatkę frakcji: stację albo statek, co akurat jest pod ręką.
+        /// </summary>
+        public void Diagnostyka()
+        {
+            Powiedz("=== diagnostyka załogi ===");
+            Powiedz("AiEnabled API: Valid=" + (_api != null && _api.Valid) +
+                    ", CanSpawn=" + (_api != null && _api.Valid && _api.CanSpawn));
+            if (_api == null || !_api.Valid)
+            {
+                Powiedz("KONIEC: bez zarejestrowanego API nie ma o czym mówić.");
+                return;
+            }
+
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (gracz == null || gracz.Character == null)
+            {
+                Powiedz("KONIEC: brak gracza.");
+                return;
+            }
+            Vector3D pozycjaGracza = gracz.GetPosition();
+
+            IMyCubeGrid cel = null;
+            string celTag = null;
+            double celDystans = -1;
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                var kandydaci = new List<IMyCubeGrid>(FactionEconomy.FactionGrids(Tags[i]));
+                foreach (IMyCubeGrid g in kandydaci)
+                {
+                    if (g == null || g.MarkedForClose || g.GridSizeEnum != MyCubeSize.Large)
+                    {
+                        continue;
+                    }
+                    double d = Vector3D.Distance(pozycjaGracza, g.GetPosition());
+                    if (celDystans < 0 || d < celDystans)
+                    {
+                        cel = g; celTag = Tags[i]; celDystans = d;
+                    }
+                }
+            }
+            if (cel == null)
+            {
+                Powiedz("KONIEC: w świecie nie ma ŻADNEJ dużej siatki naszych frakcji.");
+                return;
+            }
+            Powiedz("cel: " + (cel.DisplayName ?? "?") + " (" + celTag + "), " +
+                    (int)celDystans + " m stąd, bloków=" + LiczBloki(cel));
+
+            var duza = cel as MyCubeGrid;
+            if (duza == null)
+            {
+                Powiedz("STOP: siatka nie jest MyCubeGrid (nie da się zbudować mapy).");
+                return;
+            }
+            bool pathfinding = _api.IsValidForPathfinding(cel);
+            Powiedz("IsValidForPathfinding: " + pathfinding);
+            if (!pathfinding)
+            {
+                Powiedz("STOP: AiEnabled uważa tę siatkę za nienadającą się pod boty.");
+                return;
+            }
+            bool mapa = _api.IsGridMapReady(duza);
+            Powiedz("IsGridMapReady: " + mapa);
+            if (!mapa)
+            {
+                _api.CreateGridMap(duza);
+                Powiedz("Zamówiłem budowę mapy siatki — poczekaj kilkanaście sekund " +
+                        "i powtórz `/zf zaloga`.");
+                return;
+            }
+
+            var wezly = new List<Vector3D>();
+            _api.GetAvailableGridNodes(duza, CrewPerStation, wezly, null, false);
+            Powiedz("GetAvailableGridNodes: " + wezly.Count + " wolnych węzłów");
+            if (wezly.Count == 0)
+            {
+                Powiedz("STOP: nie ma gdzie postawić bota (brak wnętrza / węzłów).");
+                return;
+            }
+
+            string ignored;
+            long wlasciciel = FactionEconomy.FindTargetIdentity(celTag, out ignored);
+            Powiedz("właściciel dla botów: " + wlasciciel);
+            if (wlasciciel == 0)
+            {
+                Powiedz("STOP: brak tożsamości właściciela — bot byłby bezpański.");
+                return;
+            }
+
+            int index = Array.IndexOf(Tags, celTag);
+            Powiedz("próbuję postawić 1 bota: typ=" + BotType[index] + ", rola=" + Role[index]);
+            // CALLBACK jest tu najważniejszy (2026-08-05). AiEnabled przyjął już zlecenie bez
+            // jednego wpisu w swoim logu — czyli nie odmawia GŁOŚNO. `SpawnBotQueued` oddaje
+            // postać właśnie tędy, a `null` znaczy „nie udało się" i to jedyny sposób, żeby
+            // odróżnić „bot powstał, tylko go nie widzisz" od „AiEnabled zwrócił nic".
+            Powiedz("wysyłam zlecenie… (odpowiedź przyjdzie asynchronicznie)");
+            _api.SpawnBotQueued(BotType[index], "ZF Test",
+                                new MyPositionAndOrientation(wezly[0], Vector3.Forward, Vector3.Up),
+                                duza, Role[index], wlasciciel, null,
+                                postac =>
+                                {
+                                    if (postac == null)
+                                    {
+                                        Powiedz("ODPOWIEDŹ: AiEnabled zwrócił NULL — bot NIE powstał. " +
+                                                "Powód szukaj w Storage/2596208372.sbm_AiEnabled/" +
+                                                "AiEnabled.log");
+                                        return;
+                                    }
+                                    Powiedz("ODPOWIEDŹ: bot POWSTAŁ — \"" + postac.DisplayName +
+                                            "\", id=" + postac.EntityId + ". Rozejrzyj się dookoła.");
+                                });
+        }
+
+        private static int LiczBloki(IMyCubeGrid grid)
+        {
+            var b = new List<IMySlimBlock>();
+            grid.GetBlocks(b);
+            return b.Count;
+        }
+
+        private static void Powiedz(string tekst)
+        {
+            MyAPIGateway.Utilities.ShowMessage("ZAŁOGA", tekst);
         }
 
         public void Dispose()
@@ -135,9 +317,129 @@ namespace ZyweFrakcje
                 {
                     continue;
                 }
-                _nextTry[stacja.GridId] = tick + RetryTicks;
-                Uzupelnij(i, stacja);
-                return; // jedna stacja na przebieg
+                // CAŁY KOMPLEKS, NIE TYLKO SIATKA Z BLOKIEM KONTRAKTÓW (2026-08-05).
+                // Vanillowe stacje to prefaby z KILKU siatek (GE_LogisticsFacility ma 11:
+                // główny kadłub, cumy, kontenery, przekaźnik). Blok kontraktów dokładamy do
+                // największej, ale to nie ona musi mieć wnętrze, po którym bot ma chodzić —
+                // `/zf zaloga` postawił pierwszego bota dopiero na 57-blokowym kontenerze,
+                // gdy główny kadłub nie dawał węzłów. Próbujemy więc po kolei: najpierw grid
+                // z blokiem kontraktów, potem pozostałe duże siatki tej frakcji w zasięgu.
+                // Każda ma własną karencję, więc nieudana nie blokuje kolejnych.
+                if (SprobujKompleks(i, stacja, tick, pozycjaGracza))
+                {
+                    return; // jedna próba na przebieg
+                }
+            }
+
+            ZalogaNaStatkach(tick, pozycjaGracza);
+        }
+
+        /// <summary>
+        /// Próbuje obsadzić kolejno siatki kompleksu stacji tej frakcji. true = któraś siatka
+        /// dostała próbę w tym przebiegu (i nie ma co robić nic więcej).
+        /// </summary>
+        private bool SprobujKompleks(int index, EconomyBlock stacja, int tick, Vector3D pozycjaGracza)
+        {
+            var kolejka = new List<IMyCubeGrid>();
+            var glowna = MyAPIGateway.Entities.GetEntityById(stacja.GridId) as IMyCubeGrid;
+            if (glowna != null)
+            {
+                kolejka.Add(glowna);
+            }
+            foreach (IMyCubeGrid grid in FactionEconomy.FactionGrids(Tags[index]))
+            {
+                if (grid == null || grid.MarkedForClose || grid.GridSizeEnum != MyCubeSize.Large)
+                {
+                    continue;
+                }
+                if (glowna != null && grid.EntityId == glowna.EntityId)
+                {
+                    continue;
+                }
+                if (Vector3D.DistanceSquared(pozycjaGracza, grid.GetPosition()) > PlayerRange * PlayerRange)
+                {
+                    continue;
+                }
+                kolejka.Add(grid);
+            }
+
+            for (int k = 0; k < kolejka.Count; k++)
+            {
+                IMyCubeGrid grid = kolejka[k];
+                int next;
+                if (_nextTry.TryGetValue(grid.EntityId, out next) && tick < next)
+                {
+                    continue;
+                }
+                _nextTry[grid.EntityId] = tick + RetryTicks;
+                Uzupelnij(index, new EconomyBlock
+                {
+                    GridId = grid.EntityId,
+                    Position = grid.GetPosition(),
+                    GridName = grid.DisplayName,
+                });
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Załoga na statkach rajdowych — PROGRAMOWO, tak samo jak na stacjach (2026-08-05).
+        ///
+        /// Dlaczego nie przez MES, skoro `ZF_Boty.sbc` ma komplet profili, akcji i triggerów:
+        /// bo ta droga nie działa dla NASZYCH kadłubów i wiemy dlaczego. Duże prefaby vanilli
+        /// (Vulture, Enforcer, Armed Tender…) NIE MAJĄ bloku zdalnego sterowania, więc w chwili
+        /// spawnu MES nie ma gdzie zapisać zachowania ani podpiąć triggerów. Blok dokłada nasz
+        /// `TestSpawner.EnsurePilot` DOPIERO w callbacku po spawnie — RivalAI odczytuje z niego
+        /// `[BehaviorName:Fighter]` (statek faktycznie leci, mamy to potwierdzone w autoteście),
+        /// ale `[Triggers:...]` jest już wtedy po herbacie: lista triggerów zachowania została
+        /// zamknięta wcześniej. Objaw: w logu AiEnabled NIE MA ANI JEDNEJ próby spawnu bota —
+        /// czyli nikt o nią nie prosi, a nie że AiEnabled odmawia.
+        ///
+        /// Zamiast walczyć z kolejnością faz w cudzym modzie, prosimy sami. Uchwyt do AiEnabled
+        /// już mamy i już działa (patrz <see cref="ApiZarejestrowane"/>), a `Uzupelnij` jest ten
+        /// sam co dla stacji — buduje mapę siatki, znajduje wolne węzły i stawia załogę.
+        /// Profile w `ZF_Boty.sbc` zostają: są poprawne, kosztują tyle co nic i zadziałają same,
+        /// gdyby kiedyś trafił się kadłub z własnym blokiem zdalnego sterowania.
+        /// </summary>
+        private void ZalogaNaStatkach(int tick, Vector3D pozycjaGracza)
+        {
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                List<IMyCubeGrid> statki = TestSpawner.SledzoneSiatki(Tags[i]);
+                for (int s = 0; s < statki.Count; s++)
+                {
+                    IMyCubeGrid grid = statki[s];
+                    if (grid == null || grid.MarkedForClose)
+                    {
+                        continue;
+                    }
+                    // Boty nie chodzą po małych siatkach — patrole odpadają z definicji.
+                    if (grid.GridSizeEnum != MyCubeSize.Large)
+                    {
+                        continue;
+                    }
+                    Vector3D pozycja = grid.GetPosition();
+                    // Ten sam próg co trigger PlayerNear w ZF_Boty.sbc, żeby zachowanie było
+                    // jedno, niezależnie od tego, która droga bota postawi.
+                    if (Vector3D.DistanceSquared(pozycjaGracza, pozycja) > StatekRange * StatekRange)
+                    {
+                        continue;
+                    }
+                    int next;
+                    if (_nextTry.TryGetValue(grid.EntityId, out next) && tick < next)
+                    {
+                        continue;
+                    }
+                    _nextTry[grid.EntityId] = tick + RetryTicks;
+                    Uzupelnij(i, new EconomyBlock
+                    {
+                        GridId = grid.EntityId,
+                        Position = pozycja,
+                        GridName = grid.DisplayName,
+                    });
+                    return; // jeden statek na przebieg
+                }
             }
         }
 

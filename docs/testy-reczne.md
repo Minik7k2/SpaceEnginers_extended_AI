@@ -424,7 +424,16 @@ Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
   `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
   Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
   → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
-- [x] **I17. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
+- [x] **I17. Eskorta — TYP MARTWY, potwierdzone 2026-08-05.** Gra NIE MA już definicji
+  `ContractTypeEscort`: `Content/Data` wozi osiem typów (Deliver, Find, GridHauling, Hunt,
+  ObtainAndDeliver, PvEBounty, Repair, Salvage) i eskorty wśród nich nie ma, a
+  `MyContractGenerator.CreateCustomEscortContract` wychodzi na samym początku, gdy
+  `GetDefinition()` nie jest `MyContractTypeEscortDefinition` — zwracając `Error` BEZ
+  wpisu do logu. Stąd „gra odrzuciła kontrakt" bez żadnego śladu. Mod nie próbuje już
+  wystawiać tego typu i mówi wprost dlaczego; waga w `[kontrakty.typy]` zostaje 0.
+  Kod eskorty (spawn konwoju po przyjęciu) zostaje kompletny na wypadek przywrócenia typu.
+  ORYGINALNY OPIS TESTU (nieaktualny, do odtworzenia gdyby typ wrócił):
+- [ ] **I17-stary. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
   (waga 0 w configu, więc tylko wymuszona) → kontrakt powstaje, ale w konsoli braina
   NIE MA jeszcze `spawn_request`. Dopiero gdy przyjmiesz zlecenie w terminalu →
   `kontrakt <ID> (HEL, eskorta) przyjęty przez gracza` i `spawn_request [HEL] kind=convoy`.

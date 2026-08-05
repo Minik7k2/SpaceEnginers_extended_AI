@@ -116,16 +116,72 @@ namespace ZyweFrakcje
         private readonly RansomManager _ransom;
         private readonly CrewSpawner _crew;
 
+        private const ulong AiEnabledWorkshopId = 2596208372;
+
         /// <summary>
-        /// Czy AiEnabled jest w świecie. Rozstrzyga, czy brak botów to OSTRZEŻENIE (zależność
-        /// miękka — moda po prostu nie ma), czy BŁĄD (mod jest, a boty i tak się nie pojawiają).
-        /// Bez tego rozróżnienia sekcja P zawsze świeciła na żółto i przebieg z 2026-08-02
-        /// zaraportował „bez AiEnabled to normalne" na świecie, w którym AiEnabled v1.9 BYŁO
-        /// załadowane — czyli cztery prawdziwe porażki przebrane za łagodne ostrzeżenia.
+        /// Czy AiEnabled jest ZASUBSKRYBOWANE w tym świecie — czytane z listy modów świata,
+        /// a NIE z uchwytu API. Rozstrzyga, czy brak botów to OSTRZEŻENIE (zależność miękka,
+        /// moda po prostu nie ma), czy BŁĄD (mod jest, a boty się nie pojawiają).
+        ///
+        /// Dwie poprawki, obie z realnych przebiegów:
+        /// 2026-08-04 — dotąd było to ZAWSZE ostrzeżenie, więc przebieg zameldował „bez
+        /// AiEnabled to normalne" na świecie z aktywnym AiEnabled v1.9.
+        /// 2026-08-05 — pierwsza wersja pytała o to `RemoteBotAPI.Valid` i myliła się tak samo,
+        /// tylko subtelniej: `Valid` ustawia się dopiero, gdy AiEnabled ODPOWIE na rejestrację,
+        /// więc mod obecny, lecz nieodpowiadający, dalej wychodził na „nieobecny". A to właśnie
+        /// ten przypadek zachodzi i to on jest przyczyną pustych pokładów.
         /// </summary>
-        private bool AiEnabledObecny
+        private static bool AiEnabledWSwiecie
         {
-            get { return _crew != null && _crew.AiEnabledObecny; }
+            get
+            {
+                if (MyAPIGateway.Session == null || MyAPIGateway.Session.Mods == null)
+                {
+                    return false;
+                }
+                foreach (var mod in MyAPIGateway.Session.Mods)
+                {
+                    if (mod.PublishedFileId == AiEnabledWorkshopId)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        /// <summary>Czy uchwyt API zdążył się zarejestrować u AiEnabled.</summary>
+        private bool ApiBotowGotowe
+        {
+            get { return _crew != null && _crew.ApiZarejestrowane; }
+        }
+
+        /// <summary>
+        /// Czy gracz stoi dość blisko którejkolwiek stacji, żeby załoga miała prawo tam być.
+        /// Bez tego sekcja P zgłaszała FAIL za coś, czego autotest nie mógł spełnić: stacje
+        /// stają 8–15 km od gracza, a załogę dokładamy tylko w promieniu 3 km — więc dopóki
+        /// nikt tam nie doleci, botów NIE MA i to jest zachowanie zamierzone (2026-08-05).
+        /// </summary>
+        private static bool StacjaWZasieguZalogi
+        {
+            get
+            {
+                double d = CrewSpawner.DystansDoNajblizszejStacji();
+                return d >= 0 && d <= CrewSpawner.ZasiegZalogi;
+            }
+        }
+
+        /// <summary>Wymówka dla kroków sekcji P, gdy gracz jest za daleko od stacji.</summary>
+        private static string PowodPozaZasiegiem()
+        {
+            double d = CrewSpawner.DystansDoNajblizszejStacji();
+            string gdzie = d < 0
+                ? "w świecie nie ma jeszcze żadnej stacji frakcji"
+                : "najbliższa stacja jest " + (int)(d / 1000) + " km stąd, a załogę stawiamy " +
+                  "tylko w promieniu " + (int)(CrewSpawner.ZasiegZalogi / 1000) + " km";
+            return "NIE DA SIĘ SPRAWDZIĆ STĄD: " + gdzie + ". To nie jest błąd — botów, " +
+                   "których nikt nie widzi, celowo nie stawiamy. Dolec do stacji i powtórz " +
+                   "`/zf autotest boty`.";
         }
 
         private List<Krok> _kroki;
@@ -159,6 +215,8 @@ namespace ZyweFrakcje
         private Vector3D _flotaPozycja;
         private long _flotaGrid;
         private int _flotaPrzed;
+        // Ile siatek KRW stało w świecie, ZANIM krok o załodze zamówił swój rajd.
+        private int _botyPrzed;
 
         // Sekcja „boty": liczebność załogi sprzed powtórnego podejścia (P6).
         private int _zalogaPrzed;
@@ -1016,7 +1074,9 @@ namespace ZyweFrakcje
             {
                 Nazwa = "zlecenie " + tag + " \"" + typ + "\": powstaje i NIE schodzi po cichu na dostawę",
                 Grupa = "kontrakty",
-                Miekki = miekki,
+                // Łagodzimy WYŁĄCZNIE zejście typu na dostawę; „zlecenie w ogóle nie powstało"
+                // jest zawsze twarde, niezależnie od typu.
+                MiekkiGdy = () => miekki && !_kontraktNiePowstal,
                 Start = () =>
                 {
                     if (_contracts == null)
@@ -1032,8 +1092,20 @@ namespace ZyweFrakcje
             });
         }
 
+        /// <summary>
+        /// Czy OSTATNIE sprawdzenie zlecenia skończyło się tym, że zlecenie w ogóle nie
+        /// powstało. Flaga `miekki` przy typie zlecenia miała łagodzić JEDNĄ rzecz: zejście
+        /// typu na dostawę, gdy w świecie nie ma celu (I15 — dopuszczalne i opisane).
+        /// Łagodziła jednak wszystko, co zwróci <see cref="SprawdzKontrakt"/>, więc gdy gra
+        /// odrzucała kontrakt CAŁKOWICIE, sześć z siedmiu typów meldowało OSTRZEŻENIE, a
+        /// „dostawa" (jedyna z miekki=false) FAIL — ten sam powód, dwie różne barwy w tym
+        /// samym przebiegu. Stąd wrażenie, że wynik autotestu jest losowy (2026-08-05).
+        /// </summary>
+        private bool _kontraktNiePowstal;
+
         private string SprawdzKontrakt(string zadany)
         {
+            _kontraktNiePowstal = false;
             if (_contracts == null)
             {
                 return "ContractManager nie wstał (BeforeStart)";
@@ -1049,6 +1121,9 @@ namespace ZyweFrakcje
             }
             if (_contracts.OstatniTyp == null)
             {
+                // To NIE jest przypadek, który wolno łagodzić flagą `miekki` — patrz komentarz
+                // przy _kontraktNiePowstal.
+                _kontraktNiePowstal = true;
                 return "zlecenie NIE powstało: " + (_contracts.OstatniPowod ?? "gra odmówiła bez powodu");
             }
             if (_contracts.OstatniTyp != zadany)
@@ -1588,6 +1663,13 @@ namespace ZyweFrakcje
         private void DodajRuch(List<Krok> kroki, string tag, string rodzaj, bool spawnuj, string nazwa)
         {
             const double ProgMetrow = 200;
+            // Okno 90 s, nie 30 (2026-08-05). Ten sam krok dał PASS w jednym przebiegu i 96 m
+            // w następnym — nie dlatego, że coś się zepsuło, tylko dlatego, że RivalAI musi
+            // najpierw namierzyć cel i rozpędzić kadłub, a 30 s bywało krótsze niż ten rozruch.
+            // Wydłużenie NIC nie kosztuje, gdy statek leci: krok jest monotoniczny i pollowany,
+            // więc zamyka się w chwili przekroczenia progu. Dłużej czekamy tylko wtedy, gdy
+            // faktycznie jest na co czekać.
+            const int OknoTikow = 90 * Sekunda;
 
             kroki.Add(new Krok
             {
@@ -1615,7 +1697,7 @@ namespace ZyweFrakcje
                         _flotaPozycja = grid.GetPosition();
                     }
                 },
-                CzekajTikow = 30 * Sekunda,
+                CzekajTikow = OknoTikow,
                 Poll = true,
                 Sprawdz = () =>
                 {
@@ -1646,9 +1728,9 @@ namespace ZyweFrakcje
                     double dystans = Vector3D.Distance(_flotaPozycja, grid2.GetPosition());
                     return dystans >= ProgMetrow
                         ? ""
-                        : "przebył " + (int)dystans + " m w oknie obserwacji (próg " +
-                          (int)ProgMetrow + " m) — kadłub stoi albo dryfuje, autopilot go " +
-                          "nie prowadzi";
+                        : "przebył " + (int)dystans + " m w oknie " + (OknoTikow / Sekunda) +
+                          " s (próg " + (int)ProgMetrow + " m) — kadłub stoi albo dryfuje, " +
+                          "autopilot go nie prowadzi";
                 },
             });
         }
@@ -1660,7 +1742,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na stacji frakcji (zależność miękka — AiEnabled)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 CzekajTikow = 5 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
@@ -1677,12 +1759,35 @@ namespace ZyweFrakcje
                             return "";
                         }
                     }
-                    return "na żadnej stacji nie ma postaci NPC. " + (AiEnabledObecny
-                        ? "AiEnabled JEST w świecie, więc to BŁĄD: pierwsze podejrzane jest " +
-                          "[BotType] w Crew.cs / ZF_Boty.sbc — wiki MES mówi, że to pole Name " +
-                          "z SBC, a nie SubtypeId"
-                        : "Moda AiEnabled (2596208372) nie ma w świecie — to zależność miękka " +
-                          "i taki wynik jest normalny");
+                    if (!AiEnabledWSwiecie)
+                    {
+                        return "na żadnej stacji nie ma postaci NPC. Moda AiEnabled " +
+                               "(2596208372) nie ma w świecie — to zależność miękka i taki " +
+                               "wynik jest normalny";
+                    }
+                    // Mod JEST. Najpierw powiedz, czy w ogóle się z nami przywitał — bez tego
+                    // wysyłalibyśmy szukającego w stronę [BotType], choć problem leży piętro
+                    // niżej: AiEnabled nie odpowiedziało na rejestrację, więc żadne wywołanie
+                    // API nie miało prawa zadziałać.
+                    if (!StacjaWZasieguZalogi)
+                    {
+                        return PowodPozaZasiegiem();
+                    }
+                    return "na żadnej stacji nie ma postaci NPC, a AiEnabled JEST w świecie. " +
+                           (ApiBotowGotowe
+                               // NAZWY SĄ JUŻ SPRAWDZONE (2026-08-05) i NIE są przyczyną:
+                               // `Default_Astronaut` figuruje w Characters.sbc z Name równym
+                               // SubtypeId, a AiEnabled buduje RobotSubtypes właśnie z pola
+                               // Name; `Soldier` jest w BotRoleEnemy. Zostaje więc droga
+                               // spawnu na stacji, nie słownik nazw.
+                               ? "API odpowiedziało na rejestrację, a [BotType] i rola są " +
+                                 "poprawne (sprawdzone w plikach gry i AiEnabled). Szukaj " +
+                                 "dalej w Crew.cs: IsValidForPathfinding / IsGridMapReady / " +
+                                 "GetAvailableGridNodes — stacja musi mieć mapę siatki i wolne " +
+                                 "węzły w środku, inaczej SpawnBotQueued nie ma gdzie postawić bota"
+                               : "API NIE odpowiedziało na rejestrację (RemoteBotAPI.Valid == " +
+                                 "false): to jest przyczyna, a nie nazwy botów. Sprawdź " +
+                                 "kolejność modów i czy AiEnabled wstało bez błędu w logu SE");
                 },
             });
 
@@ -1692,7 +1797,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga należy do frakcji, a nie jest bezpańska (P3)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 Sprawdz = () =>
                 {
                     for (int i = 0; i < Tagi.Length; i++)
@@ -1714,33 +1819,67 @@ namespace ZyweFrakcje
                               "ŻADNA nie należy do frakcji — MES/AiEnabled nie zawołało " +
                               "SetPlayersFaction, więc bot nie zareaguje na zmianę relacji";
                     }
-                    return "nie ma przy stacjach żadnej postaci NPC do sprawdzenia" +
-                           (AiEnabledObecny ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
+                    return StacjaWZasieguZalogi
+                        ? "nie ma przy stacjach żadnej postaci NPC do sprawdzenia" +
+                          (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)")
+                        : PowodPozaZasiegiem();
                 },
             });
 
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na statku rajdowym (trigger PlayerNear 1,5 km)",
-                MiekkiGdy = () => !AiEnabledObecny,
-                Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
-                CzekajTikow = 20 * Sekunda,
+                // UWAGA: ten krok NIE zależy od odległości do STACJI (poprawka 2026-08-05).
+                // Załogę na statku stawia MES przez trigger PlayerNear 1500 m na samym
+                // kadłubie, więc liczy się dystans do STATKU. Podpięcie tu bramki
+                // stacyjnej ukrywałoby prawdziwą porażkę: gracz stojący 200 m od rajdu
+                // ma prawo oczekiwać załogi niezależnie od tego, gdzie stoją stacje.
+                MiekkiGdy = () => !AiEnabledWSwiecie,
+                Start = () =>
+                {
+                    // Zapamiętujemy STAN SPRZED zamówienia (2026-08-05). Bez tego krok brał
+                    // ostatnią śledzoną siatkę KRW — a `CustomSpawnRequest` jest asynchroniczny,
+                    // więc przez pierwsze sekundy była nią siatka, która stała w świecie WCZEŚNIEJ.
+                    // W praktyce trafiał na KONWÓJ z ręcznego `/zf raid KRW` (brain bez podanego
+                    // rodzaju dobiera flotę do nastroju frakcji i potrafi wybrać `convoy`), czyli
+                    // mierzył załogę na transportowcu, który z definicji ŻADNEJ nie ma:
+                    // `BehaviorKonwoj` nie zawiera `[Triggers:...]`. Krok meldował wtedy porażkę
+                    // botów, choć sprawdzał nie ten statek.
+                    _botyPrzed = TestSpawner.SledzoneSiatki("KRW").Count;
+                    TestSpawner.SpawnForFaction("KRW", "raid");
+                },
+                CzekajTikow = 40 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
                 {
                     List<IMyCubeGrid> siatki = TestSpawner.SledzoneSiatki("KRW");
-                    if (siatki.Count == 0)
+                    if (siatki.Count <= _botyPrzed)
                     {
-                        return "nie udało się postawić statku KRW (patrz sekcja floty)";
+                        return "zamówiony RAJD KRW jeszcze nie stanął — bez niego nie ma czego " +
+                               "sprawdzać (konwój z wcześniejszego spawnu się NIE liczy, " +
+                               "transportowiec nie ma triggera załogi)";
                     }
                     IMyCubeGrid grid = siatki[siatki.Count - 1];
                     if (grid == null || grid.MarkedForClose)
                     {
                         return "statek KRW zniknął przed sprawdzeniem";
                     }
+                    // Trigger PlayerNear mierzy dystans do KADŁUBA. Gdy gracz jest dalej, to nie
+                    // jest porażka botów — to brak warunku, i trzeba to powiedzieć wprost.
+                    IMyPlayer gracz = MyAPIGateway.Session.Player;
+                    double dystans = gracz == null
+                        ? -1
+                        : Vector3D.Distance(gracz.GetPosition(), grid.GetPosition());
+                    if (dystans > 1500)
+                    {
+                        return "NIE DA SIĘ SPRAWDZIĆ STĄD: rajd KRW stanął " + (int)dystans +
+                               " m stąd, a trigger załogi (PlayerNear) sięga 1500 m. Podleć " +
+                               "bliżej i powtórz `/zf autotest boty`.";
+                    }
                     int ile = PoliczPostacie(grid.GetPosition(), 200);
-                    return ile > 0 ? "" : "na pokładzie nie ma nikogo (profil ZF_Bot_KRW_* / akcja " +
-                                          "AddBotsToGrid / trigger PlayerNear — podejdź bliżej niż 1,5 km)";
+                    return ile > 0 ? "" : "na pokładzie RAJDU nie ma nikogo mimo dystansu " +
+                                          (int)dystans + " m (profil ZF_Bot_KRW_* / akcja " +
+                                          "AddBotsToGrid / APIs.AiEnabled.Valid po stronie MES)";
                 },
             });
 
@@ -1750,15 +1889,17 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga się nie mnoży przy kolejnych przebiegach (P6)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie || !StacjaWZasieguZalogi,
                 Start = () => { _zalogaPrzed = PoliczZalogeStacji(); },
                 CzekajTikow = 12 * Sekunda,
                 Sprawdz = () =>
                 {
                     if (_zalogaPrzed == 0)
                     {
-                        return "nie ma przy stacjach załogi do policzenia" +
-                               (AiEnabledObecny ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
+                        return StacjaWZasieguZalogi
+                            ? "nie ma przy stacjach załogi do policzenia" +
+                              (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)")
+                            : PowodPozaZasiegiem();
                     }
                     int teraz = PoliczZalogeStacji();
                     return teraz <= _zalogaPrzed

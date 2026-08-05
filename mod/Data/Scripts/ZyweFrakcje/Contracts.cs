@@ -361,18 +361,37 @@ namespace ZyweFrakcje
 
                 case "transport":
                 {
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId);
-                    if (target == null)
+                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
+                    MyContractHauling c;
+                    if (target != null)
                     {
-                        powod = "w świecie nie ma drugiej stacji z blokiem kontraktów/sklepem";
-                        return false;
-                    }
-                    var c = new MyContractHauling(start.BlockId, money, collateral, durationSeconds,
+                        c = new MyContractHauling(start.BlockId, money, collateral, durationSeconds,
                                                   target.BlockId);
+                        opis = "transport ładunku do " + (target.GridName ?? "innej stacji");
+                    }
+                    else
+                    {
+                        // DRUGA DROGA (2026-08-05): celem jest STACJA FRAKCJI, nie drugi blok.
+                        // Nasz spawner stawia frakcji dokładnie JEDNĄ stację, więc warunek
+                        // „dwa bloki tego samego właściciela" w normalnej grze nie miał szans —
+                        // transport schodził na dostawę zawsze, a nie tylko wyjątkowo.
+                        // Generator gry sprawdza właściciela WYŁĄCZNIE wtedy, gdy cel jest
+                        // blokiem (`endBlock != null`); przy EndFactionStationId ta kontrola
+                        // w ogóle się nie wykonuje, a frakcje mają po kilka stacji vanilla
+                        // (WGR w świecie testowym: 7).
+                        long stacja = FactionEconomy.FirstFactionStationId(faction);
+                        if (stacja == 0)
+                        {
+                            powod = "frakcja nie ma ani drugiego bloku, ani własnej stacji vanilla";
+                            return false;
+                        }
+                        c = new MyContractHauling(start.BlockId, money, collateral, durationSeconds, 0);
+                        c.EndFactionStationId = stacja;
+                        opis = "transport ładunku do stacji frakcji";
+                    }
                     c.OnContractSucceeded = onSuccess;
                     c.OnContractFailed = onFail;
                     c.OnContractAcquired = onTaken;
-                    opis = "transport ładunku do " + (target.GridName ?? "innej stacji");
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
 
@@ -417,6 +436,27 @@ namespace ZyweFrakcje
 
                 case "eskorta":
                 {
+                    // ESKORTY NIE DA SIĘ WYSTAWIĆ — TYP ZOSTAŁ USUNIĘTY Z GRY.
+                    // Ustalone 2026-08-05 i to jest fakt o danych gry, nie hipoteza:
+                    // `MyContractGenerator.CreateCustomEscortContract` zaczyna się od
+                    //     if (!(new MyContractEscort().GetDefinition()
+                    //           is MyContractTypeEscortDefinition def))
+                    //         return MyContractCreationResults.Error;
+                    // a w Content/Data nie ma ŻADNEGO wpisu tego typu. Gra wozi dziś osiem
+                    // definicji zleceń: Deliver, Find, GridHauling, Hunt, ObtainAndDeliver,
+                    // PvEBounty, Repair, Salvage. Escort wśród nich nie ma, więc warunek
+                    // wywala się zawsze i zwraca Error BEZ WPISU DO LOGU — stąd „gra odrzuciła
+                    // kontrakt" bez jednego śladu, którego szukaliśmy przez trzy przebiegi.
+                    // Nie próbujemy więc i nie udajemy, że to przypadek: mówimy prawdę
+                    // i schodzimy na dostawę. Gdyby Keen kiedyś przywrócił ten typ, wystarczy
+                    // usunąć ten blok — kod poniżej jest kompletny i sprawdzony.
+                    powod = "typ eskorty został usunięty z gry (brak definicji ContractTypeEscort " +
+                            "w danych) — nie da się go wystawić";
+                    return false;
+                }
+
+                case "eskorta_nieuzywane":
+                {
                     string ignored;
                     long owner = FactionEconomy.FindTargetIdentity(faction, out ignored);
                     if (owner == 0)
@@ -426,7 +466,7 @@ namespace ZyweFrakcje
                     }
                     // Trasa: ze stacji frakcji do drugiej stacji, a gdy jej nie ma — 20 km
                     // w stronę gracza (żeby konwój dało się w ogóle spotkać).
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId);
+                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
                     Vector3D end;
                     string gdzie;
                     if (target != null)
@@ -459,7 +499,7 @@ namespace ZyweFrakcje
                         powod = "gra nie zna typu " + CustomContractDefinition;
                         return false;
                     }
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId);
+                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
                     string nazwa;
                     string opisPelny;
                     CustomTextForFaction(faction, out nazwa, out opisPelny);
@@ -492,6 +532,20 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// Czy pokazaliśmy już w tej sesji wyjaśnienie o kontach w banku. Ogranicza SAM
+        /// KOMUNIKAT, a NIE próby wystawiania zleceń.
+        ///
+        /// PIERWSZA WERSJA TEJ FLAGI (2026-08-05) BYŁA BŁĘDEM i trzeba to zapisać, żeby nikt
+        /// nie wrócił do tamtego pomysłu: blokowała wszystkie kolejne próby do końca sesji,
+        /// „bo skoro raz odmówiono, to odmówi zawsze". Przebieg 18:10 pokazał, że to nieprawda —
+        /// w TEJ SAMEJ sesji `dostawa` (WGR) i `nagroda` (KRW) powstały bez problemu, a dopiero
+        /// czwarty typ dostał odmowę. Blokada zjadła wtedy cztery kolejne typy i zamieniła
+        /// jedną odmowę w pięć porażek. Odmowa dotyczy konkretnej frakcji i konkretnej próby,
+        /// nie całej sesji.
+        /// </summary>
+        private static bool _ostrzezonoOKoncie;
+
         /// <summary>Wynik AddContract na nasze out-paramy (gra potrafi odrzucić zlecenie bez podania powodu).</summary>
         private static bool Added(MyAddContractResultWrapper result, string faction, out long contractId,
                                   out string powod)
@@ -499,7 +553,33 @@ namespace ZyweFrakcje
             if (!result.Success)
             {
                 contractId = 0;
+                // NAJCZĘSTSZA PRZYCZYNA, ustalona dekompilacją + logiem SE (2026-08-05):
+                // tożsamość właściciela bloku NIE MA KONTA w banku gry. `MyBankingSystem
+                // .GetBalance` zwraca wtedy -1 (a nie 0), więc warunek gry
+                //     GetBalance(startBlock.OwnerId) < MoneyReward
+                // jest spełniony ZAWSZE i leci Fail_NotEnoughFunds — niezależnie od tego,
+                // ile frakcja ma na swoim koncie i ile jej dosypiemy. Nasze dosypanie też
+                // przepada po cichu: ChangeBalanceInternal na brakującym koncie tylko loguje
+                // „Target Identifier <id> does not contain account" i zwraca false.
+                // Konta zakłada gra przy tworzeniu tożsamości NPC i przy WCZYTYWANIU świata
+                // (MyPlayerCollection.LoadIdentities), więc świeżo wygenerowane frakcje
+                // z Factions.sbc bywają bez konta aż do pierwszego zapisu i wczytania.
+                // Z ModAPI konta założyć się nie da (MyBankingSystem poza whitelistą).
+                // NIE zgadujemy przyczyny (poprawka 2026-08-05). Wcześniej dopisywaliśmy tu
+                // „właściciel bloku nie ma konta w banku" — i to była nieprawda w przebiegu 18:17,
+                // gdzie ta sama frakcja w tej samej sesji wystawiła trzy inne typy, a konta były
+                // obciążane normalnie. Odmowa ma wiele przyczyn i gra POTRAFI je nazwać, tylko
+                // pisze o nich do własnego logu, a nie do wrappera wyniku.
                 powod = "gra odrzuciła kontrakt frakcji " + faction;
+                if (!_ostrzezonoOKoncie)
+                {
+                    _ostrzezonoOKoncie = true;
+                    MyAPIGateway.Utilities.ShowMessage("ZF",
+                        "Wskazówka (raz na sesję): powód odmowy zlecenia gra zapisuje do SWOJEGO " +
+                        "logu, nie oddaje go modowi. Zajrzyj do %APPDATA%\\SpaceEngineers\\" +
+                        "SpaceEngineers_*.log i poszukaj \"CreateCustom\" albo \"does not contain " +
+                        "account\" — tam stoi konkretna przyczyna.");
+                }
                 return false;
             }
             contractId = result.ContractId;
