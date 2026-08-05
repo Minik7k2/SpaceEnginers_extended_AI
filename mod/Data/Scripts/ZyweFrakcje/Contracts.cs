@@ -361,7 +361,7 @@ namespace ZyweFrakcje
 
                 case "transport":
                 {
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId);
+                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
                     if (target == null)
                     {
                         powod = "w świecie nie ma drugiej stacji z blokiem kontraktów/sklepem";
@@ -426,7 +426,7 @@ namespace ZyweFrakcje
                     }
                     // Trasa: ze stacji frakcji do drugiej stacji, a gdy jej nie ma — 20 km
                     // w stronę gracza (żeby konwój dało się w ogóle spotkać).
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId);
+                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
                     Vector3D end;
                     string gdzie;
                     if (target != null)
@@ -459,7 +459,7 @@ namespace ZyweFrakcje
                         powod = "gra nie zna typu " + CustomContractDefinition;
                         return false;
                     }
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId);
+                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
                     string nazwa;
                     string opisPelny;
                     CustomTextForFaction(faction, out nazwa, out opisPelny);
@@ -525,17 +525,20 @@ namespace ZyweFrakcje
                 // (MyPlayerCollection.LoadIdentities), więc świeżo wygenerowane frakcje
                 // z Factions.sbc bywają bez konta aż do pierwszego zapisu i wczytania.
                 // Z ModAPI konta założyć się nie da (MyBankingSystem poza whitelistą).
-                powod = "gra odrzuciła kontrakt frakcji " + faction + " — właściciel bloku nie ma " +
-                        "konta w banku";
+                // NIE zgadujemy przyczyny (poprawka 2026-08-05). Wcześniej dopisywaliśmy tu
+                // „właściciel bloku nie ma konta w banku" — i to była nieprawda w przebiegu 18:17,
+                // gdzie ta sama frakcja w tej samej sesji wystawiła trzy inne typy, a konta były
+                // obciążane normalnie. Odmowa ma wiele przyczyn i gra POTRAFI je nazwać, tylko
+                // pisze o nich do własnego logu, a nie do wrappera wyniku.
+                powod = "gra odrzuciła kontrakt frakcji " + faction;
                 if (!_ostrzezonoOKoncie)
                 {
                     _ostrzezonoOKoncie = true;
                     MyAPIGateway.Utilities.ShowMessage("ZF",
-                        "Wskazówka (raz na sesję): odmowy zleceń biorą się zwykle stąd, że " +
-                        "tożsamość właściciela bloku nie ma konta w banku gry. Gra zakłada takie " +
-                        "konta przy WCZYTYWANIU świata, więc na świeżo utworzonym świecie pomaga " +
-                        "zapisanie i ponowne wczytanie. W logu SE widać \"does not contain account\". " +
-                        "Próby wystawiania zleceń lecą dalej normalnie.");
+                        "Wskazówka (raz na sesję): powód odmowy zlecenia gra zapisuje do SWOJEGO " +
+                        "logu, nie oddaje go modowi. Zajrzyj do %APPDATA%\\SpaceEngineers\\" +
+                        "SpaceEngineers_*.log i poszukaj \"CreateCustom\" albo \"does not contain " +
+                        "account\" — tam stoi konkretna przyczyna.");
                 }
                 return false;
             }

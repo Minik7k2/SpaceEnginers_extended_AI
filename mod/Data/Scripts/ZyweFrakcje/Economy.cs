@@ -190,13 +190,30 @@ namespace ZyweFrakcje
         /// trasa między jej stacjami), potem u kogokolwiek — trasa międzyfrakcyjna też jest
         /// trasą. null = w świecie jest tylko jedna stacja z blokiem ekonomicznym.
         /// </summary>
-        public static EconomyBlock FindHaulTarget(string factionTag, long excludeGridId)
+        /// <summary>
+        /// Cel transportu/eskorty. <paramref name="ownerId"/> to właściciel bloku STARTOWEGO:
+        /// gra wymaga, żeby oba bloki miały TEGO SAMEGO właściciela, i inaczej odrzuca zlecenie.
+        ///
+        /// USTALONE Z LOGU GRY (2026-08-05). `MyContractGenerator.CreateCustomHaulingContract`:
+        ///     if (startBlock != null &amp;&amp; endBlock != null &amp;&amp; endBlock.OwnerId != startBlock.OwnerId)
+        ///         return MyContractCreationResults.Fail_NotAnOwnerOfBlock;
+        /// a w logu SE stało wprost: „CreateCustomHaulingContract : Start and target blocks
+        /// don't have the same owner." Poprzednia wersja miała fallback na siatkę DOWOLNEJ
+        /// frakcji („trasa międzyfrakcyjna też jest trasą") — i to on zabijał każdy transport,
+        /// bo blok innej frakcji z definicji ma innego właściciela. Zlecenie schodziło wtedy
+        /// po cichu na dostawę i wyglądało to jak problem z kontem w banku.
+        /// ownerId == 0 wyłącza filtr (zachowanie jak dawniej).
+        /// </summary>
+        public static EconomyBlock FindHaulTarget(string factionTag, long excludeGridId, long ownerId)
         {
-            EconomyBlock own = FindEconomyBlockOtherThan(factionTag, excludeGridId);
-            return own ?? FindEconomyBlockOtherThan(null, excludeGridId);
+            EconomyBlock own = FindEconomyBlockOtherThan(factionTag, excludeGridId, ownerId);
+            // Fallback tylko wtedy, gdy właściciel nie jest wymagany — inaczej szukanie
+            // u obcych frakcji jest z góry stratą czasu i kończy się odmową gry.
+            return own ?? (ownerId != 0 ? null : FindEconomyBlockOtherThan(null, excludeGridId, 0));
         }
 
-        private static EconomyBlock FindEconomyBlockOtherThan(string factionTag, long excludeGridId)
+        private static EconomyBlock FindEconomyBlockOtherThan(string factionTag, long excludeGridId,
+                                                             long ownerId)
         {
             foreach (IMyCubeGrid grid in FactionGrids(factionTag))
             {
@@ -205,16 +222,25 @@ namespace ZyweFrakcje
                     continue;
                 }
                 long blockId;
-                if (HasBlockOfType(grid, ContractType, out blockId))
+                if (HasBlockOfType(grid, ContractType, out blockId) &&
+                    (ownerId == 0 || BlockOwner(blockId) == ownerId))
                 {
                     return Describe(grid, blockId, true);
                 }
-                if (HasBlockOfType(grid, StoreType, out blockId))
+                if (HasBlockOfType(grid, StoreType, out blockId) &&
+                    (ownerId == 0 || BlockOwner(blockId) == ownerId))
                 {
                     return Describe(grid, blockId, false);
                 }
             }
             return null;
+        }
+
+        /// <summary>Właściciel bloku po jego EntityId (0 = nie znaleziono albo niczyj).</summary>
+        public static long BlockOwner(long blockId)
+        {
+            var block = MyAPIGateway.Entities.GetEntityById(blockId) as IMyCubeBlock;
+            return block == null ? 0 : block.OwnerId;
         }
 
         /// <summary>
