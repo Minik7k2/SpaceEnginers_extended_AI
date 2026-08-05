@@ -78,13 +78,23 @@ namespace ZyweFrakcje
         }
 
         /// <summary>
-        /// Czy AiEnabled odpowiedziało na rejestrację, czyli czy mod jest w świecie.
-        /// Czyta to autotest, żeby odróżnić „nie ma moda" (ostrzeżenie) od „mod jest,
-        /// a botów nie ma" (błąd) — patrz <see cref="Autotest"/>.
+        /// Czy AiEnabled ODPOWIEDZIAŁO na rejestrację (odesłało słownik API).
+        ///
+        /// UWAGA — to NIE jest to samo co „mod jest w świecie" (2026-08-05). `Valid` ustawia
+        /// się dopiero w odpowiedzi na nasz komunikat rejestracyjny, więc `false` znaczy albo
+        /// „moda nie ma", albo „mod jest, ale uścisk dłoni nie doszedł do skutku" — a to drugie
+        /// jest właśnie najciekawsze, bo oznacza, że botów nie będzie mimo zasubskrybowanego
+        /// moda. Obecność samego moda sprawdza <see cref="Autotest"/> po liście modów świata.
         /// </summary>
-        public bool AiEnabledObecny
+        public bool ApiZarejestrowane
         {
             get { return _api != null && _api.Valid; }
+        }
+
+        /// <summary>Czy API zgłasza gotowość do stawiania botów (osobny etap po rejestracji).</summary>
+        public bool ApiGotowe
+        {
+            get { return _api != null && _api.Valid && _api.CanSpawn; }
         }
 
         public void Dispose()

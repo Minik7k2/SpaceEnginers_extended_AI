@@ -116,16 +116,44 @@ namespace ZyweFrakcje
         private readonly RansomManager _ransom;
         private readonly CrewSpawner _crew;
 
+        private const ulong AiEnabledWorkshopId = 2596208372;
+
         /// <summary>
-        /// Czy AiEnabled jest w świecie. Rozstrzyga, czy brak botów to OSTRZEŻENIE (zależność
-        /// miękka — moda po prostu nie ma), czy BŁĄD (mod jest, a boty i tak się nie pojawiają).
-        /// Bez tego rozróżnienia sekcja P zawsze świeciła na żółto i przebieg z 2026-08-02
-        /// zaraportował „bez AiEnabled to normalne" na świecie, w którym AiEnabled v1.9 BYŁO
-        /// załadowane — czyli cztery prawdziwe porażki przebrane za łagodne ostrzeżenia.
+        /// Czy AiEnabled jest ZASUBSKRYBOWANE w tym świecie — czytane z listy modów świata,
+        /// a NIE z uchwytu API. Rozstrzyga, czy brak botów to OSTRZEŻENIE (zależność miękka,
+        /// moda po prostu nie ma), czy BŁĄD (mod jest, a boty się nie pojawiają).
+        ///
+        /// Dwie poprawki, obie z realnych przebiegów:
+        /// 2026-08-04 — dotąd było to ZAWSZE ostrzeżenie, więc przebieg zameldował „bez
+        /// AiEnabled to normalne" na świecie z aktywnym AiEnabled v1.9.
+        /// 2026-08-05 — pierwsza wersja pytała o to `RemoteBotAPI.Valid` i myliła się tak samo,
+        /// tylko subtelniej: `Valid` ustawia się dopiero, gdy AiEnabled ODPOWIE na rejestrację,
+        /// więc mod obecny, lecz nieodpowiadający, dalej wychodził na „nieobecny". A to właśnie
+        /// ten przypadek zachodzi i to on jest przyczyną pustych pokładów.
         /// </summary>
-        private bool AiEnabledObecny
+        private static bool AiEnabledWSwiecie
         {
-            get { return _crew != null && _crew.AiEnabledObecny; }
+            get
+            {
+                if (MyAPIGateway.Session == null || MyAPIGateway.Session.Mods == null)
+                {
+                    return false;
+                }
+                foreach (var mod in MyAPIGateway.Session.Mods)
+                {
+                    if (mod.PublishedFileId == AiEnabledWorkshopId)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        /// <summary>Czy uchwyt API zdążył się zarejestrować u AiEnabled.</summary>
+        private bool ApiBotowGotowe
+        {
+            get { return _crew != null && _crew.ApiZarejestrowane; }
         }
 
         private List<Krok> _kroki;
@@ -1660,7 +1688,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na stacji frakcji (zależność miękka — AiEnabled)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie,
                 CzekajTikow = 5 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
@@ -1677,12 +1705,24 @@ namespace ZyweFrakcje
                             return "";
                         }
                     }
-                    return "na żadnej stacji nie ma postaci NPC. " + (AiEnabledObecny
-                        ? "AiEnabled JEST w świecie, więc to BŁĄD: pierwsze podejrzane jest " +
-                          "[BotType] w Crew.cs / ZF_Boty.sbc — wiki MES mówi, że to pole Name " +
-                          "z SBC, a nie SubtypeId"
-                        : "Moda AiEnabled (2596208372) nie ma w świecie — to zależność miękka " +
-                          "i taki wynik jest normalny");
+                    if (!AiEnabledWSwiecie)
+                    {
+                        return "na żadnej stacji nie ma postaci NPC. Moda AiEnabled " +
+                               "(2596208372) nie ma w świecie — to zależność miękka i taki " +
+                               "wynik jest normalny";
+                    }
+                    // Mod JEST. Najpierw powiedz, czy w ogóle się z nami przywitał — bez tego
+                    // wysyłalibyśmy szukającego w stronę [BotType], choć problem leży piętro
+                    // niżej: AiEnabled nie odpowiedziało na rejestrację, więc żadne wywołanie
+                    // API nie miało prawa zadziałać.
+                    return "na żadnej stacji nie ma postaci NPC, a AiEnabled JEST w świecie. " +
+                           (ApiBotowGotowe
+                               ? "API odpowiedziało na rejestrację, więc pierwsze podejrzane " +
+                                 "jest [BotType] w Crew.cs / ZF_Boty.sbc — wiki MES mówi, że " +
+                                 "to pole Name z SBC, a nie SubtypeId"
+                               : "API NIE odpowiedziało na rejestrację (RemoteBotAPI.Valid == " +
+                                 "false): to jest przyczyna, a nie nazwy botów. Sprawdź " +
+                                 "kolejność modów i czy AiEnabled wstało bez błędu w logu SE");
                 },
             });
 
@@ -1692,7 +1732,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga należy do frakcji, a nie jest bezpańska (P3)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie,
                 Sprawdz = () =>
                 {
                     for (int i = 0; i < Tagi.Length; i++)
@@ -1715,14 +1755,14 @@ namespace ZyweFrakcje
                               "SetPlayersFaction, więc bot nie zareaguje na zmianę relacji";
                     }
                     return "nie ma przy stacjach żadnej postaci NPC do sprawdzenia" +
-                           (AiEnabledObecny ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
+                           (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
                 },
             });
 
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga na statku rajdowym (trigger PlayerNear 1,5 km)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie,
                 Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
                 CzekajTikow = 20 * Sekunda,
                 Poll = true,
@@ -1750,7 +1790,7 @@ namespace ZyweFrakcje
             kroki.Add(new Krok
             {
                 Nazwa = "boty: załoga się nie mnoży przy kolejnych przebiegach (P6)",
-                MiekkiGdy = () => !AiEnabledObecny,
+                MiekkiGdy = () => !AiEnabledWSwiecie,
                 Start = () => { _zalogaPrzed = PoliczZalogeStacji(); },
                 CzekajTikow = 12 * Sekunda,
                 Sprawdz = () =>
@@ -1758,7 +1798,7 @@ namespace ZyweFrakcje
                     if (_zalogaPrzed == 0)
                     {
                         return "nie ma przy stacjach załogi do policzenia" +
-                               (AiEnabledObecny ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
+                               (AiEnabledWSwiecie ? " — a AiEnabled JEST w świecie" : " (brak AiEnabled)");
                     }
                     int teraz = PoliczZalogeStacji();
                     return teraz <= _zalogaPrzed
