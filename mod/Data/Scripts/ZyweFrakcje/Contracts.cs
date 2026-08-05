@@ -436,6 +436,27 @@ namespace ZyweFrakcje
 
                 case "eskorta":
                 {
+                    // ESKORTY NIE DA SIĘ WYSTAWIĆ — TYP ZOSTAŁ USUNIĘTY Z GRY.
+                    // Ustalone 2026-08-05 i to jest fakt o danych gry, nie hipoteza:
+                    // `MyContractGenerator.CreateCustomEscortContract` zaczyna się od
+                    //     if (!(new MyContractEscort().GetDefinition()
+                    //           is MyContractTypeEscortDefinition def))
+                    //         return MyContractCreationResults.Error;
+                    // a w Content/Data nie ma ŻADNEGO wpisu tego typu. Gra wozi dziś osiem
+                    // definicji zleceń: Deliver, Find, GridHauling, Hunt, ObtainAndDeliver,
+                    // PvEBounty, Repair, Salvage. Escort wśród nich nie ma, więc warunek
+                    // wywala się zawsze i zwraca Error BEZ WPISU DO LOGU — stąd „gra odrzuciła
+                    // kontrakt" bez jednego śladu, którego szukaliśmy przez trzy przebiegi.
+                    // Nie próbujemy więc i nie udajemy, że to przypadek: mówimy prawdę
+                    // i schodzimy na dostawę. Gdyby Keen kiedyś przywrócił ten typ, wystarczy
+                    // usunąć ten blok — kod poniżej jest kompletny i sprawdzony.
+                    powod = "typ eskorty został usunięty z gry (brak definicji ContractTypeEscort " +
+                            "w danych) — nie da się go wystawić";
+                    return false;
+                }
+
+                case "eskorta_nieuzywane":
+                {
                     string ignored;
                     long owner = FactionEconomy.FindTargetIdentity(faction, out ignored);
                     if (owner == 0)
