@@ -215,6 +215,8 @@ namespace ZyweFrakcje
         private Vector3D _flotaPozycja;
         private long _flotaGrid;
         private int _flotaPrzed;
+        // Ile siatek KRW stało w świecie, ZANIM krok o załodze zamówił swój rajd.
+        private int _botyPrzed;
 
         // Sekcja „boty": liczebność załogi sprzed powtórnego podejścia (P6).
         private int _zalogaPrzed;
@@ -1833,24 +1835,51 @@ namespace ZyweFrakcje
                 // stacyjnej ukrywałoby prawdziwą porażkę: gracz stojący 200 m od rajdu
                 // ma prawo oczekiwać załogi niezależnie od tego, gdzie stoją stacje.
                 MiekkiGdy = () => !AiEnabledWSwiecie,
-                Start = () => TestSpawner.SpawnForFaction("KRW", "raid"),
-                CzekajTikow = 20 * Sekunda,
+                Start = () =>
+                {
+                    // Zapamiętujemy STAN SPRZED zamówienia (2026-08-05). Bez tego krok brał
+                    // ostatnią śledzoną siatkę KRW — a `CustomSpawnRequest` jest asynchroniczny,
+                    // więc przez pierwsze sekundy była nią siatka, która stała w świecie WCZEŚNIEJ.
+                    // W praktyce trafiał na KONWÓJ z ręcznego `/zf raid KRW` (brain bez podanego
+                    // rodzaju dobiera flotę do nastroju frakcji i potrafi wybrać `convoy`), czyli
+                    // mierzył załogę na transportowcu, który z definicji ŻADNEJ nie ma:
+                    // `BehaviorKonwoj` nie zawiera `[Triggers:...]`. Krok meldował wtedy porażkę
+                    // botów, choć sprawdzał nie ten statek.
+                    _botyPrzed = TestSpawner.SledzoneSiatki("KRW").Count;
+                    TestSpawner.SpawnForFaction("KRW", "raid");
+                },
+                CzekajTikow = 40 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
                 {
                     List<IMyCubeGrid> siatki = TestSpawner.SledzoneSiatki("KRW");
-                    if (siatki.Count == 0)
+                    if (siatki.Count <= _botyPrzed)
                     {
-                        return "nie udało się postawić statku KRW (patrz sekcja floty)";
+                        return "zamówiony RAJD KRW jeszcze nie stanął — bez niego nie ma czego " +
+                               "sprawdzać (konwój z wcześniejszego spawnu się NIE liczy, " +
+                               "transportowiec nie ma triggera załogi)";
                     }
                     IMyCubeGrid grid = siatki[siatki.Count - 1];
                     if (grid == null || grid.MarkedForClose)
                     {
                         return "statek KRW zniknął przed sprawdzeniem";
                     }
+                    // Trigger PlayerNear mierzy dystans do KADŁUBA. Gdy gracz jest dalej, to nie
+                    // jest porażka botów — to brak warunku, i trzeba to powiedzieć wprost.
+                    IMyPlayer gracz = MyAPIGateway.Session.Player;
+                    double dystans = gracz == null
+                        ? -1
+                        : Vector3D.Distance(gracz.GetPosition(), grid.GetPosition());
+                    if (dystans > 1500)
+                    {
+                        return "NIE DA SIĘ SPRAWDZIĆ STĄD: rajd KRW stanął " + (int)dystans +
+                               " m stąd, a trigger załogi (PlayerNear) sięga 1500 m. Podleć " +
+                               "bliżej i powtórz `/zf autotest boty`.";
+                    }
                     int ile = PoliczPostacie(grid.GetPosition(), 200);
-                    return ile > 0 ? "" : "na pokładzie nie ma nikogo (profil ZF_Bot_KRW_* / akcja " +
-                                          "AddBotsToGrid / trigger PlayerNear — podejdź bliżej niż 1,5 km)";
+                    return ile > 0 ? "" : "na pokładzie RAJDU nie ma nikogo mimo dystansu " +
+                                          (int)dystans + " m (profil ZF_Bot_KRW_* / akcja " +
+                                          "AddBotsToGrid / APIs.AiEnabled.Valid po stronie MES)";
                 },
             });
 
