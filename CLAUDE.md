@@ -130,8 +130,15 @@ docs/protocol.md                # spec mostka JSONL
   grid_destroyed (MarkedForClose + świeże dmg; odróżnić od despawnu MES),
   proximity z histerezą 3/4 km. Zweryfikowane W GRZE 2026-07-19: proximity
   enter/exit, combat_hit (broń ręczna i Explosion), grid_destroyed.
-  Do zrobienia przy okazji: kontrtest, że despawn MES NIE generuje
-  grid_destroyed. Po drodze naprawiony mostek braina: offsety linii
+  Kontrtest despawnu (zaległość od Etapu 2) zautomatyzowany 2026-08-08 jako
+  `/zf autotest despawn`: siatka, której gracz NIE ostrzelał, po `Close()` NIE MOŻE
+  dać `grid_destroyed` — plus kontrola dodatnia (świeże trafienie nadal się liczy),
+  bez której reguła „zawsze nie" przeszłaby na zielono, i granica okna 30 s
+  (postrzelałeś, odleciałeś, MES posprzątał minutę później). Decyzję podejmuje jeden
+  predykat `CombatTracker.CzyDespawnZglosiZniszczenie` używany i przez `OnEntityRemove`,
+  i przez test — gdyby test miał własną kopię warunku, potwierdzałby swoje założenia.
+  Granica: to kontrtest REGUŁY MODA, nie integracji z MES (samego MES w teście nie ma).
+  Po drodze naprawiony mostek braina: offsety linii
   kluczowane pełną ścieżką (offset starego świata przesłaniał krótszy
   events.jsonl nowego → „brak odczytów") + config per maszyna
   (rules.local.toml).
@@ -184,6 +191,16 @@ docs/protocol.md                # spec mostka JSONL
   razem z własnym warunkiem po stronie moda. Tamże: `EndBlockId` custom kontraktu musi być
   BLOKIEM KONTRAKTÓW (`as MyContractBlock` → `Fail_BlockNotFound`), a `FindHaulTarget`
   schodzi na sklep — osobna przyczyna odrzuceń.
+  **PUŁAPKA — nadpisanie frakcji WYGRYWA z wartością domyślną (2026-08-08).** Powyższe
+  „waga 0" było prawdą tylko dla `[kontrakty.typy]`; `[kontrakty.typy.KRW]` w TYM SAMYM
+  PLIKU miało `wlasne = 2`, więc piraci przez tydzień losowali typ opisany w całym repo
+  jako wyłączony (~27% zleceń KRW) i gracz dostawał zadanie bez warunku wykonania.
+  Scenariusze tego nie łapały, bo sprawdzają typ WYMUSZONY (`/zf kontrakt KRW wlasne`) —
+  ścieżkę, która celowo omija wagi. Od teraz pilnują tego dwie bramki: `dlug_test`
+  (waga 0 u KAŻDEJ frakcji i w KAŻDYM stanie + 1200 losowań kontrolnych) oraz
+  `tools/waliduj_sbc.py` (wagę wolno podnieść dopiero, gdy `Contracts.cs` zawiera
+  `TryFinishCustomContract`). Ta druga jest jedynym miejscem widzącym JEDNOCZEŚNIE config
+  brainu i kod moda — brain nie czyta C#, mod nie czyta `rules.toml`.
   **Rekwizyty (2026-07-30):** frakcja sama przygotowuje robotę — `poszukiwania`
   i `naprawa` stawiają prefab z `mod/Data/Prefabs/ZF_ContractProps.sbc` (zgubiony
   moduł / uszkodzony wrak, właściciel = frakcja) i dopiero w callbacku spawnu tworzą
@@ -285,9 +302,10 @@ docs/protocol.md                # spec mostka JSONL
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
-- **`/zf autotest [sekcja]`** (2026-08-01, rozszerzone 2026-08-02): samosprawdzanie W GRZE.
-  Sekcje bezpieczne (lecą bez argumentu): `stacje`, `ceny`, `rekwizyt`, `kontrakty`,
-  `reputacja`, `okup`. Osobno `floty` i `boty` (spawnują prawdziwe rajdy — kosmos, świat
+- **`/zf autotest [sekcja]`** (2026-08-01, rozszerzone 2026-08-02 i 2026-08-08):
+  samosprawdzanie W GRZE.
+  Sekcje bezpieczne (lecą bez argumentu): `stacje`, `ceny`, `rekwizyt`, `despawn`,
+  `kontrakty`, `reputacja`, `okup`. Osobno `floty` i `boty` (spawnują prawdziwe rajdy — kosmos, świat
   testowy) oraz `wszystko`. Odpowiada na pytania, których nie da się zadać poza grą: czy
   `GetStoreItems` w ogóle zwraca oferty, czy `PricePerUnit` jest zapisywalne, czy mnożnik
   nie składa się po reloadzie, czy `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub
@@ -300,6 +318,10 @@ docs/protocol.md                # spec mostka JSONL
   Hak: `ContractManager.OstatniTyp`/`OstatniPowod`/`LicznikRozstrzygniec`.
   **Sekcja `reputacja`** pokrywa hybrydę (M1–M3, M5, M7) — łącznie z tym, czy mod przywraca
   swój cel po tym, jak gra ruszy reputację sama.
+  **Sekcja `despawn`** (2026-08-08) spłaca kontrtest zaległy od Etapu 2 — patrz Etap 2 wyżej.
+  Jest jedyną sekcją, której sedno jest NEGATYWNE („nic się nie stało"), więc ma kontrolę
+  dodatnią: bez niej reguła zwracająca zawsze „nie" przechodziłaby na zielono, a zestrzelenie
+  statku przestałoby cokolwiek znaczyć dla relacji.
   Autotest podaje mechanikom dokładnie takie ładunki, jakie przysłałby brain (`PriceManager
   .Handle`, `ReputationSync.Handle`, `RansomManager.HandleDemand`), więc **działa też bez
   uruchomionego `zf_brain.exe`**.
@@ -319,6 +341,16 @@ docs/protocol.md                # spec mostka JSONL
   zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
   i wagami typów kontraktów. Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
+- **Strażnicy długu technicznego** (2026-08-08). Osobna kategoria: nie bronią działającej
+  mechaniki, tylko decyzji „tego jeszcze NIE WŁĄCZAMY, bo brakuje drugiej połowy". Taka
+  decyzja żyła dotąd wyłącznie w komentarzu i dzieliła ją od cofnięcia jedna cyfra w configu.
+  `brain/tests/dlug_test.cpp` czyta PRAWDZIWY `rules.toml` (nie syntetyczny — inaczej nie
+  mówiłby nic o tym, co dostaje gracz) i sprawdza: waga 0 typów zablokowanych u każdej
+  frakcji i w każdym stanie, 1200 losowań kontrolnych, brak typów wyłączonych po cichu bez
+  wpisu w tabeli `kBlokady`, jawny mnożnik trudności dla każdego typu. Każdy wpis `kBlokady`
+  niesie POWÓD i WARUNEK ODBLOKOWANIA, które lądują wprost w komunikacie FAIL — a spłacenie
+  długu wymaga skreślenia wpisu, czyli świadomego potwierdzenia przez człowieka.
+  Drugą bramkę (waga kontra kod moda) trzyma `tools/waliduj_sbc.py` — patrz Etap 6.
 - **Scenariusze** (`brain/tests/scenariusze/*.jsonl`, 2026-08-02): plik JSONL, w którym
   obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
   `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
@@ -352,7 +384,15 @@ docs/protocol.md                # spec mostka JSONL
   zdalnego sterowania (przyczyna dryfujących konwojów). Vanillowych prefabów nie da się
   potwierdzić bez plików gry, więc trzyma jawną tabelę `ZNANE_PREFABY` — prefab spoza niej
   to błąd z prośbą o dopisanie. `tools/test_waliduj_sbc.py` psuje dane na kopii i wymaga
-  wykrycia każdej usterki (walidator, który zawsze mówi „czysto", byłby bezwartościowy).
+  wykrycia każdej usterki (walidator, który zawsze mówi „czysto", byłby bezwartościowy);
+  22 przypadki, w tym trzy ostrzeżeniowe — ostrzeżenie, które nigdy nie pada, jest tak samo
+  bezwartościowe jak test bez asercji.
+  **Dług kontraktów (2026-08-08, `--rules`):** walidator jest JEDYNYM miejscem widzącym
+  jednocześnie `brain/configs/rules.toml` i kod C# moda. Typ zlecenia wolno włączyć dopiero
+  wtedy, gdy mod ma to, czego typ potrzebuje: `wlasne` wymaga `TryFinishCustomContract`
+  w `Contracts.cs`, `eskorta` — żeby implementacja nie stała już pod martwym case'em
+  `eskorta_nieuzywane`, `nagroda` daje samo ostrzeżenie (kod jest gotowy, wątpliwa jest
+  mechanika gry). Gdy dług zostanie spłacony, bramka przestaje krzyczeć sama z siebie.
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
   (z scenariuszami) i smoke test `--replay`; osobna praca puszcza walidator SBC i jego
   kontrtest. Wariant bez LLM łatwo psuje się niezauważenie.

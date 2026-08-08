@@ -115,8 +115,13 @@ namespace ZyweFrakcje
     internal sealed class CombatTracker : IDisposable
     {
         private const int FlushAfterTicks = 180;    // 3 s @ 60 Hz — okno agregacji
-        private const int FreshDamageTicks = 1800;  // 30 s — zniszczenie vs despawn MES
         private const int CleanupEveryTicks = 3600; // sprzątanie słownika siatek co minutę
+
+        /// <summary>
+        /// 30 s @ 60 Hz — granica między ZNISZCZENIEM a despawnem. Publiczna, bo autotest
+        /// sprawdza obie jej strony i musi znać dokładną wartość (patrz sekcja „despawn").
+        /// </summary>
+        public const int FreshDamageTicks = 1800;
 
         private sealed class Aggregate
         {
@@ -310,6 +315,53 @@ namespace ZyweFrakcje
             }
         }
 
+        /// <summary>
+        /// Ile razy ten tracker zgłosił <c>grid_destroyed</c>. Autotest mierzy tym, że
+        /// despawn NIC nie zgłosił — a licznik bez punktu odniesienia niczego by nie dowiódł.
+        /// </summary>
+        public int ZgloszoneZniszczenia { get; private set; }
+
+        /// <summary>
+        /// Czy usunięcie tej siatki ZOSTAŁOBY policzone jako zniszczenie przez gracza.
+        /// Ta sama decyzja, co w <see cref="OnEntityRemove"/>, tylko bez skutków ubocznych —
+        /// dzięki temu autotest sprawdza REGUŁĘ, nie musząc wywoływać zdarzenia, które
+        /// zmieniłoby relacje w brainie (grid_destroyed to -30 do -50).
+        ///
+        /// Reguła: zgłaszamy WYŁĄCZNIE siatki, które gracz świeżo ostrzelał. Despawn MES
+        /// dotyczy siatek, których gracz nigdy nie tknął (fałsz przez brak wpisu) albo
+        /// tknął dawno (fałsz przez okno 30 s) — i to jest cała różnica między
+        /// „zestrzeliłeś patrol" a „MES posprzątał patrol, bo odleciałeś".
+        /// </summary>
+        public bool CzyDespawnZglosiZniszczenie(long gridId)
+        {
+            DamagedGrid damaged;
+            if (!_damaged.TryGetValue(gridId, out damaged))
+            {
+                return false;
+            }
+            return _tick - damaged.LastTick <= FreshDamageTicks;
+        }
+
+        /// <summary>
+        /// Wpisuje trafienie tak, jakby zrobił to <see cref="OnAfterDamage"/> — z tą różnicą,
+        /// że wolno podać WIEK trafienia w tikach. Wyłącznie dla autotestu: nie da się ani
+        /// poczekać w grze pół minuty na jeden krok testu, ani cofnąć zegara, a bez obu stron
+        /// granicy 30 s kontrtest despawnu sprawdzałby połowę reguły.
+        /// </summary>
+        public void ZarejestrujTrafienieDlaTestu(IMyCubeGrid grid, string faction, int wiekTikow)
+        {
+            if (grid == null)
+            {
+                return;
+            }
+            var damaged = new DamagedGrid();
+            damaged.Faction = faction;
+            damaged.Name = grid.DisplayName;
+            damaged.LastTick = _tick - wiekTikow;
+            damaged.IsStation = grid.IsStatic;
+            _damaged[grid.EntityId] = damaged;
+        }
+
         private void OnEntityRemove(IMyEntity entity)
         {
             if (_disposed)
@@ -326,9 +378,13 @@ namespace ZyweFrakcje
             {
                 return;
             }
+            // Decyzja przez wspólny predykat, ŻEBY BYŁA JEDNA: gdyby autotest sprawdzał
+            // własną kopię warunku, potwierdzałby swoje założenia, a nie zachowanie moda.
+            bool zglosic = CzyDespawnZglosiZniszczenie(grid.EntityId);
             _damaged.Remove(grid.EntityId);
-            if (_tick - damaged.LastTick <= FreshDamageTicks)
+            if (zglosic)
             {
+                ZgloszoneZniszczenia++;
                 _events.WriteGridDestroyed(damaged.Faction, damaged.Name, true, damaged.IsStation);
             }
         }

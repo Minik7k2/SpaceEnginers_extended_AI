@@ -168,8 +168,13 @@ naprawa = 1
 dostawa = 3
 poszukiwania = 2
 transport = 1
-wlasne = 2
 naprawa = 0
+# wlasne = 0 JAWNIE, mimo że taka jest wartość domyślna wyżej. Do 2026-08-08 stało tu
+# `wlasne = 2` i to nadpisanie WYGRYWAŁO z domyślnym zerem — piraci losowali typ opisany
+# w całym repo jako wyłączony (~27% zleceń KRW), a gracz dostawał zadanie bez warunku
+# wykonania, które wygasało na karę relacji i przepadek kaucji. Zero zostaje do czasu
+# zaimplementowania TryFinishCustomContract po stronie moda; pilnuje tego dlug_test.
+wlasne = 0
 
 [kontrakty.typy.WGR]
 # Górnicy: szyby się psują, koparki gubią, ruda musi dojechać.

@@ -8,7 +8,7 @@ najpierw — ręczna lista ma sens dopiero, gdy są zielone.
 | Narzędzie | Co pokrywa | Jak uruchomić |
 |---|---|---|
 | `ctest --test-dir brain/build` | logika braina + **scenariusze** (`brain/tests/scenariusze/*.jsonl`, 99 sprawdzeń): brainowa połowa I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, K2–K6, L1–L3, M1–M3/M4/M7, N2–N8, N12 | po `cmake --build brain/build` |
-| `python3 tools/waliduj_sbc.py` | referencje w danych moda: grupy spawnu ↔ zachowania ↔ manipulacje ↔ boty ↔ kod (sekcje O i P niżej) | z korzenia repo |
+| `python3 tools/waliduj_sbc.py` | referencje w danych moda: grupy spawnu ↔ zachowania ↔ manipulacje ↔ boty ↔ kod (sekcje O i P niżej) **oraz dług kontraktów**: waga typu w `rules.toml` kontra to, co mod naprawdę implementuje | z korzenia repo |
 | `tools/sprawdz-mod.ps1` | czy mod w ogóle się kompiluje (składnia i typy, NIE whitelista) | Windows z SE + Visual Studio |
 
 **Uwaga o podziale.** Scenariusze sprawdzają, co brain LICZY i WYSYŁA — nie to, czy gra
@@ -22,14 +22,38 @@ deadline, jest gwarancją MODU (przestaje wysyłać `ransom_expired`) i sprawdza
 `/zf autotest okup`. Sam brain, dostawszy `ransom_expired` z powodem `deadline`, karę
 naliczy — i ma prawo.
 
+### Strażnicy długu technicznego
+
+Osobna kategoria, dodana 2026-08-08. Zwykły test broni działającej mechaniki; te bronią
+decyzji „tego jeszcze NIE WŁĄCZAMY, bo brakuje drugiej połowy". Taka decyzja żyła dotąd
+wyłącznie w komentarzu, a od cofnięcia dzieliła ją jedna cyfra w configu.
+
+| Gdzie | Czego pilnuje |
+|---|---|
+| `dlug_test` (ctest) | typy zleceń wyłączone wagą 0 (`wlasne`, `eskorta`, `nagroda`) mają zero **u każdej frakcji i w każdym stanie**, losowanie nigdy ich nie zwraca, a każdy typ ma jawny mnożnik trudności |
+| `waliduj_sbc.py` | wagę wolno podnieść dopiero, gdy mod ma to, czego typ potrzebuje (`wlasne` → `TryFinishCustomContract` w `Contracts.cs`; `eskorta` → implementacja nie stoi już pod `eskorta_nieuzywane`) |
+| `/zf autotest despawn` | despawn siatki nieostrzelanej NIE generuje `grid_destroyed` (kontrtest zaległy od Etapu 2) |
+
+**Dlaczego akurat tak.** `[kontrakty.typy] wlasne = 0` z akapitem komentarza „WYŁĄCZONE, bo
+nie ma warunku wykonania" było prawdą tylko dla wartości domyślnej — `[kontrakty.typy.KRW]`
+niżej w TYM SAMYM PLIKU miało `wlasne = 2`, a nadpisanie frakcji wygrywa. Piraci losowali
+typ opisany w całym repo jako wyłączony w ~27% swoich zleceń, a gracz dostawał zadanie bez
+warunku wykonania, które wygasało na karę relacji i przepadek kaucji. Żaden istniejący test
+tego nie łapał: scenariusze sprawdzają typ WYMUSZONY (`/zf kontrakt KRW wlasne`), czyli
+ścieżkę, która celowo omija wagi.
+
+Gdy dług zostanie spłacony, `dlug_test` wymaga skreślenia wpisu z tabeli `kBlokady` —
+i to skreślenie jest jedynym miejscem, w którym ktoś musi świadomie potwierdzić, że
+warunek odblokowania jest naprawdę spełniony.
+
 ## W grze: `/zf autotest [sekcja]`
 
 Jedna komenda zamiast przeklikiwania listy. Sprawdza to, czego nie da się sprawdzić poza
 grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `events.jsonl`
 (typ `autotest_result`), więc widać go też w konsoli brainu.
 
-- `/zf autotest` — sekcje bezpieczne (`stacje`, `ceny`, `rekwizyt`, `kontrakty`, `reputacja`,
-  `okup`): nic nie spawnują wrogo i **przywracają stan świata**, także gdy krok padnie
+- `/zf autotest` — sekcje bezpieczne (`stacje`, `ceny`, `rekwizyt`, `despawn`, `kontrakty`,
+  `reputacja`, `okup`): nic nie spawnują wrogo i **przywracają stan świata**, także gdy krok padnie
   w połowie (cennik wraca do x1.00, reputacja do wartości sprzed testu, zlecenia i rekwizyty
   autotestu są kasowane, żądanie trybutu odwołane).
 - `/zf autotest ceny` — **bramka całej sekcji N**: czy `GetStoreItems` zwraca oferty, czy
@@ -40,6 +64,14 @@ grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `e
   w wersji bez reloadu (czy w świecie nie stoją dwie stacje tej samej frakcji).
 - `/zf autotest rekwizyt` — I19a: czy `SpawningOptions.SetNpcSpawnedGrid` faktycznie ustawia
   flagę (bez niej poszukiwania zawalają się sekundę po przyjęciu).
+- `/zf autotest despawn` — **kontrtest z Etapu 2** (dług spłacony 2026-08-08): czy usunięcie
+  siatki, której gracz NIE ostrzelał, na pewno NIE generuje `grid_destroyed`. Zwykły test
+  pyta, czy coś się dzieje; ten pyta, czy coś się NIE dzieje — bo fałszywe `grid_destroyed`
+  zabiera -30 relacji za statek, którego gracz nie tknął, i nie zostawia po sobie śladu poza
+  spadkiem liczby w `/zf rel` (objaw: „frakcje same z siebie mnie nienawidzą"). Ma kontrolę
+  dodatnią (świeże trafienie NADAL się liczy), bo inaczej reguła „zawsze nie" przeszłaby
+  na zielono. **Granica:** to kontrtest reguły MODA — siatkę usuwamy przez `Close()`, tak jak
+  robi to despawner MES, ale samego MES w tym teście nie ma.
 - `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie siedem
   typów zleceń i porównuje typ ZAMÓWIONY z tym, który NAPRAWDĘ powstał. Mod ma przy
   zleceniach ostatnie słowo i przy braku celu po cichu wystawia dostawę (I15) — dotąd
@@ -84,9 +116,14 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 - [x] **A3. Combat:** ostrzelaj statek NPC → w konsoli `combat_hit` z bronią
   i frakcją, paczki co ~3 s (nie pojedyncze strzały).
 - [x] **A4. Zniszczenie:** rozwal statek do końca → `grid_destroyed` z nazwą siatki.
-- [x] **A5. Kontrtest despawnu (zaległość Etapu 2):** spawnij statek, NIE
+- [ ] **A5. Kontrtest despawnu (zaległość Etapu 2):** spawnij statek, NIE
   strzelaj, odleć bardzo daleko i poczekaj aż MES go zdespawni → w konsoli
   braina NIE MOŻE pojawić się `grid_destroyed`.
+  Automat: **`/zf autotest despawn`** (2026-08-08) — pokrywa REGUŁĘ MODA po obu stronach
+  okna 30 s, razem z kontrolą dodatnią. Ręcznie zostaje jedna rzecz, której automat nie
+  dosięga: że MES despawnuje właśnie tą ścieżką (`Close()`), a nie jakąś inną. Dlatego
+  kratka wraca na pustą — była odhaczona, choć CLAUDE.md od Etapu 2 wymieniał ten kontrtest
+  jako zaległy, a przebiegu z prawdziwym despawnem MES nikt nie odnotował.
 
 ## B. Silnik relacji (Etap 3)
 

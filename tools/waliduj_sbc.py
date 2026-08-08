@@ -16,7 +16,12 @@ ZNANE_POSTACIE dla [BotType] — 2026-08-02 okazało się, że wpisane tam z opi
 Workshopie „Police_Bot" i „Space_Skeleton" NIE ISTNIEJĄ, a AiEnabled przerywa wtedy
 spawn po cichu (ostrzeżenie idzie tylko do jego własnego logu).
 
-Użycie: python3 tools/waliduj_sbc.py [--korzen <katalog moda>]
+DŁUG TECHNICZNY. Osobna rola tego skryptu (2026-08-08): jest jedynym miejscem, które
+widzi JEDNOCZEŚNIE config brainu i kod moda. Typy zleceń wyłączone wagą 0 są wyłączone
+dlatego, że brakuje im drugiej połowy PO STRONIE MODA — a tego brain sprawdzić nie może
+(nie czyta C#) i mod też nie (nie czyta rules.toml). Patrz sprawdz_dlug_kontraktow.
+
+Użycie: python3 tools/waliduj_sbc.py [--korzen <katalog moda>] [--rules <rules.toml>]
 Kod wyjścia: 0 = czysto, 1 = błędy.
 """
 
@@ -25,6 +30,11 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:  # pragma: no cover — starsze Pythony
+    tomllib = None
 
 # Vanillowe prefaby używane przez mod. Rozmiar i obecność bloku zdalnego sterowania
 # spisane 2026-08-01 przy doborze flot (przeskanowane po xsi:type bloków) — to jedyne
@@ -84,6 +94,47 @@ ROLE_AIENABLED = {
 }
 
 TAG_RE = re.compile(r"\[([A-Za-z0-9_]+):([^\]]*)\]")
+
+# ---------------------------------------------------------------------------
+# Dług techniczny: typy zleceń wyłączone wagą 0 w brain/configs/rules.toml.
+#
+# Wagę widzi brain (dlug_test pilnuje, żeby była zerowa), ale POWÓD blokady leży
+# w kodzie moda — i nikt tych dwóch stron ze sobą nie zestawia. Tu je zestawiamy:
+# waga wolno podnieść dopiero wtedy, gdy w C# stoi to, czego typ potrzebuje.
+#
+#   marker      fragment tekstu szukany w mod/Data/Scripts/ZyweFrakcje/<plik>
+#   sens        "wymagany"  — bez tego markera typu WŁĄCZYĆ NIE WOLNO
+#               "zabroniony"— obecność markera znaczy, że mod wciąż typu nie wystawia
+#               None        — nie ma czego szukać w kodzie, blokada jest empiryczna
+BLOKADY_KONTRAKTOW = {
+    "wlasne": {
+        "plik": "Contracts.cs",
+        "marker": "TryFinishCustomContract",
+        "sens": "wymagany",
+        "powod": "zlecenie custom nie ma warunku wykonania — kończy je WYŁĄCZNIE mod "
+                 "przez IMyContractSystem.TryFinishCustomContract(id). Bez tego gracz "
+                 "dostaje zadanie, którego nie da się zaliczyć: wygasa na karę relacji "
+                 "i przepadek kaucji",
+    },
+    "eskorta": {
+        "plik": "Contracts.cs",
+        # Działający kod eskorty jest zaparkowany pod nieużywanym case'em; dopóki tam
+        # stoi, mod tego typu nie wystawia i waga > 0 daje wyłącznie ciche dostawy.
+        "marker": "eskorta_nieuzywane",
+        "sens": "zabroniony",
+        "powod": "typ USUNIĘTY Z GRY (2026-08-05) — nie ma definicji ContractTypeEscort, "
+                 "a CreateCustomEscortContract zwraca Error BEZ WPISU DO LOGU",
+    },
+    "nagroda": {
+        # Tu nie ma czego szukać w C#: kod jest kompletny, wątpliwa jest sama MECHANIKA
+        # gry. To dług do rozstrzygnięcia w grze, nie do naprawienia w kodzie.
+        "plik": None,
+        "marker": None,
+        "sens": None,
+        "powod": "vanillowa nagroda za głowę liczy zabicia GRACZY, nie NPC — zlecenie na "
+                 "tożsamość bota może nie mieć jak się zaliczyć (I14 w docs/testy-reczne.md)",
+    },
+}
 
 
 class Wynik:
@@ -549,10 +600,97 @@ def sprawdz_frakcje(korzen, grupy, wynik):
                               .format(tag, nazwa))
 
 
+def wagi_typow_zlecen(rules_path, wynik):
+    """{typ: {gdzie: waga}} z [kontrakty.typy] — wartości domyślne i nadpisania frakcji.
+
+    `gdzie` to "domyślnie" albo tag frakcji. Nadpisanie frakcji WYGRYWA z domyślnym,
+    więc obie warstwy muszą być widoczne osobno: to właśnie pomyłka „przecież u góry
+    jest 0" kosztowała nas tydzień losowania wyłączonego typu przez KRW.
+    """
+    if tomllib is None:
+        wynik.ostrzez(rules_path, "Python < 3.11 (brak tomllib) — pomijam kontrolę długu "
+                                  "kontraktów; uruchom walidator na Pythonie 3.11+")
+        return None
+    try:
+        with open(rules_path, "rb") as f:
+            dane = tomllib.load(f)
+    except (OSError, ValueError) as e:
+        wynik.blad(rules_path, "nie mogę wczytać ({})".format(e))
+        return None
+
+    typy = dane.get("kontrakty", {}).get("typy", {})
+    wagi = {}
+    for klucz, wartosc in typy.items():
+        if isinstance(wartosc, dict):
+            for typ, waga in wartosc.items():  # [kontrakty.typy.HEL] itd.
+                wagi.setdefault(typ, {})[klucz] = waga
+        else:
+            wagi.setdefault(klucz, {})["domyślnie"] = wartosc
+    return wagi
+
+
+def sprawdz_dlug_kontraktow(rules_path, korzen_skryptow, wynik):
+    """Typ zlecenia wolno włączyć dopiero, gdy mod ma to, czego typ potrzebuje.
+
+    Jedyna kontrola, która widzi obie strony granicy: wagę z configu brainu i kod C#
+    moda. Brain nie czyta Contracts.cs, mod nie czyta rules.toml, więc bez tego
+    zestawienia „wyłączone, bo brakuje warunku wykonania" jest komentarzem, który
+    dzieli od cofnięcia jedna cyfra.
+    """
+    if not os.path.isfile(rules_path):
+        wynik.ostrzez(rules_path, "nie ma pliku — pomijam kontrolę długu kontraktów "
+                                  "(wskaż go przez --rules)")
+        return
+    wagi = wagi_typow_zlecen(rules_path, wynik)
+    if wagi is None:
+        return
+
+    for typ, blokada in BLOKADY_KONTRAKTOW.items():
+        wlaczone = {gdzie: waga for gdzie, waga in wagi.get(typ, {}).items() if waga > 0}
+        if not wlaczone:
+            continue
+        gdzie = ", ".join("{}={}".format(g, w) for g, w in sorted(wlaczone.items()))
+        opis = "typ \"{}\" ma wagę > 0 ({})".format(typ, gdzie)
+
+        if blokada["marker"] is None:
+            # Blokada empiryczna — kod jest gotowy, wątpliwa jest mechanika gry.
+            wynik.ostrzez(rules_path, "{} — {}. Zanim zostawisz tę wagę, potwierdź typ "
+                                      "W GRZE.".format(opis, blokada["powod"]))
+            continue
+
+        sciezka = os.path.join(korzen_skryptow, blokada["plik"])
+        try:
+            with open(sciezka, encoding="utf-8") as f:
+                kod = f.read()
+        except OSError as e:
+            wynik.blad(sciezka, "nie mogę wczytać, a jest potrzebny do kontroli typu "
+                                "\"{}\" ({})".format(typ, e))
+            continue
+
+        ma_marker = blokada["marker"] in kod
+        if blokada["sens"] == "wymagany" and not ma_marker:
+            wynik.blad(rules_path,
+                       "{}, ale {} nie zawiera \"{}\" — {}. Zaimplementuj to w modzie "
+                       "ALBO zostaw wagę 0."
+                       .format(opis, blokada["plik"], blokada["marker"], blokada["powod"]))
+        elif blokada["sens"] == "zabroniony" and ma_marker:
+            wynik.blad(rules_path,
+                       "{}, ale {} wciąż parkuje ten typ pod \"{}\" — {}. Dopóki mod go "
+                       "nie wystawia, waga > 0 daje tylko ciche dostawy."
+                       .format(opis, blokada["plik"], blokada["marker"], blokada["powod"]))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Walidator plików SBC moda SE_ZyweFrakcje")
     parser.add_argument("--korzen", default="mod/Data",
                         help="katalog z danymi moda (domyślnie mod/Data)")
+    # Ścieżka domyślna liczona od POŁOŻENIA SKRYPTU, nie od katalogu roboczego: --korzen
+    # bywa kopią w /tmp (kontrtest), a rules.toml i tak leży w repo.
+    parser.add_argument("--rules",
+                        default=os.path.join(os.path.dirname(os.path.dirname(
+                            os.path.abspath(__file__))), "brain", "configs", "rules.toml"),
+                        help="config brainu z wagami typów zleceń "
+                             "(domyślnie brain/configs/rules.toml)")
     args = parser.parse_args()
 
     if not os.path.isdir(args.korzen):
@@ -569,7 +707,9 @@ def main():
     sprawdz_referencje(grupy, komponenty, wynik)
     sprawdz_grupy(grupy, prefaby, wynik)
     sprawdz_frakcje(args.korzen, grupy, wynik)
-    sprawdz_kod(os.path.join(args.korzen, "Scripts", "ZyweFrakcje"), grupy, prefaby, wynik)
+    korzen_skryptow = os.path.join(args.korzen, "Scripts", "ZyweFrakcje")
+    sprawdz_kod(korzen_skryptow, grupy, prefaby, wynik)
+    sprawdz_dlug_kontraktow(args.rules, korzen_skryptow, wynik)
 
     return wynik.raport()
 

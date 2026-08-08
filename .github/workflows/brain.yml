@@ -52,6 +52,15 @@ jobs:
           echo "scenariuszy w ctest: $ile"
           test "$ile" -ge 4
 
+      # Ta sama bramka, co wyżej, dla strażników długu technicznego. Gdyby dlug_test wypadł
+      # z CMakeLists (albo nie zbudował się przez brakującą definicję ZF_RULES_TOML), ctest
+      # dalej byłby zielony — a jedyne, co pilnuje wyłączonych typów zleceń, zniknęłoby bez
+      # śladu. Dokładnie tak zniknęły kiedyś scenariusze.
+      - name: Strażnicy długu naprawdę się uruchomili
+        run: |
+          ctest --test-dir build -N | grep -q "dlug_test"
+          echo "dlug_test obecny w ctest"
+
       - name: Smoke test --replay (mostek + silnik bez gry)
         run: |
           mkdir -p /tmp/zf_storage
