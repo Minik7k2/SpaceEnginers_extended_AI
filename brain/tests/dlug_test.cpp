@@ -55,12 +55,10 @@ const std::vector<Blokada> kBlokady = {
      "Gracz dostaje zlecenie bez zadania, które wygasa na karę relacji i przepadek kaucji",
      "zaimplementuj warunek po stronie moda (TryFinishCustomContract w Contracts.cs) "
      "i dopiero wtedy podnieś wagę"},
-    {"eskorta",
-     "typ USUNIĘTY Z GRY (potwierdzone 2026-08-05): Content/Data wozi osiem typów, "
-     "ContractTypeEscort wśród nich nie ma. CreateCustomEscortContract wychodzi na "
-     "pierwszym warunku i zwraca Error BEZ WPISU DO LOGU",
-     "typ może wrócić tylko z aktualizacją gry — najpierw sprawdź, czy definicja "
-     "ContractTypeEscort znowu istnieje"},
+    // "eskorta" NIE MA już w tej tabeli, bo nie ma jej w Config::contract_kinds() —
+    // typ został usunięty 2026-08-09, a nie tylko wyłączony wagą. Blokada pilnuje typów
+    // ISTNIEJĄCYCH, ale niegotowych; typu, którego nie ma, pilnuje sama jego nieobecność
+    // (D3 niżej wyłapie, gdyby ktoś wrócił z nim do listy bez wagi).
     {"nagroda",
      "vanillowa nagroda za głowę liczy zabicia GRACZY, nie NPC — zlecenie na tożsamość "
      "bota nie ma jak się zaliczyć",

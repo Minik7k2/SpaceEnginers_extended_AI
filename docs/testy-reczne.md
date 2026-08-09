@@ -30,8 +30,8 @@ wyłącznie w komentarzu, a od cofnięcia dzieliła ją jedna cyfra w configu.
 
 | Gdzie | Czego pilnuje |
 |---|---|
-| `dlug_test` (ctest) | typy zleceń wyłączone wagą 0 (`wlasne`, `eskorta`, `nagroda`) mają zero **u każdej frakcji i w każdym stanie**, losowanie nigdy ich nie zwraca, a każdy typ ma jawny mnożnik trudności |
-| `waliduj_sbc.py` | wagę wolno podnieść dopiero, gdy mod ma to, czego typ potrzebuje (`wlasne` → `TryFinishCustomContract` w `Contracts.cs`; `eskorta` → implementacja nie stoi już pod `eskorta_nieuzywane`) |
+| `dlug_test` (ctest) | typy zleceń wyłączone wagą 0 (`wlasne`, `nagroda`) mają zero **u każdej frakcji i w każdym stanie**, losowanie nigdy ich nie zwraca, a każdy typ ma jawny mnożnik trudności |
+| `waliduj_sbc.py` | wagę wolno podnieść dopiero, gdy mod ma to, czego typ potrzebuje (`wlasne` → `TryFinishCustomContract` w `Contracts.cs`), a KAŻDY losowalny typ ma swój `case` w `Contracts.cs` — bez niego `switch` schodzi na `default` i po cichu wystawia dostawę |
 | `/zf autotest despawn` | despawn siatki nieostrzelanej NIE generuje `grid_destroyed` (kontrtest zaległy od Etapu 2) |
 
 **Dlaczego akurat tak.** `[kontrakty.typy] wlasne = 0` z akapitem komentarza „WYŁĄCZONE, bo
@@ -72,7 +72,7 @@ grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `e
   dodatnią (świeże trafienie NADAL się liczy), bo inaczej reguła „zawsze nie" przeszłaby
   na zielono. **Granica:** to kontrtest reguły MODA — siatkę usuwamy przez `Close()`, tak jak
   robi to despawner MES, ale samego MES w tym teście nie ma.
-- `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie siedem
+- `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie sześć
   typów zleceń i porównuje typ ZAMÓWIONY z tym, który NAPRAWDĘ powstał. Mod ma przy
   zleceniach ostatnie słowo i przy braku celu po cichu wystawia dostawę (I15) — dotąd
   nie było jak zauważyć, że jakiś typ od tygodni degraduje. Sprawdza też, że `Duration`
@@ -450,30 +450,28 @@ Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
 - [x] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
   (polityka KRW/HEL -70), mod tworzy `MyContractBounty`, a w terminalu stacji widać
   zlecenie na głowę pilota HEL. Analogicznie `transport`, `naprawa`, `poszukiwania`,
-  `eskorta`, `wlasne`, `dostawa`.
+  `wlasne`, `dostawa`.
 - [x] **I15. Zejście na dostawę:** wymuś typ, dla którego w świecie NIE MA celu
   (np. `/zf kontrakt HEL naprawa`, gdy żadna siatka HEL nie jest uszkodzona) → na czacie
   `Zlecenie HEL typu "naprawa" niemożliwe (frakcja nie ma uszkodzonej siatki do naprawy)
   — wystawiam dostawę`, a `contract_created` w konsoli braina ma `dostawa`, NIE `naprawa`.
   To najważniejszy test całej rozbudowy: żadne zlecenie nie może przepaść po cichu.
-  Automat: `/zf autotest kontrakty` zamawia wszystkie siedem typów i melduje KAŻDE zejście na dostawę wraz z powodem.
+  Automat: `/zf autotest kontrakty` zamawia wszystkie sześć typów i melduje KAŻDE zejście na dostawę wraz z powodem.
 - [x] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
   `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
   Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
   → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
-- [x] **I17. Eskorta — TYP MARTWY, potwierdzone 2026-08-05.** Gra NIE MA już definicji
+- [x] **I17. Eskorta — TYP USUNIĘTY 2026-08-09.** Gra NIE MA definicji
   `ContractTypeEscort`: `Content/Data` wozi osiem typów (Deliver, Find, GridHauling, Hunt,
   ObtainAndDeliver, PvEBounty, Repair, Salvage) i eskorty wśród nich nie ma, a
   `MyContractGenerator.CreateCustomEscortContract` wychodzi na samym początku, gdy
   `GetDefinition()` nie jest `MyContractTypeEscortDefinition` — zwracając `Error` BEZ
-  wpisu do logu. Stąd „gra odrzuciła kontrakt" bez żadnego śladu. Mod nie próbuje już
-  wystawiać tego typu i mówi wprost dlaczego; waga w `[kontrakty.typy]` zostaje 0.
-  Kod eskorty (spawn konwoju po przyjęciu) zostaje kompletny na wypadek przywrócenia typu.
-  ORYGINALNY OPIS TESTU (nieaktualny, do odtworzenia gdyby typ wrócił):
-- [ ] **I17-stary. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
-  (waga 0 w configu, więc tylko wymuszona) → kontrakt powstaje, ale w konsoli braina
-  NIE MA jeszcze `spawn_request`. Dopiero gdy przyjmiesz zlecenie w terminalu →
-  `kontrakt <ID> (HEL, eskorta) przyjęty przez gracza` i `spawn_request [HEL] kind=convoy`.
+  wpisu do logu. Stąd „gra odrzuciła kontrakt" bez żadnego śladu.
+  Typ został wycięty w całości (brain, mod, config, testy), a nie tylko wyzerowany wagą:
+  trzymanie martwego kodu kosztowało gałąź w silniku, dwa case'y w modzie i trzy warstwy
+  testów pilnujących, żeby nie wrócił. Implementacja siedzi w historii gita.
+  `/zf kontrakt HEL eskorta` odpowiada dziś „nieznany typ zlecenia", a wpis `eskorta`
+  w `[kontrakty.typy]` wywala config brainu — usunięcie jest pełne i głośne.
 - [x] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
   jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
   `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
@@ -483,7 +481,6 @@ Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
   UWAGA: gdy zlecenie POWSTANIE, ale nie da się go wykonać (gra nie wie, kiedy je
   zamknąć), po `czas_min` wygaśnie jako ZAWALONE i zabierze relację (`-kontrakt_min ×
   mnożnik`). Dlatego I18 rób na świecie testowym, a nie na tym, w którym się grasz.
-  To samo dotyczy `eskorta` — jeśli okaże się, że gra nie potrafi jej rozliczyć.
 - [x] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
   `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
   niż +20 z dostawy. Kwota nagrody też jest przemnożona.

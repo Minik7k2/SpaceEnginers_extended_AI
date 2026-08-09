@@ -136,7 +136,7 @@ struct Config {
     double kontrakty_mnoznik_nagrody_w_napieciu = 3;
 
     // Kanoniczna lista typów (dostawa, nagroda, transport, naprawa, poszukiwania,
-    // eskorta, wlasne) — waliduje config i komendę /zf kontrakt <frakcja> [typ].
+    // wlasne) — waliduje config i komendę /zf kontrakt <frakcja> [typ].
     static const std::vector<std::string>& contract_kinds();
 };
 

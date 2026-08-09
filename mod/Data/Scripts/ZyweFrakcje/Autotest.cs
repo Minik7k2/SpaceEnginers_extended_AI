@@ -1171,7 +1171,8 @@ namespace ZyweFrakcje
             // i z jakiego powodu, zamiast dowiadywać się o tym po miesiącu.
             DodajKontraktTyp(kroki, "KRW", "nagroda", "HEL", true, 2 * Sekunda);
             DodajKontraktTyp(kroki, "WGR", "transport", null, true, 2 * Sekunda);
-            DodajKontraktTyp(kroki, "HEL", "eskorta", null, true, 2 * Sekunda);
+            // `eskorta` nie jest już zamawiana — typ usunięty 2026-08-09 razem z obsługą
+            // w Contracts.cs, więc sekcja pokrywa SZEŚĆ typów, nie siedem.
             // Te dwa najpierw STAWIAJĄ rekwizyt (SpawnPrefab jest asynchroniczny), stąd
             // dłuższe okno — kontrakt powstaje dopiero w callbacku spawnu.
             DodajKontraktTyp(kroki, "WGR", "naprawa", null, true, 12 * Sekunda);
@@ -1269,7 +1270,7 @@ namespace ZyweFrakcje
         /// powstało. Flaga `miekki` przy typie zlecenia miała łagodzić JEDNĄ rzecz: zejście
         /// typu na dostawę, gdy w świecie nie ma celu (I15 — dopuszczalne i opisane).
         /// Łagodziła jednak wszystko, co zwróci <see cref="SprawdzKontrakt"/>, więc gdy gra
-        /// odrzucała kontrakt CAŁKOWICIE, sześć z siedmiu typów meldowało OSTRZEŻENIE, a
+        /// odrzucała kontrakt CAŁKOWICIE, pięć z sześciu typów meldowało OSTRZEŻENIE, a
         /// „dostawa" (jedyna z miekki=false) FAIL — ten sam powód, dwie różne barwy w tym
         /// samym przebiegu. Stąd wrażenie, że wynik autotestu jest losowy (2026-08-05).
         /// </summary>

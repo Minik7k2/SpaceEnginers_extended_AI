@@ -116,15 +116,10 @@ BLOKADY_KONTRAKTOW = {
                  "dostaje zadanie, którego nie da się zaliczyć: wygasa na karę relacji "
                  "i przepadek kaucji",
     },
-    "eskorta": {
-        "plik": "Contracts.cs",
-        # Działający kod eskorty jest zaparkowany pod nieużywanym case'em; dopóki tam
-        # stoi, mod tego typu nie wystawia i waga > 0 daje wyłącznie ciche dostawy.
-        "marker": "eskorta_nieuzywane",
-        "sens": "zabroniony",
-        "powod": "typ USUNIĘTY Z GRY (2026-08-05) — nie ma definicji ContractTypeEscort, "
-                 "a CreateCustomEscortContract zwraca Error BEZ WPISU DO LOGU",
-    },
+    # `eskorta` nie ma tu wpisu, bo typ został USUNIĘTY 2026-08-09 (gra nie wozi definicji
+    # ContractTypeEscort). Blokada opisuje typ istniejący, lecz niegotowy; typu, którego nie
+    # ma, pilnuje sprawdz_typy_maja_obsluge_w_modzie — gdyby ktoś wrócił z nim do configu,
+    # wyjdzie brak `case "eskorta"` w Contracts.cs.
     "nagroda": {
         # Tu nie ma czego szukać w C#: kod jest kompletny, wątpliwa jest sama MECHANIKA
         # gry. To dług do rozstrzygnięcia w grze, nie do naprawienia w kodzie.
@@ -629,6 +624,38 @@ def wagi_typow_zlecen(rules_path, wynik):
     return wagi
 
 
+def sprawdz_typy_maja_obsluge_w_modzie(wagi, korzen_skryptow, wynik):
+    """Każdy typ, który brain może WYLOSOWAĆ, musi mieć swój `case` w Contracts.cs.
+
+    Inaczej degradacja jest CICHA: `switch (kind)` kończy się gałęzią `default`, która
+    buduje zwykłą dostawę i zwraca sukces. Brain zapisuje wtedy w SQLite typ, o który
+    prosił, gra pokazuje graczowi dostawę, a w logach nie ma ani jednego ostrzeżenia.
+    Dokładnie ten kształt błędu miała eskorta przez trzy przebiegi, zanim dekompilacja
+    pokazała, że typu po prostu nie ma w grze.
+
+    `dostawa` jest wyjątkiem z definicji — to ona JEST gałęzią `default`.
+    """
+    sciezka = os.path.join(korzen_skryptow, "Contracts.cs")
+    try:
+        with open(sciezka, encoding="utf-8") as f:
+            kod = f.read()
+    except OSError as e:
+        wynik.blad(sciezka, "nie mogę wczytać ({})".format(e))
+        return
+
+    for typ, gdzie_wagi in sorted(wagi.items()):
+        if typ == "dostawa" or not any(w > 0 for w in gdzie_wagi.values()):
+            continue
+        if 'case "{}":'.format(typ) not in kod:
+            gdzie = ", ".join("{}={}".format(g, w) for g, w in sorted(gdzie_wagi.items())
+                              if w > 0)
+            wynik.blad(sciezka,
+                       "brain może wylosować zlecenie typu \"{}\" ({}), ale Contracts.cs nie ma "
+                       "dla niego `case` — switch zejdzie na `default`, czyli po cichu wystawi "
+                       "DOSTAWĘ i zamelduje sukces. Albo dopisz obsługę, albo wyzeruj wagę "
+                       "w [kontrakty.typy]".format(typ, gdzie))
+
+
 def sprawdz_dlug_kontraktow(rules_path, korzen_skryptow, wynik):
     """Typ zlecenia wolno włączyć dopiero, gdy mod ma to, czego typ potrzebuje.
 
@@ -644,6 +671,7 @@ def sprawdz_dlug_kontraktow(rules_path, korzen_skryptow, wynik):
     wagi = wagi_typow_zlecen(rules_path, wynik)
     if wagi is None:
         return
+    sprawdz_typy_maja_obsluge_w_modzie(wagi, korzen_skryptow, wynik)
 
     for typ, blokada in BLOKADY_KONTRAKTOW.items():
         wlaczone = {gdzie: waga for gdzie, waga in wagi.get(typ, {}).items() if waga > 0}

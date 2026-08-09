@@ -189,11 +189,20 @@ USTERKI = [
      "nie parsuje się jako XML"),
 
     # --- dług techniczny: waga typu zlecenia kontra to, co mod naprawdę umie ---
-    # Blokada „zabroniona": eskorta ma w Contracts.cs zaparkowaną implementację pod
-    # case'em eskorta_nieuzywane, więc waga > 0 daje wyłącznie ciche dostawy.
-    ("eskorta włączona, choć mod jej nie wystawia",
-     lambda d: podmien(_rules(d), "eskorta = 0", "eskorta = 1"),
-     "parkuje ten typ pod \"eskorta_nieuzywane\""),
+    # Typ, którego mod nie umie zbudować, degraduje CICHO: switch zejdzie na `default`,
+    # wystawi dostawę i zamelduje sukces. Wracamy tu usuniętą eskortą, bo to prawdziwy
+    # przypadek — dokładnie tak wyglądał przez trzy przebiegi, zanim dekompilacja
+    # pokazała, że gra nie ma tego typu.
+    ("waga dla typu, dla którego Contracts.cs nie ma case'a",
+     lambda d: podmien(_rules(d), "poszukiwania = 1\n", "poszukiwania = 1\neskorta = 1\n"),
+     "switch zejdzie na `default`"),
+
+    # Ten sam brak, ale wprowadzony od strony KODU: typ zostaje w configu, znika obsługa.
+    # Bez tego przypadku reguła sprawdzałaby tylko literówki w rules.toml.
+    ("Contracts.cs traci case dla typu, który brain nadal losuje",
+     lambda d: podmien(os.path.join(d, "Scripts", "ZyweFrakcje", "Contracts.cs"),
+                       'case "poszukiwania":', 'case "poszukiwania_wylaczone":'),
+     "Contracts.cs nie ma dla niego `case`"),
 
     # Blokada „wymagana" ORAZ dokładny kształt błędu z 2026-08-08: waga wraca nie
     # w wartości domyślnej, tylko w nadpisaniu frakcji — a ono wygrywa. To jest ten

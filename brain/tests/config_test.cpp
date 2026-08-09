@@ -95,7 +95,7 @@ int main() {
     //     i nakładka lokalna przestawiająca JEDNĄ wagę (bez przepisywania tabeli).
     write_file(cfg_path, "[bridge]\nstorage_dir = \"" + reczny.generic_string() + "\"\n" +
                              "[kontrakty]\nmnoznik_nagrody_w_napieciu = 4\n"
-                             "[kontrakty.typy]\ndostawa = 2\nnagroda = 1\neskorta = 0\n"
+                             "[kontrakty.typy]\ndostawa = 2\nnagroda = 1\nposzukiwania = 0\n"
                              "[kontrakty.typy.KRW]\nnagroda = 5\nnaprawa = 0\n"
                              "[kontrakty.mnoznik]\nnagroda = 1.5\n");
     {
@@ -108,7 +108,7 @@ int main() {
                "nadpisanie KRW nie dotyczy WGR");
         assert(zf::contract_kind_weight(cfg, "WGR", "nagroda", "wojna") == 4 &&
                "wojna podbija wagę nagrody o mnoznik_nagrody_w_napieciu");
-        assert(zf::contract_kind_weight(cfg, "WGR", "eskorta", "wojna") == 0 &&
+        assert(zf::contract_kind_weight(cfg, "WGR", "poszukiwania", "wojna") == 0 &&
                "waga 0 wyłącza typ na dobre");
         assert(zf::contract_kind_weight(cfg, "KRW", "naprawa", "spokoj") == 0);
         assert(zf::contract_kind_weight(cfg, "WGR", "transport", "spokoj") == 2 &&
@@ -116,9 +116,9 @@ int main() {
         assert(zf::contract_kind_multiplier(cfg, "nagroda") == 1.5);
         assert(zf::contract_kind_multiplier(cfg, "dostawa") == 1.0 && "brak wpisu => 1.0");
 
-        write_file(tmp / "rules.local.toml", "[kontrakty.typy]\neskorta = 3\n");
+        write_file(tmp / "rules.local.toml", "[kontrakty.typy]\nposzukiwania = 3\n");
         const zf::Config lokalny = zf::load_config(cfg_path.string());
-        assert(zf::contract_kind_weight(lokalny, "WGR", "eskorta", "spokoj") == 3 &&
+        assert(zf::contract_kind_weight(lokalny, "WGR", "poszukiwania", "spokoj") == 3 &&
                "rules.local.toml ma przestawiać pojedynczą wagę");
         assert(zf::contract_kind_weight(lokalny, "KRW", "nagroda", "spokoj") == 5 &&
                "nakładka nie może gubić nadpisań frakcji z pliku głównego");
@@ -136,6 +136,24 @@ int main() {
             threw = true;
         }
         assert(threw && "nieznany typ kontraktu ma wywalić config");
+    }
+
+    // 4d. Usunięcie typu ma być PEŁNE, nie samo wyzerowanie wagi. Stary rules.toml
+    //     z `eskorta` musi wywalić config z czytelnym komunikatem, a nie zostać po cichu
+    //     wchłonięty — bo wtedy nikt by się nie dowiedział, że ta linia nic już nie znaczy.
+    //     To zarazem instrukcja migracji dla kogoś, kto wgrywa nową wersję na stary config.
+    write_file(cfg_path, "[bridge]\nstorage_dir = \"" + reczny.generic_string() + "\"\n" +
+                             "[kontrakty.typy]\ndostawa = 3\neskorta = 1\n");
+    {
+        std::string komunikat;
+        try {
+            zf::load_config(cfg_path.string());
+        } catch (const std::exception& e) {
+            komunikat = e.what();
+        }
+        assert(komunikat.find("eskorta") != std::string::npos &&
+               "config ma powiedzieć WPROST, który klucz jest do usunięcia");
+        assert(komunikat.find("nieznany typ kontraktu") != std::string::npos);
     }
 
     // 5. Baza per świat: z db_path robi się nazwa związana z konkretnym zapisem.

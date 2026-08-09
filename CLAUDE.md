@@ -174,9 +174,9 @@ docs/protocol.md                # spec mostka JSONL
   w rules.toml) → mod tworzy je przez `MyAPIGateway.ContractSystem` na bloku
   kontraktów/sklepu frakcji → `contract_created` z prawdziwym ID ląduje w SQLite →
   wykonanie/porażka wraca jako `contract_done`.
-  **Siedem typów zleceń** (2026-07-30), po jednej klasie z `Sandbox.ModAPI.Contracts`:
-  `dostawa` (Acquisition), `nagroda` (Bounty), `transport` (Hauling), `naprawa`
-  (Repair), `poszukiwania` (Search), `eskorta` (Escort), `wlasne` (Custom +
+  **Sześć typów zleceń** (2026-07-30, siódmy usunięty 2026-08-09), po jednej klasie
+  z `Sandbox.ModAPI.Contracts`: `dostawa` (Acquisition), `nagroda` (Bounty), `transport`
+  (Hauling), `naprawa` (Repair), `poszukiwania` (Search), `wlasne` (Custom +
   `mod/Data/ContractTypes.sbc`). Typ losuje brain wagami z `[kontrakty.typy]`
   (nadpisania per frakcja: piraci wolą nagrody za głowę, górnicy naprawy), a
   `[kontrakty.mnoznik]` skaluje nagrodę I zmianę relacji wg trudności typu.
@@ -210,13 +210,21 @@ docs/protocol.md                # spec mostka JSONL
   dopiero teraz wyrusza, cel nagrody dostaje ochronę, a każdy WRÓG wystawcy traci do
   gracza `kontrakt_przyjety_u_wroga` (-3). Kara raz na kontrakt (status `taken`
   w SQLite, liczy się do `max_otwartych` jak `open`).
-  **`eskorta` — TYP MARTWY, potwierdzone 2026-08-05.** Gra nie ma już definicji
+  **`eskorta` — TYP USUNIĘTY W CAŁOŚCI (2026-08-09).** Gra nie ma definicji
   `ContractTypeEscort`: `Content/Data` wozi osiem typów (Deliver, Find, GridHauling, Hunt,
   ObtainAndDeliver, PvEBounty, Repair, Salvage). `CreateCustomEscortContract` wychodzi na
   pierwszym warunku (`GetDefinition() is MyContractTypeEscortDefinition`) i zwraca `Error`
   BEZ WPISU DO LOGU — stąd „gra odrzuciła kontrakt" bez śladu, którego szukaliśmy trzy
-  przebiegi. Mod nie próbuje już tego typu wystawiać. Waga 0, kod kompletny na wypadek
-  przywrócenia. `nagroda` ma wagę 0 z innego powodu (vanilla liczy zabicia GRACZY, nie NPC).
+  przebiegi. Do 2026-08-09 typ stał z wagą 0, a implementacja czekała „na wypadek
+  przywrócenia przez Keena" — kosztowało to gałąź w silniku, dwa case'y w `Contracts.cs`,
+  wpis w `contract_kinds()`, dwa klucze w configu i trzy warstwy testów, których jedynym
+  zadaniem było pilnowanie, żeby martwy kod pozostał martwy. Wycięty end-to-end; kod
+  i pełne ustalenie z dekompilacji zostają w historii gita, bo to jest archiwum.
+  Usunięcie jest GŁOŚNE: `eskorta` w `[kontrakty.typy]` wywala config brainu
+  (`require_contract_kind`), więc stary `rules.toml` mówi wprost, którą linię skasować.
+  Wart zapamiętania jest sam pomysł, który przy okazji zniknął: konwój wyrusza dopiero po
+  `contract_taken`, nie przy wystawieniu zlecenia — do wskrzeszenia na innym typie.
+  `nagroda` ma wagę 0 z innego powodu (vanilla liczy zabicia GRACZY, nie NPC).
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
   nie ma zdarzenia transakcji. UWAGA: kaucję ściąganą przy PRZYJĘCIU zlecenia ta sama
   heurystyka brała za zakup (darmowe +1..+3 relacji), stąd `_trade.Suppress()` także
@@ -297,7 +305,7 @@ docs/protocol.md                # spec mostka JSONL
   kadłubów bez AI), `/zf raid <frakcja> [patrol|raid|convoy]` (pełny potok MES; bez rodzaju
   brain dobiera flotę do nastroju frakcji), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
   <frakcja> [typ]` (wymuszone zlecenie; typ opcjonalny — dostawa, nagroda, transport,
-  naprawa, poszukiwania, eskorta, wlasne), `/zf stations` (stacje i blok kontraktów),
+  naprawa, poszukiwania, wlasne), `/zf stations` (stacje i blok kontraktów),
   `/zf daj <surowiec> [ilość]` (towar do inwentarza — do testu trybutu bez trybu
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
@@ -311,7 +319,7 @@ docs/protocol.md                # spec mostka JSONL
   nie składa się po reloadzie, czy `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub
   z naszej grupy i czy ten kadłub NAPRAWDĘ leci (dystans w oknie 30 s, bo sam blok zdalnego
   sterowania niczego nie dowodzi).
-  **Sekcja `kontrakty` jest najważniejsza:** zamawia po kolei wszystkie siedem typów zleceń
+  **Sekcja `kontrakty` jest najważniejsza:** zamawia po kolei wszystkie sześć typów zleceń
   i porównuje typ ZAMÓWIONY z tym, który powstał. Mod ma przy zleceniach ostatnie słowo
   i przy braku celu po cichu wystawia dostawę — dotąd nie było jak zauważyć, że typ od
   tygodni degraduje, bo `contract_created` wraca poprawne i wszystko wygląda zdrowo.
@@ -385,14 +393,17 @@ docs/protocol.md                # spec mostka JSONL
   potwierdzić bez plików gry, więc trzyma jawną tabelę `ZNANE_PREFABY` — prefab spoza niej
   to błąd z prośbą o dopisanie. `tools/test_waliduj_sbc.py` psuje dane na kopii i wymaga
   wykrycia każdej usterki (walidator, który zawsze mówi „czysto", byłby bezwartościowy);
-  22 przypadki, w tym trzy ostrzeżeniowe — ostrzeżenie, które nigdy nie pada, jest tak samo
+  23 przypadki, w tym ostrzeżeniowe — ostrzeżenie, które nigdy nie pada, jest tak samo
   bezwartościowe jak test bez asercji.
   **Dług kontraktów (2026-08-08, `--rules`):** walidator jest JEDYNYM miejscem widzącym
-  jednocześnie `brain/configs/rules.toml` i kod C# moda. Typ zlecenia wolno włączyć dopiero
-  wtedy, gdy mod ma to, czego typ potrzebuje: `wlasne` wymaga `TryFinishCustomContract`
-  w `Contracts.cs`, `eskorta` — żeby implementacja nie stała już pod martwym case'em
-  `eskorta_nieuzywane`, `nagroda` daje samo ostrzeżenie (kod jest gotowy, wątpliwa jest
-  mechanika gry). Gdy dług zostanie spłacony, bramka przestaje krzyczeć sama z siebie.
+  jednocześnie `brain/configs/rules.toml` i kod C# moda. Dwie reguły. (1) Typ zlecenia wolno
+  włączyć dopiero, gdy mod ma to, czego typ potrzebuje: `wlasne` wymaga
+  `TryFinishCustomContract` w `Contracts.cs`, `nagroda` daje samo ostrzeżenie (kod jest
+  gotowy, wątpliwa jest mechanika gry). (2) KAŻDY typ z wagą > 0 musi mieć swój
+  `case` w `Contracts.cs` — bez niego `switch (kind)` schodzi na `default`, po cichu wystawia
+  DOSTAWĘ i melduje sukces, a brain zapisuje w SQLite typ, o który prosił. Dokładnie ten
+  kształt błędu miała eskorta przez trzy przebiegi. Reguła (2) zastąpiła wpis o eskorcie:
+  jedna zasada ogólna zamiast wyjątku na każdy martwy typ.
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
   (z scenariuszami) i smoke test `--replay`; osobna praca puszcza walidator SBC i jego
   kontrtest. Wariant bez LLM łatwo psuje się niezauważenie.

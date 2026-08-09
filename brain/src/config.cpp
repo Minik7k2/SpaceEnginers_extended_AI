@@ -378,8 +378,13 @@ const std::vector<std::string>& Config::contract_kinds() {
         "transport",     // MyContractHauling
         "naprawa",       // MyContractRepair
         "poszukiwania",  // MyContractSearch
-        "eskorta",       // MyContractEscort
         "wlasne",        // MyContractCustom
+        // "eskorta" USUNIĘTA 2026-08-09. Gra nie ma już definicji ContractTypeEscort
+        // (Content/Data wozi osiem typów, Escort wśród nich nie ma), więc AddContract
+        // zawsze zwracało Error — typ nie mógł powstać ANI RAZU. Trzymaliśmy go „na wypadek
+        // przywrócenia przez Keena", ale kosztowało to gałąź w silniku, dwa case'y w modzie
+        // i trzy warstwy testów pilnujących, żeby martwy kod pozostał martwy. Implementacja
+        // i ustalenie z dekompilacji siedzą w historii gita — to jest archiwum, nie kod.
     };
     return kinds;
 }

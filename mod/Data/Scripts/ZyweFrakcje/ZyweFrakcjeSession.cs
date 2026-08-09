@@ -552,7 +552,7 @@ namespace ZyweFrakcje
                 if (czesci.Length == 0)
                 {
                     MyAPIGateway.Utilities.ShowMessage("ZF",
-                        "Użycie: /zf kontrakt <frakcja> [typ] (typy: dostawa, nagroda, transport, naprawa, poszukiwania, eskorta, wlasne)");
+                        "Użycie: /zf kontrakt <frakcja> [typ] (typy: dostawa, nagroda, transport, naprawa, poszukiwania, wlasne)");
                 }
                 else
                 {

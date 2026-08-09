@@ -772,14 +772,11 @@ void Engine::handle_contract_taken(const Event& ev, const Config& cfg, std::int6
     std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", " << kind
               << ") przyjęty przez gracza\n";
 
-    // Eskorta: konwój rusza DOPIERO teraz. Wcześniej spawnowaliśmy go przy wystawieniu
-    // zlecenia, więc statki kręciły się bez celu, nawet gdy gracz nigdy nie podszedł
-    // do terminala. Teraz konwój pojawia się, bo ktoś podjął się go pilnować.
-    if (kind == "eskorta") {
-        request_spawn(faction, "convoy", cfg, now_ms,
-                      "Konwój wyrusza — gracz przyjął zlecenie eskorty frakcji " + faction + ".",
-                      /*force=*/true);
-    }
+    // Tu stał spawn konwoju dla zlecenia "eskorta" (usuniętego 2026-08-09 razem z typem —
+    // gra nie ma definicji ContractTypeEscort, więc gałąź nie mogła się wykonać ani razu).
+    // Sam POMYSŁ był dobry i warto go kiedyś wskrzesić na innym typie: konwój wyrusza
+    // dopiero, gdy gracz przyjmie zlecenie, a nie przy jego wystawieniu — inaczej statki
+    // krążą bez celu przy robocie, której gracz nawet nie zobaczył. Kod w historii gita.
 
     // Cel nagrody za głowę dowiaduje się, że ktoś na niego poluje, i wysyła ochronę.
     std::string target;
