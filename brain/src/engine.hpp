@@ -78,7 +78,7 @@ struct PriceOut {
 // odsyła contract_created z prawdziwym ID (dopiero wtedy trafia do SQLite).
 struct ContractOut {
     std::string faction;
-    // dostawa | nagroda | transport | naprawa | poszukiwania | eskorta | wlasne
+    // dostawa | nagroda | transport | naprawa | poszukiwania | wlasne
     // (Config::contract_kinds(); każdy ma swoją klasę w Sandbox.ModAPI.Contracts).
     // Silnik wybiera typ wagami z [kontrakty.typy], ale OSTATNIE słowo ma mod: jeśli
     // nie znajdzie w świecie celu (wrogiego pilota, drugiego bloku, uszkodzonej

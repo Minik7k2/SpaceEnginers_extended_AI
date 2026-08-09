@@ -8,7 +8,7 @@ najpierw — ręczna lista ma sens dopiero, gdy są zielone.
 | Narzędzie | Co pokrywa | Jak uruchomić |
 |---|---|---|
 | `ctest --test-dir brain/build` | logika braina + **scenariusze** (`brain/tests/scenariusze/*.jsonl`, 99 sprawdzeń): brainowa połowa I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, K2–K6, L1–L3, M1–M3/M4/M7, N2–N8, N12 | po `cmake --build brain/build` |
-| `python3 tools/waliduj_sbc.py` | referencje w danych moda: grupy spawnu ↔ zachowania ↔ manipulacje ↔ boty ↔ kod (sekcje O i P niżej) | z korzenia repo |
+| `python3 tools/waliduj_sbc.py` | referencje w danych moda: grupy spawnu ↔ zachowania ↔ manipulacje ↔ boty ↔ kod (sekcje O i P niżej) **oraz dług kontraktów**: waga typu w `rules.toml` kontra to, co mod naprawdę implementuje | z korzenia repo |
 | `tools/sprawdz-mod.ps1` | czy mod w ogóle się kompiluje (składnia i typy, NIE whitelista) | Windows z SE + Visual Studio |
 
 **Uwaga o podziale.** Scenariusze sprawdzają, co brain LICZY i WYSYŁA — nie to, czy gra
@@ -22,14 +22,38 @@ deadline, jest gwarancją MODU (przestaje wysyłać `ransom_expired`) i sprawdza
 `/zf autotest okup`. Sam brain, dostawszy `ransom_expired` z powodem `deadline`, karę
 naliczy — i ma prawo.
 
+### Strażnicy długu technicznego
+
+Osobna kategoria, dodana 2026-08-08. Zwykły test broni działającej mechaniki; te bronią
+decyzji „tego jeszcze NIE WŁĄCZAMY, bo brakuje drugiej połowy". Taka decyzja żyła dotąd
+wyłącznie w komentarzu, a od cofnięcia dzieliła ją jedna cyfra w configu.
+
+| Gdzie | Czego pilnuje |
+|---|---|
+| `dlug_test` (ctest) | typy zleceń wyłączone wagą 0 (`wlasne`, `nagroda`) mają zero **u każdej frakcji i w każdym stanie**, losowanie nigdy ich nie zwraca, a każdy typ ma jawny mnożnik trudności |
+| `waliduj_sbc.py` | wagę wolno podnieść dopiero, gdy mod ma to, czego typ potrzebuje (`wlasne` → `TryFinishCustomContract` w `Contracts.cs`), a KAŻDY losowalny typ ma swój `case` w `Contracts.cs` — bez niego `switch` schodzi na `default` i po cichu wystawia dostawę |
+| `/zf autotest despawn` | despawn siatki nieostrzelanej NIE generuje `grid_destroyed` (kontrtest zaległy od Etapu 2) |
+
+**Dlaczego akurat tak.** `[kontrakty.typy] wlasne = 0` z akapitem komentarza „WYŁĄCZONE, bo
+nie ma warunku wykonania" było prawdą tylko dla wartości domyślnej — `[kontrakty.typy.KRW]`
+niżej w TYM SAMYM PLIKU miało `wlasne = 2`, a nadpisanie frakcji wygrywa. Piraci losowali
+typ opisany w całym repo jako wyłączony w ~27% swoich zleceń, a gracz dostawał zadanie bez
+warunku wykonania, które wygasało na karę relacji i przepadek kaucji. Żaden istniejący test
+tego nie łapał: scenariusze sprawdzają typ WYMUSZONY (`/zf kontrakt KRW wlasne`), czyli
+ścieżkę, która celowo omija wagi.
+
+Gdy dług zostanie spłacony, `dlug_test` wymaga skreślenia wpisu z tabeli `kBlokady` —
+i to skreślenie jest jedynym miejscem, w którym ktoś musi świadomie potwierdzić, że
+warunek odblokowania jest naprawdę spełniony.
+
 ## W grze: `/zf autotest [sekcja]`
 
 Jedna komenda zamiast przeklikiwania listy. Sprawdza to, czego nie da się sprawdzić poza
 grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `events.jsonl`
 (typ `autotest_result`), więc widać go też w konsoli brainu.
 
-- `/zf autotest` — sekcje bezpieczne (`stacje`, `ceny`, `rekwizyt`, `kontrakty`, `reputacja`,
-  `okup`): nic nie spawnują wrogo i **przywracają stan świata**, także gdy krok padnie
+- `/zf autotest` — sekcje bezpieczne (`stacje`, `ceny`, `rekwizyt`, `despawn`, `kontrakty`,
+  `reputacja`, `okup`): nic nie spawnują wrogo i **przywracają stan świata**, także gdy krok padnie
   w połowie (cennik wraca do x1.00, reputacja do wartości sprzed testu, zlecenia i rekwizyty
   autotestu są kasowane, żądanie trybutu odwołane).
 - `/zf autotest ceny` — **bramka całej sekcji N**: czy `GetStoreItems` zwraca oferty, czy
@@ -40,11 +64,23 @@ grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `e
   w wersji bez reloadu (czy w świecie nie stoją dwie stacje tej samej frakcji).
 - `/zf autotest rekwizyt` — I19a: czy `SpawningOptions.SetNpcSpawnedGrid` faktycznie ustawia
   flagę (bez niej poszukiwania zawalają się sekundę po przyjęciu).
-- `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie siedem
+- `/zf autotest despawn` — **kontrtest z Etapu 2** (dług spłacony 2026-08-08): czy usunięcie
+  siatki, której gracz NIE ostrzelał, na pewno NIE generuje `grid_destroyed`. Zwykły test
+  pyta, czy coś się dzieje; ten pyta, czy coś się NIE dzieje — bo fałszywe `grid_destroyed`
+  zabiera -30 relacji za statek, którego gracz nie tknął, i nie zostawia po sobie śladu poza
+  spadkiem liczby w `/zf rel` (objaw: „frakcje same z siebie mnie nienawidzą"). Ma kontrolę
+  dodatnią (świeże trafienie NADAL się liczy), bo inaczej reguła „zawsze nie" przeszłaby
+  na zielono. **Granica:** to kontrtest reguły MODA — siatkę usuwamy przez `Close()`, tak jak
+  robi to despawner MES, ale samego MES w tym teście nie ma.
+- `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie sześć
   typów zleceń i porównuje typ ZAMÓWIONY z tym, który NAPRAWDĘ powstał. Mod ma przy
   zleceniach ostatnie słowo i przy braku celu po cichu wystawia dostawę (I15) — dotąd
-  nie było jak zauważyć, że jakiś typ od tygodni degraduje. Sprawdza też, że `Duration`
-  jest w MINUTACH i że zlecenie wisi na bloku frakcji. Zlecenia i rekwizyty kasuje po sobie.
+  nie było jak zauważyć, że jakiś typ od tygodni degraduje.
+  Jeden krok jest TWARDY: „FUNDAMENT custom" sprawdza, czy gra przyjmuje `MyContractCustom`
+  z naszej definicji `ZF_Zlecenie`. Od jego wyniku zależy CAŁA rodzina własnych rodzajów
+  zleceń (`docs/zlecenia-custom.md`), więc zejście na dostawę nie jest tu ostrzeżeniem.
+  Sprawdza też, że `Duration` jest w MINUTACH i że zlecenie wisi na bloku frakcji.
+  Zlecenia i rekwizyty kasuje po sobie.
 - `/zf autotest reputacja` — sekcja M bez klikania w okno frakcji: czy cel z brainu ląduje
   w grze, czy trafia w progi etykiet (±500), czy działa polityka frakcja↔frakcja i — sedno
   hybrydy — czy mod PRZYWRACA swój cel po tym, jak gra ruszy reputację po swojemu (M5).
@@ -84,9 +120,14 @@ Przy każdym teście patrz na DWA miejsca: czat w grze i konsolę braina.
 - [x] **A3. Combat:** ostrzelaj statek NPC → w konsoli `combat_hit` z bronią
   i frakcją, paczki co ~3 s (nie pojedyncze strzały).
 - [x] **A4. Zniszczenie:** rozwal statek do końca → `grid_destroyed` z nazwą siatki.
-- [x] **A5. Kontrtest despawnu (zaległość Etapu 2):** spawnij statek, NIE
+- [ ] **A5. Kontrtest despawnu (zaległość Etapu 2):** spawnij statek, NIE
   strzelaj, odleć bardzo daleko i poczekaj aż MES go zdespawni → w konsoli
   braina NIE MOŻE pojawić się `grid_destroyed`.
+  Automat: **`/zf autotest despawn`** (2026-08-08) — pokrywa REGUŁĘ MODA po obu stronach
+  okna 30 s, razem z kontrolą dodatnią. Ręcznie zostaje jedna rzecz, której automat nie
+  dosięga: że MES despawnuje właśnie tą ścieżką (`Close()`), a nie jakąś inną. Dlatego
+  kratka wraca na pustą — była odhaczona, choć CLAUDE.md od Etapu 2 wymieniał ten kontrtest
+  jako zaległy, a przebiegu z prawdziwym despawnem MES nikt nie odnotował.
 
 ## B. Silnik relacji (Etap 3)
 
@@ -413,40 +454,45 @@ Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
 - [x] **I14. Wymuszony typ:** `/zf kontrakt KRW nagroda` → brain loguje `cel HEL`
   (polityka KRW/HEL -70), mod tworzy `MyContractBounty`, a w terminalu stacji widać
   zlecenie na głowę pilota HEL. Analogicznie `transport`, `naprawa`, `poszukiwania`,
-  `eskorta`, `wlasne`, `dostawa`.
+  `wlasne`, `dostawa`.
 - [x] **I15. Zejście na dostawę:** wymuś typ, dla którego w świecie NIE MA celu
   (np. `/zf kontrakt HEL naprawa`, gdy żadna siatka HEL nie jest uszkodzona) → na czacie
   `Zlecenie HEL typu "naprawa" niemożliwe (frakcja nie ma uszkodzonej siatki do naprawy)
   — wystawiam dostawę`, a `contract_created` w konsoli braina ma `dostawa`, NIE `naprawa`.
   To najważniejszy test całej rozbudowy: żadne zlecenie nie może przepaść po cichu.
-  Automat: `/zf autotest kontrakty` zamawia wszystkie siedem typów i melduje KAŻDE zejście na dostawę wraz z powodem.
+  Automat: `/zf autotest kontrakty` zamawia wszystkie sześć typów i melduje KAŻDE zejście na dostawę wraz z powodem.
 - [x] **I16. Transport potrzebuje dwóch stacji:** przy jednej stacji frakcji
   `/zf kontrakt WGR transport` → komunikat „w świecie nie ma drugiej stacji…" i dostawa.
   Postaw drugą stację z blokiem kontraktów (`/zf stacja WGR` na drugiej siatce) i powtórz
   → tym razem powstaje `MyContractHauling` z opisem `transport ładunku do <nazwa>`.
-- [x] **I17. Eskorta — TYP MARTWY, potwierdzone 2026-08-05.** Gra NIE MA już definicji
+- [x] **I17. Eskorta — TYP USUNIĘTY 2026-08-09.** Gra NIE MA definicji
   `ContractTypeEscort`: `Content/Data` wozi osiem typów (Deliver, Find, GridHauling, Hunt,
   ObtainAndDeliver, PvEBounty, Repair, Salvage) i eskorty wśród nich nie ma, a
   `MyContractGenerator.CreateCustomEscortContract` wychodzi na samym początku, gdy
   `GetDefinition()` nie jest `MyContractTypeEscortDefinition` — zwracając `Error` BEZ
-  wpisu do logu. Stąd „gra odrzuciła kontrakt" bez żadnego śladu. Mod nie próbuje już
-  wystawiać tego typu i mówi wprost dlaczego; waga w `[kontrakty.typy]` zostaje 0.
-  Kod eskorty (spawn konwoju po przyjęciu) zostaje kompletny na wypadek przywrócenia typu.
-  ORYGINALNY OPIS TESTU (nieaktualny, do odtworzenia gdyby typ wrócił):
-- [ ] **I17-stary. Eskorta: konwój rusza PO PRZYJĘCIU:** `/zf kontrakt HEL eskorta`
-  (waga 0 w configu, więc tylko wymuszona) → kontrakt powstaje, ale w konsoli braina
-  NIE MA jeszcze `spawn_request`. Dopiero gdy przyjmiesz zlecenie w terminalu →
-  `kontrakt <ID> (HEL, eskorta) przyjęty przez gracza` i `spawn_request [HEL] kind=convoy`.
-- [x] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
-  jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
-  `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
-  Sprawdź log SE: jeśli narzeka na `ContractTypes.sbc`, kontener/pola definicji trzeba
-  poprawić wg vanilla `Content/Data/ContractTypes.sbc`. Do czasu potwierdzenia można
-  ustawić `wlasne = 0` w `[kontrakty.typy]`.
-  UWAGA: gdy zlecenie POWSTANIE, ale nie da się go wykonać (gra nie wie, kiedy je
-  zamknąć), po `czas_min` wygaśnie jako ZAWALONE i zabierze relację (`-kontrakt_min ×
-  mnożnik`). Dlatego I18 rób na świecie testowym, a nie na tym, w którym się grasz.
-  To samo dotyczy `eskorta` — jeśli okaże się, że gra nie potrafi jej rozliczyć.
+  wpisu do logu. Stąd „gra odrzuciła kontrakt" bez żadnego śladu.
+  Typ został wycięty w całości (brain, mod, config, testy), a nie tylko wyzerowany wagą:
+  trzymanie martwego kodu kosztowało gałąź w silniku, dwa case'y w modzie i trzy warstwy
+  testów pilnujących, żeby nie wrócił. Implementacja siedzi w historii gita.
+  `/zf kontrakt HEL eskorta` odpowiada dziś „nieznany typ zlecenia", a wpis `eskorta`
+  w `[kontrakty.typy]` wywala config brainu — usunięcie jest pełne i głośne.
+- [ ] **I18. FUNDAMENT rodziny custom** — od tego kroku zależy cały
+  `docs/zlecenia-custom.md`, więc nie jest już „eksperymentalny".
+  Kratka wróciła na pustą: stara wersja tego testu przechodziła W OBIE STRONY („albo
+  zlecenie jest w terminalu, ALBO na czacie leci komunikat o odrzuceniu"), czyli była
+  odhaczona, nie sprawdzając niczego. Test bez asercji.
+  Automat: `/zf autotest kontrakty`, krok „FUNDAMENT custom" — TWARDY. Dowodzi, że
+  `AddContract` przyjął `MyContractCustom`, czyli podtyp `ZF_Zlecenie` istnieje w danych gry.
+  Ręcznie zostaje połowa, której automat nie dosięga: **otwórz terminal zleceń KRW i sprawdź,
+  czy zlecenie nazywa się „Kontrabanda Krwawej Ręki"** z polskim opisem. Jeśli widzisz tam
+  generyczną nazwę typu — definicja się wczytała, ale UI jej nie używa, a to zmienia projekt
+  (jedna definicja wspólna kontra jedna na rodzaj).
+  Gdy krok padnie: sprawdź log SE pod kątem `ZF_Zlecenie`; jeśli narzeka na
+  `ContractTypes.sbc`, kontener/pola definicji trzeba poprawić wg vanilla
+  `Content/Data/ContractTypes.sbc`.
+  UWAGA: zlecenie `wlasne` NIE MA dziś warunku wykonania, więc po `czas_min` wygaśnie jako
+  ZAWALONE i zabierze relację (`-kontrakt_min × mnożnik`). Autotest kasuje swoje zlecenia po
+  sobie, ale ręczne `/zf kontrakt KRW wlasne` rób na świecie testowym.
 - [x] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
   `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
   niż +20 z dostawy. Kwota nagrody też jest przemnożona.

@@ -19,6 +19,15 @@ zf_add_test(engine_test engine_test.cpp)
 zf_add_test(llm_test llm_test.cpp)
 zf_add_test(config_test config_test.cpp)
 
+# Strażnicy długu technicznego: pilnują, żeby rzeczy ŚWIADOMIE wyłączone (typy zleceń bez
+# drugiej połowy implementacji) nie wróciły do gry przez jedną cyfrę w configu. Test czyta
+# PRAWDZIWY rules.toml — o wartościach wpisanych w samym teście nie dowiedzielibyśmy się
+# niczego o tym, co dostaje gracz. Ścieżka idzie przez definicję, a nie WORKING_DIRECTORY,
+# bo ma być odporna na to, skąd ctest zostanie uruchomiony.
+zf_add_test(dlug_test dlug_test.cpp)
+target_compile_definitions(dlug_test PRIVATE
+  ZF_RULES_TOML="${CMAKE_CURRENT_SOURCE_DIR}/../configs/rules.toml")
+
 # Scenariusze: zdarzenia z gry + OCZEKIWANIA w jednym pliku JSONL (patrz scenariusz.hpp).
 # Pokrywają brainową połowę mechanik, których do tej pory pilnowały wyłącznie ręczne
 # testy w grze — ceny, okup i kontrakty. zf_brain wraca kodem 1, gdy choć jedno

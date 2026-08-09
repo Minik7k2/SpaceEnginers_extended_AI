@@ -120,8 +120,12 @@ mnoznik_nagrody_w_napieciu = 3
 #   transport    MyContractHauling      ładunek z bloku frakcji na inny blok
 #   naprawa      MyContractRepair       napraw uszkodzoną siatkę frakcji
 #   poszukiwania MyContractSearch       znajdź siatkę w promieniu (zaginione/wrak)
-#   eskorta      MyContractEscort       odprowadź konwój (brain dokłada spawn MES)
 #   wlasne       MyContractCustom       zlecenie z własną nazwą i opisem PL (SBC)
+#
+# Typu `eskorta` już tu nie ma (usunięty 2026-08-09): gra nie wozi definicji
+# ContractTypeEscort, więc AddContract zwracało Error przy KAŻDEJ próbie. Nie da się go
+# włączyć wagą — wróciłby dopiero z aktualizacją gry, a wtedy i tak trzeba by napisać go
+# od nowa. Szczegóły ustalenia: CLAUDE.md, Etap 6.
 #
 # UWAGA co do `wlasne`: to JEDYNY typ nieprzewidziany wprost w dokumentacji API —
 # wymaga definicji MyObjectBuilder_ContractTypeDefinition (mod/Data/ContractTypes.sbc),
@@ -132,19 +136,15 @@ mnoznik_nagrody_w_napieciu = 3
 [kontrakty.typy]
 # Wagi losowania (0 = typ wyłączony). Wartości domyślne dla wszystkich frakcji.
 #
-# nagroda i eskorta stoją na 0 do czasu weryfikacji W GRZE (I14/I17 w docs/testy-reczne.md):
-#  - vanillowa nagroda za głowę jest mechaniką PvP (cel to inny GRACZ, dobicie bronią
-#    ręczną), więc zlecenie na tożsamość NPC może nie mieć jak się zaliczyć;
-#  - eskorty zostały z gry usunięte (zastąpione nagrodą PvE), więc AddContract
-#    prawdopodobnie je odrzuci i i tak dostaniemy dostawę.
-# Kod obu typów jest kompletny — po potwierdzeniu w grze wystarczy wpisać tu wagę
-# (proponowane: nagroda 1, eskorta 1, a u KRW nagroda 4).
+# nagroda stoi na 0 do czasu weryfikacji W GRZE (I14 w docs/testy-reczne.md): vanillowa
+# nagroda za głowę jest mechaniką PvP (cel to inny GRACZ, dobicie bronią ręczną), więc
+# zlecenie na tożsamość NPC może nie mieć jak się zaliczyć. Kod jest kompletny — po
+# potwierdzeniu w grze wystarczy wpisać tu wagę (proponowane: nagroda 1, a u KRW 4).
 dostawa = 3
 nagroda = 0
 transport = 2
 naprawa = 1
 poszukiwania = 1
-eskorta = 0
 # wlasne = 0 (2026-08-01, ROZSTRZYGNIĘTE W GRZE + dekompilacją): zlecenie custom NIE MA
 # warunku wykonania. IMyContractCustom niesie tylko DefinitionId/EndBlockId/Name/Description,
 # a podpięty MyContractConditionCustom kończy WYŁĄCZNIE mod przez
@@ -168,8 +168,13 @@ naprawa = 1
 dostawa = 3
 poszukiwania = 2
 transport = 1
-wlasne = 2
 naprawa = 0
+# wlasne = 0 JAWNIE, mimo że taka jest wartość domyślna wyżej. Do 2026-08-08 stało tu
+# `wlasne = 2` i to nadpisanie WYGRYWAŁO z domyślnym zerem — piraci losowali typ opisany
+# w całym repo jako wyłączony (~27% zleceń KRW), a gracz dostawał zadanie bez warunku
+# wykonania, które wygasało na karę relacji i przepadek kaucji. Zero zostaje do czasu
+# zaimplementowania TryFinishCustomContract po stronie moda; pilnuje tego dlug_test.
+wlasne = 0
 
 [kontrakty.typy.WGR]
 # Górnicy: szyby się psują, koparki gubią, ruda musi dojechać.
@@ -186,7 +191,6 @@ nagroda = 1.6
 transport = 1.1
 naprawa = 1.2
 poszukiwania = 0.9
-eskorta = 1.4
 wlasne = 1.1
 
 [spawn]

@@ -130,8 +130,15 @@ docs/protocol.md                # spec mostka JSONL
   grid_destroyed (MarkedForClose + świeże dmg; odróżnić od despawnu MES),
   proximity z histerezą 3/4 km. Zweryfikowane W GRZE 2026-07-19: proximity
   enter/exit, combat_hit (broń ręczna i Explosion), grid_destroyed.
-  Do zrobienia przy okazji: kontrtest, że despawn MES NIE generuje
-  grid_destroyed. Po drodze naprawiony mostek braina: offsety linii
+  Kontrtest despawnu (zaległość od Etapu 2) zautomatyzowany 2026-08-08 jako
+  `/zf autotest despawn`: siatka, której gracz NIE ostrzelał, po `Close()` NIE MOŻE
+  dać `grid_destroyed` — plus kontrola dodatnia (świeże trafienie nadal się liczy),
+  bez której reguła „zawsze nie" przeszłaby na zielono, i granica okna 30 s
+  (postrzelałeś, odleciałeś, MES posprzątał minutę później). Decyzję podejmuje jeden
+  predykat `CombatTracker.CzyDespawnZglosiZniszczenie` używany i przez `OnEntityRemove`,
+  i przez test — gdyby test miał własną kopię warunku, potwierdzałby swoje założenia.
+  Granica: to kontrtest REGUŁY MODA, nie integracji z MES (samego MES w teście nie ma).
+  Po drodze naprawiony mostek braina: offsety linii
   kluczowane pełną ścieżką (offset starego świata przesłaniał krótszy
   events.jsonl nowego → „brak odczytów") + config per maszyna
   (rules.local.toml).
@@ -167,9 +174,9 @@ docs/protocol.md                # spec mostka JSONL
   w rules.toml) → mod tworzy je przez `MyAPIGateway.ContractSystem` na bloku
   kontraktów/sklepu frakcji → `contract_created` z prawdziwym ID ląduje w SQLite →
   wykonanie/porażka wraca jako `contract_done`.
-  **Siedem typów zleceń** (2026-07-30), po jednej klasie z `Sandbox.ModAPI.Contracts`:
-  `dostawa` (Acquisition), `nagroda` (Bounty), `transport` (Hauling), `naprawa`
-  (Repair), `poszukiwania` (Search), `eskorta` (Escort), `wlasne` (Custom +
+  **Sześć typów zleceń** (2026-07-30, siódmy usunięty 2026-08-09), po jednej klasie
+  z `Sandbox.ModAPI.Contracts`: `dostawa` (Acquisition), `nagroda` (Bounty), `transport`
+  (Hauling), `naprawa` (Repair), `poszukiwania` (Search), `wlasne` (Custom +
   `mod/Data/ContractTypes.sbc`). Typ losuje brain wagami z `[kontrakty.typy]`
   (nadpisania per frakcja: piraci wolą nagrody za głowę, górnicy naprawy), a
   `[kontrakty.mnoznik]` skaluje nagrodę I zmianę relacji wg trudności typu.
@@ -184,6 +191,16 @@ docs/protocol.md                # spec mostka JSONL
   razem z własnym warunkiem po stronie moda. Tamże: `EndBlockId` custom kontraktu musi być
   BLOKIEM KONTRAKTÓW (`as MyContractBlock` → `Fail_BlockNotFound`), a `FindHaulTarget`
   schodzi na sklep — osobna przyczyna odrzuceń.
+  **PUŁAPKA — nadpisanie frakcji WYGRYWA z wartością domyślną (2026-08-08).** Powyższe
+  „waga 0" było prawdą tylko dla `[kontrakty.typy]`; `[kontrakty.typy.KRW]` w TYM SAMYM
+  PLIKU miało `wlasne = 2`, więc piraci przez tydzień losowali typ opisany w całym repo
+  jako wyłączony (~27% zleceń KRW) i gracz dostawał zadanie bez warunku wykonania.
+  Scenariusze tego nie łapały, bo sprawdzają typ WYMUSZONY (`/zf kontrakt KRW wlasne`) —
+  ścieżkę, która celowo omija wagi. Od teraz pilnują tego dwie bramki: `dlug_test`
+  (waga 0 u KAŻDEJ frakcji i w KAŻDYM stanie + 1200 losowań kontrolnych) oraz
+  `tools/waliduj_sbc.py` (wagę wolno podnieść dopiero, gdy `Contracts.cs` zawiera
+  `TryFinishCustomContract`). Ta druga jest jedynym miejscem widzącym JEDNOCZEŚNIE config
+  brainu i kod moda — brain nie czyta C#, mod nie czyta `rules.toml`.
   **Rekwizyty (2026-07-30):** frakcja sama przygotowuje robotę — `poszukiwania`
   i `naprawa` stawiają prefab z `mod/Data/Prefabs/ZF_ContractProps.sbc` (zgubiony
   moduł / uszkodzony wrak, właściciel = frakcja) i dopiero w callbacku spawnu tworzą
@@ -193,13 +210,21 @@ docs/protocol.md                # spec mostka JSONL
   dopiero teraz wyrusza, cel nagrody dostaje ochronę, a każdy WRÓG wystawcy traci do
   gracza `kontrakt_przyjety_u_wroga` (-3). Kara raz na kontrakt (status `taken`
   w SQLite, liczy się do `max_otwartych` jak `open`).
-  **`eskorta` — TYP MARTWY, potwierdzone 2026-08-05.** Gra nie ma już definicji
+  **`eskorta` — TYP USUNIĘTY W CAŁOŚCI (2026-08-09).** Gra nie ma definicji
   `ContractTypeEscort`: `Content/Data` wozi osiem typów (Deliver, Find, GridHauling, Hunt,
   ObtainAndDeliver, PvEBounty, Repair, Salvage). `CreateCustomEscortContract` wychodzi na
   pierwszym warunku (`GetDefinition() is MyContractTypeEscortDefinition`) i zwraca `Error`
   BEZ WPISU DO LOGU — stąd „gra odrzuciła kontrakt" bez śladu, którego szukaliśmy trzy
-  przebiegi. Mod nie próbuje już tego typu wystawiać. Waga 0, kod kompletny na wypadek
-  przywrócenia. `nagroda` ma wagę 0 z innego powodu (vanilla liczy zabicia GRACZY, nie NPC).
+  przebiegi. Do 2026-08-09 typ stał z wagą 0, a implementacja czekała „na wypadek
+  przywrócenia przez Keena" — kosztowało to gałąź w silniku, dwa case'y w `Contracts.cs`,
+  wpis w `contract_kinds()`, dwa klucze w configu i trzy warstwy testów, których jedynym
+  zadaniem było pilnowanie, żeby martwy kod pozostał martwy. Wycięty end-to-end; kod
+  i pełne ustalenie z dekompilacji zostają w historii gita, bo to jest archiwum.
+  Usunięcie jest GŁOŚNE: `eskorta` w `[kontrakty.typy]` wywala config brainu
+  (`require_contract_kind`), więc stary `rules.toml` mówi wprost, którą linię skasować.
+  Wart zapamiętania jest sam pomysł, który przy okazji zniknął: konwój wyrusza dopiero po
+  `contract_taken`, nie przy wystawieniu zlecenia — do wskrzeszenia na innym typie.
+  `nagroda` ma wagę 0 z innego powodu (vanilla liczy zabicia GRACZY, nie NPC).
   Handel wykrywany heurystycznie (zmiana salda + sklep frakcji <300 m), bo ModAPI
   nie ma zdarzenia transakcji. UWAGA: kaucję ściąganą przy PRZYJĘCIU zlecenia ta sama
   heurystyka brała za zakup (darmowe +1..+3 relacji), stąd `_trade.Suppress()` także
@@ -280,26 +305,36 @@ docs/protocol.md                # spec mostka JSONL
   kadłubów bez AI), `/zf raid <frakcja> [patrol|raid|convoy]` (pełny potok MES; bez rodzaju
   brain dobiera flotę do nastroju frakcji), `/zf okup <frakcja>` (de-eskalacja bez LLM), `/zf kontrakt
   <frakcja> [typ]` (wymuszone zlecenie; typ opcjonalny — dostawa, nagroda, transport,
-  naprawa, poszukiwania, eskorta, wlasne), `/zf stations` (stacje i blok kontraktów),
+  naprawa, poszukiwania, wlasne), `/zf stations` (stacje i blok kontraktów),
   `/zf daj <surowiec> [ilość]` (towar do inwentarza — do testu trybutu bez trybu
   eksperymentalnego), `/zf stacja <frakcja>` (oddaje wskazaną siatkę frakcji NPC —
   jedyny sposób, by mieć blok kontraktów frakcji przed Etapem 7),
   `/zf event <json>` (wstrzyknij zdarzenie).
-- **`/zf autotest [sekcja]`** (2026-08-01, rozszerzone 2026-08-02): samosprawdzanie W GRZE.
-  Sekcje bezpieczne (lecą bez argumentu): `stacje`, `ceny`, `rekwizyt`, `kontrakty`,
-  `reputacja`, `okup`. Osobno `floty` i `boty` (spawnują prawdziwe rajdy — kosmos, świat
+- **`/zf autotest [sekcja]`** (2026-08-01, rozszerzone 2026-08-02 i 2026-08-08):
+  samosprawdzanie W GRZE.
+  Sekcje bezpieczne (lecą bez argumentu): `stacje`, `ceny`, `rekwizyt`, `despawn`,
+  `kontrakty`, `reputacja`, `okup`. Osobno `floty` i `boty` (spawnują prawdziwe rajdy — kosmos, świat
   testowy) oraz `wszystko`. Odpowiada na pytania, których nie da się zadać poza grą: czy
   `GetStoreItems` w ogóle zwraca oferty, czy `PricePerUnit` jest zapisywalne, czy mnożnik
   nie składa się po reloadzie, czy `SetNpcSpawnedGrid` ustawia flagę, czy MES stawia kadłub
   z naszej grupy i czy ten kadłub NAPRAWDĘ leci (dystans w oknie 30 s, bo sam blok zdalnego
   sterowania niczego nie dowodzi).
-  **Sekcja `kontrakty` jest najważniejsza:** zamawia po kolei wszystkie siedem typów zleceń
+  **Sekcja `kontrakty` jest najważniejsza:** zamawia po kolei wszystkie sześć typów zleceń
   i porównuje typ ZAMÓWIONY z tym, który powstał. Mod ma przy zleceniach ostatnie słowo
   i przy braku celu po cichu wystawia dostawę — dotąd nie było jak zauważyć, że typ od
   tygodni degraduje, bo `contract_created` wraca poprawne i wszystko wygląda zdrowo.
   Hak: `ContractManager.OstatniTyp`/`OstatniPowod`/`LicznikRozstrzygniec`.
   **Sekcja `reputacja`** pokrywa hybrydę (M1–M3, M5, M7) — łącznie z tym, czy mod przywraca
   swój cel po tym, jak gra ruszy reputację sama.
+  **Krok „FUNDAMENT custom"** (2026-08-09) jest jedynym w sekcji kontraktów TWARDYM dla
+  zejścia na dostawę: sprawdza, czy gra przyjmuje `MyContractCustom` z naszej definicji
+  `ZF_Zlecenie`. Od tego zależy CAŁA planowana rodzina własnych rodzajów zleceń
+  (`docs/zlecenia-custom.md`), a do tej pory brak działającego custom kontraktu przechodził
+  jako łagodne ostrzeżenie.
+  **Sekcja `despawn`** (2026-08-08) spłaca kontrtest zaległy od Etapu 2 — patrz Etap 2 wyżej.
+  Jest jedyną sekcją, której sedno jest NEGATYWNE („nic się nie stało"), więc ma kontrolę
+  dodatnią: bez niej reguła zwracająca zawsze „nie" przechodziłaby na zielono, a zestrzelenie
+  statku przestałoby cokolwiek znaczyć dla relacji.
   Autotest podaje mechanikom dokładnie takie ładunki, jakie przysłałby brain (`PriceManager
   .Handle`, `ReputationSync.Handle`, `RansomManager.HandleDemand`), więc **działa też bez
   uruchomionego `zf_brain.exe`**.
@@ -319,6 +354,16 @@ docs/protocol.md                # spec mostka JSONL
   zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
   i wagami typów kontraktów. Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
+- **Strażnicy długu technicznego** (2026-08-08). Osobna kategoria: nie bronią działającej
+  mechaniki, tylko decyzji „tego jeszcze NIE WŁĄCZAMY, bo brakuje drugiej połowy". Taka
+  decyzja żyła dotąd wyłącznie w komentarzu i dzieliła ją od cofnięcia jedna cyfra w configu.
+  `brain/tests/dlug_test.cpp` czyta PRAWDZIWY `rules.toml` (nie syntetyczny — inaczej nie
+  mówiłby nic o tym, co dostaje gracz) i sprawdza: waga 0 typów zablokowanych u każdej
+  frakcji i w każdym stanie, 1200 losowań kontrolnych, brak typów wyłączonych po cichu bez
+  wpisu w tabeli `kBlokady`, jawny mnożnik trudności dla każdego typu. Każdy wpis `kBlokady`
+  niesie POWÓD i WARUNEK ODBLOKOWANIA, które lądują wprost w komunikacie FAIL — a spłacenie
+  długu wymaga skreślenia wpisu, czyli świadomego potwierdzenia przez człowieka.
+  Drugą bramkę (waga kontra kod moda) trzyma `tools/waliduj_sbc.py` — patrz Etap 6.
 - **Scenariusze** (`brain/tests/scenariusze/*.jsonl`, 2026-08-02): plik JSONL, w którym
   obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
   `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
@@ -352,7 +397,18 @@ docs/protocol.md                # spec mostka JSONL
   zdalnego sterowania (przyczyna dryfujących konwojów). Vanillowych prefabów nie da się
   potwierdzić bez plików gry, więc trzyma jawną tabelę `ZNANE_PREFABY` — prefab spoza niej
   to błąd z prośbą o dopisanie. `tools/test_waliduj_sbc.py` psuje dane na kopii i wymaga
-  wykrycia każdej usterki (walidator, który zawsze mówi „czysto", byłby bezwartościowy).
+  wykrycia każdej usterki (walidator, który zawsze mówi „czysto", byłby bezwartościowy);
+  23 przypadki, w tym ostrzeżeniowe — ostrzeżenie, które nigdy nie pada, jest tak samo
+  bezwartościowe jak test bez asercji.
+  **Dług kontraktów (2026-08-08, `--rules`):** walidator jest JEDYNYM miejscem widzącym
+  jednocześnie `brain/configs/rules.toml` i kod C# moda. Dwie reguły. (1) Typ zlecenia wolno
+  włączyć dopiero, gdy mod ma to, czego typ potrzebuje: `wlasne` wymaga
+  `TryFinishCustomContract` w `Contracts.cs`, `nagroda` daje samo ostrzeżenie (kod jest
+  gotowy, wątpliwa jest mechanika gry). (2) KAŻDY typ z wagą > 0 musi mieć swój
+  `case` w `Contracts.cs` — bez niego `switch (kind)` schodzi na `default`, po cichu wystawia
+  DOSTAWĘ i melduje sukces, a brain zapisuje w SQLite typ, o który prosił. Dokładnie ten
+  kształt błędu miała eskorta przez trzy przebiegi. Reguła (2) zastąpiła wpis o eskorcie:
+  jedna zasada ogólna zamiast wyjątku na każdy martwy typ.
 - CI (`.github/workflows/brain.yml`): build Debug+Release BEZ llama.cpp, ctest
   (z scenariuszami) i smoke test `--replay`; osobna praca puszcza walidator SBC i jego
   kontrtest. Wariant bez LLM łatwo psuje się niezauważenie.

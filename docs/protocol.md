@@ -44,7 +44,6 @@ CELEM, którego mod musi poszukać w świecie:
 | `transport` | `MyContractHauling` | drugi blok kontraktów/sklepu, na innej siatce |
 | `naprawa` | `MyContractRepair` | siatka frakcji z niepełnymi blokami, a gdy brak — postawiony wrak |
 | `poszukiwania` | `MyContractSearch` | zgubiony moduł frakcji dalej niż 5 km od gracza (stawiany, patrz „Rekwizyty") |
-| `eskorta` | `MyContractEscort` | trasa (dwa punkty) + tożsamość właściciela konwoju |
 | `wlasne` | `MyContractCustom` | definicja `ZF_Zlecenie` z `mod/Data/ContractTypes.sbc` |
 
 - Typ wybiera brain wagami z `[kontrakty.typy]` (nadpisania per frakcja), ale **mod ma
@@ -54,8 +53,10 @@ CELEM, którego mod musi poszukać w świecie:
   Powód zejścia na dostawę leci na czat, żeby nie trzeba było zgadywać.
 - `nagroda` nie wchodzi nawet do losowania, gdy wystawca z nikim nie jest poniżej
   `prog_wrogi` — nagroda za głowę bez wroga nie ma celu.
-- `eskorta` pociąga za sobą `spawn_request` z `kind=convoy` (nie ma czego eskortować
-  bez statku) — ale dopiero po `contract_taken`, nie przy wystawieniu zlecenia.
+- Typu `eskorta` **nie ma** (usunięty 2026-08-09): gra nie wozi definicji
+  `ContractTypeEscort`, więc `AddContract` zwracało `Error` przy każdej próbie — i to bez
+  wpisu do logu. Nie da się go przywrócić samą wagą; wpis `eskorta` w `[kontrakty.typy]`
+  wywali config brainu z komunikatem „nieznany typ kontraktu".
 - `wlasne` to jedyny typ nieprzewidziany wprost w dokumentacji API: wymaga definicji
   `MyObjectBuilder_ContractTypeDefinition`, a zgłoszone bugi Keena mówią, że kontrakty
   custom nie ruszają reputacji vanilla (u nas nieszkodliwe — reputację prowadzi brain)

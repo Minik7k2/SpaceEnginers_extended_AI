@@ -535,7 +535,7 @@ int main() {
         zf::Db tdb(":memory:");
         zf::Engine te(tdb, fallback, /*rng_seed=*/7);
         zf::Config tcfg;
-        tcfg.spawn_wlaczone = false; // izolacja od kanału spawnów (eskorta dokłada konwój)
+        tcfg.spawn_wlaczone = false; // izolacja od kanału spawnów (tick bywa okazją do patrolu)
         std::int64_t t = 20000000;
         te.on_event(make_event("session_start", {{"world", "T"}}), tcfg, t);
 
@@ -613,25 +613,18 @@ int main() {
         assert(te.take_contracts().empty() && "nieznany typ nie ma tworzyć zlecenia");
         assert(zly.size() == 1 && zly[0].faction == "SYSTEM");
 
-        // Eskorta: samo WYSTAWIENIE zlecenia nie stawia konwoju — statki krążyłyby
-        // bez celu przy zleceniu, którego gracz nawet nie zobaczył.
-        tcfg.spawn_wlaczone = true;
-        te.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "HEL"},
-                                                 {"kind", "eskorta"}}),
-                    tcfg, t);
-        assert(te.take_contracts()[0].kind == "eskorta");
-        assert(te.take_spawns().empty() && "konwój nie rusza przed przyjęciem zlecenia");
-
-        // ...dopiero PRZYJĘCIE przez gracza wysyła konwój w trasę.
-        te.on_event(make_event("contract_created", {{"contract_id", "e1"}, {"faction", "HEL"},
-                                                    {"kind", "eskorta"}}),
-                    tcfg, t);
-        te.take_spawns();  // wystawienie zlecenia bywa okazją do zwykłego radia/spawnu
-        t += kMinuteMs;
-        te.on_event(make_event("contract_taken", {{"contract_id", "e1"}}), tcfg, t);
-        auto spawns = te.take_spawns();
-        assert(spawns.size() == 1 && spawns[0].faction == "HEL" && spawns[0].kind == "convoy" &&
-               "przyjęta eskorta ma wysłać konwój");
+        // Tu stał test eskorty (konwój rusza dopiero po przyjęciu zlecenia). Typ usunięty
+        // 2026-08-09 — gra nie ma definicji ContractTypeEscort, więc zlecenie nie mogło
+        // powstać ani razu, a test sprawdzał zachowanie nieosiągalne w grze.
+        // Zamiast niego: nieistniejący typ ma być odrzucony tak samo jak literówka wyżej,
+        // czyli usunięcie ma być PEŁNE, a nie samo wyzerowanie wagi.
+        auto po_usunieciu = te.on_event(
+            make_event("debug_command",
+                       {{"cmd", "kontrakt"}, {"faction", "HEL"}, {"kind", "eskorta"}}),
+            tcfg, t);
+        assert(te.take_contracts().empty() && "eskorta została usunięta — zlecenie nie powstaje");
+        assert(po_usunieciu.size() == 1 && po_usunieciu[0].faction == "SYSTEM" &&
+               "gracz ma dostać komunikat o nieznanym typie, nie ciszę");
     }
 
     // --- Przyjęcie zlecenia: reakcja świata (Etap 6, punkt „gracz wziął robotę") ---

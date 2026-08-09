@@ -115,6 +115,7 @@ namespace ZyweFrakcje
         private readonly ReputationSync _reputation;
         private readonly RansomManager _ransom;
         private readonly CrewSpawner _crew;
+        private readonly CombatTracker _combat;
 
         private const ulong AiEnabledWorkshopId = 2596208372;
 
@@ -228,7 +229,8 @@ namespace ZyweFrakcje
         private readonly List<Action> _przywrocenia = new List<Action>();
 
         public Autotest(EventWriter events, PriceManager prices, ContractManager contracts,
-                        ReputationSync reputation, RansomManager ransom, CrewSpawner crew)
+                        ReputationSync reputation, RansomManager ransom, CrewSpawner crew,
+                        CombatTracker combat)
         {
             _events = events;
             _prices = prices;
@@ -236,6 +238,7 @@ namespace ZyweFrakcje
             _reputation = reputation;
             _ransom = ransom;
             _crew = crew;
+            _combat = combat;
         }
 
         public bool Trwa { get { return _kroki != null; } }
@@ -274,6 +277,9 @@ namespace ZyweFrakcje
                 case "rekwizyt":
                     DodajRekwizyt(kroki);
                     break;
+                case "despawn":
+                    DodajDespawn(kroki);
+                    break;
                 case "kontrakty":
                     DodajKontrakty(kroki);
                     break;
@@ -296,7 +302,8 @@ namespace ZyweFrakcje
                     break;
                 default:
                     Powiedz("Nieznana sekcja \"" + sekcja + "\". Dozwolone: szybkie (domyślnie), " +
-                            "stacje, ceny, rekwizyt, kontrakty, reputacja, okup, floty, boty, wszystko.");
+                            "stacje, ceny, rekwizyt, despawn, kontrakty, reputacja, okup, floty, " +
+                            "boty, wszystko.");
                     return;
             }
 
@@ -326,6 +333,9 @@ namespace ZyweFrakcje
             DodajStacje(kroki);
             DodajCeny(kroki);
             DodajRekwizyt(kroki);
+            // Despawn stawia i kasuje własne rekwizyty, nie ściąga wrogów i niczego nie
+            // zostawia — należy do zestawu bezpiecznego.
+            DodajDespawn(kroki);
             DodajKontrakty(kroki);
             DodajReputacje(kroki);
             DodajOkup(kroki);
@@ -895,37 +905,45 @@ namespace ZyweFrakcje
 
         // ================= SEKCJA: REKWIZYT (I19a) =================
 
+        /// <summary>
+        /// Stawia rekwizyt testowy przed graczem i wrzuca wynik do <paramref name="wynik"/>.
+        /// Wspólne dla sekcji „rekwizyt" i „despawn" — obie potrzebują jednorazowej siatki
+        /// należącej do frakcji NPC, a druga kopia tego wywołania rozjechałaby się przy
+        /// pierwszej zmianie SpawningOptions.
+        /// </summary>
+        private static void SpawnRekwizyt(List<IMyCubeGrid> wynik, string tag, double odlegloscM)
+        {
+            IMyPlayer gracz = MyAPIGateway.Session.Player;
+            if (gracz == null || gracz.Character == null)
+            {
+                return;
+            }
+            string ignored;
+            long wlasciciel = FactionEconomy.FindTargetIdentity(tag, out ignored);
+            MatrixD widok = gracz.Character.WorldMatrix;
+            Vector3D pozycja = widok.Translation + widok.Forward * odlegloscM;
+            Vector3D? wolne = MyAPIGateway.Entities.FindFreePlace(pozycja, 30);
+            if (wolne.HasValue)
+            {
+                pozycja = wolne.Value;
+            }
+            wynik.Clear();
+            MyAPIGateway.PrefabManager.SpawnPrefab(
+                wynik, RekwizytPrefab, pozycja, (Vector3)widok.Forward, (Vector3)widok.Up,
+                Vector3.Zero, Vector3.Zero, null,
+                // SetAuthorship musi lecieć razem z SetNpcSpawnedGrid — patrz komentarz
+                // przy identycznym wywołaniu w Contracts.cs.SpawnProp (2026-08-02).
+                SpawningOptions.SetNpcSpawnedGrid | SpawningOptions.SetAuthorship,
+                wlasciciel, true, null);
+        }
+
         private void DodajRekwizyt(List<Krok> kroki)
         {
             var wynik = new List<IMyCubeGrid>();
             kroki.Add(new Krok
             {
                 Nazwa = "rekwizyt: SpawningOptions.SetNpcSpawnedGrid naprawdę ustawia flagę",
-                Start = () =>
-                {
-                    IMyPlayer gracz = MyAPIGateway.Session.Player;
-                    if (gracz == null || gracz.Character == null)
-                    {
-                        return;
-                    }
-                    string ignored;
-                    long wlasciciel = FactionEconomy.FindTargetIdentity("WGR", out ignored);
-                    MatrixD widok = gracz.Character.WorldMatrix;
-                    Vector3D pozycja = widok.Translation + widok.Forward * 300;
-                    Vector3D? wolne = MyAPIGateway.Entities.FindFreePlace(pozycja, 30);
-                    if (wolne.HasValue)
-                    {
-                        pozycja = wolne.Value;
-                    }
-                    wynik.Clear();
-                    MyAPIGateway.PrefabManager.SpawnPrefab(
-                        wynik, RekwizytPrefab, pozycja, (Vector3)widok.Forward, (Vector3)widok.Up,
-                        Vector3.Zero, Vector3.Zero, null,
-                        // SetAuthorship musi lecieć razem z SetNpcSpawnedGrid — patrz komentarz
-                        // przy identycznym wywołaniu w Contracts.cs.SpawnProp (2026-08-02).
-                        SpawningOptions.SetNpcSpawnedGrid | SpawningOptions.SetAuthorship,
-                        wlasciciel, true, null);
-                },
+                Start = () => SpawnRekwizyt(wynik, "WGR", 300),
                 CzekajTikow = 3 * Sekunda,
                 Poll = true,
                 Sprawdz = () =>
@@ -945,6 +963,160 @@ namespace ZyweFrakcje
                                "zawalać sekundę po przyjęciu (MyContractFind.Update woła Fail())";
                     }
                     return "";
+                },
+            });
+        }
+
+        // ================= SEKCJA: DESPAWN (kontrtest z Etapu 2) =================
+        // DŁUG SPŁACANY TUTAJ. Od Etapu 2 w CLAUDE.md stało „do zrobienia przy okazji:
+        // kontrtest, że despawn MES NIE generuje grid_destroyed". Zwykły test sprawdza, że
+        // coś SIĘ DZIEJE, i taki mieliśmy (zestrzelenie daje zdarzenie). Tu sprawdzamy, że
+        // coś się NIE dzieje — a to jest w tym miejscu ważniejsze: fałszywe grid_destroyed
+        // zabiera -30 relacji za statek, którego gracz nie tknął, i nie zostawia śladu poza
+        // spadkiem liczby w /zf rel. Objawem jest „frakcje same z siebie mnie nienawidzą",
+        // czyli coś, co bardzo łatwo złożyć na karb świata mściwego.
+        //
+        // GRANICA. To kontrtest REGUŁY MODA, nie integracji z MES: siatkę usuwamy przez
+        // Close(), tak jak robi to despawner MES, ale samego MES tu nie ma. Tego, że MES
+        // despawnuje przez tę właśnie ścieżkę, ten test nie dowodzi — dowodzi, że nasza
+        // reguła nie zgłasza zniszczenia siatce, której gracz nie ostrzelał świeżo.
+        //
+        // Sprawdzenia NEGATYWNE (Q1, Q4) nie mają Poll — przeszłyby w pierwszym tiku,
+        // zanim usunięcie siatki zdążyłoby się w ogóle rozejść.
+        private void DodajDespawn(List<Krok> kroki)
+        {
+            var pierwszy = new List<IMyCubeGrid>();
+            var drugi = new List<IMyCubeGrid>();
+            int licznikPrzed = 0;
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "despawn: bramka (CombatTracker wstał)",
+                Grupa = "despawn",
+                Bramka = true,
+                Sprawdz = () => _combat == null
+                    ? "CombatTracker nie istnieje — bez niego cała sekcja nie ma czego mierzyć"
+                    : "",
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "Q1. SEDNO: usunięcie siatki NIEOSTRZELANEJ nie daje grid_destroyed",
+                Grupa = "despawn",
+                Start = () =>
+                {
+                    licznikPrzed = _combat.ZgloszoneZniszczenia;
+                    SpawnRekwizyt(pierwszy, "KRW", 300);
+                },
+                CzekajTikow = 5 * Sekunda,
+                // Poll wolno, choć część sprawdzenia jest negatywna: bramkuje ją ISTNIENIE
+                // siatki, a ta pojawia się dopiero z callbacku spawnu. Zakaz pollowania
+                // dotyczy sprawdzeń, które przechodzą w pierwszym tiku, ZANIM rzecz zdąży
+                // się wydarzyć — tu pierwszy tik po prostu wraca „prefab nie powstał".
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    if (pierwszy.Count == 0)
+                    {
+                        return "prefab " + RekwizytPrefab + " nie powstał — nie ma czego despawnować";
+                    }
+                    IMyCubeGrid grid = pierwszy[0];
+                    // Do sprzątania ZANIM cokolwiek sprawdzimy: przy porażce wychodzimy
+                    // z tej metody przed Close() i rekwizyt zostałby w świecie na zawsze.
+                    if (!_doSprzatniecia.Contains(grid))
+                    {
+                        _doSprzatniecia.Add(grid);
+                    }
+                    if (_combat.CzyDespawnZglosiZniszczenie(grid.EntityId))
+                    {
+                        return "tracker uważa świeżo postawioną, NIETKNIĘTĄ siatkę za zniszczoną " +
+                               "przez gracza — despawn MES będzie kosztował relacje bez powodu";
+                    }
+                    if (!grid.MarkedForClose)
+                    {
+                        grid.Close(); // tą samą drogą, którą siatkę usuwa despawner MES
+                    }
+                    return "";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "Q2. licznik grid_destroyed stoi po despawnie",
+                Grupa = "despawn",
+                CzekajTikow = 2 * Sekunda, // NEGATYWNE — bez Poll, czekamy pełne okno
+                Sprawdz = () => _combat.ZgloszoneZniszczenia != licznikPrzed
+                    ? "despawn wygenerował grid_destroyed (" + licznikPrzed + " -> " +
+                      _combat.ZgloszoneZniszczenia + ") — brain policzy graczowi zniszczenie " +
+                      "siatki, której ten nawet nie ostrzelał"
+                    : "",
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "Q3. KONTROLA DODATNIA: świeże trafienie NADAL liczy się jako zniszczenie",
+                Grupa = "despawn",
+                Start = () => SpawnRekwizyt(drugi, "KRW", 350),
+                CzekajTikow = 5 * Sekunda,
+                Poll = true, // jak w Q1: czekamy na callback spawnu, nie na brak zdarzenia
+                Sprawdz = () =>
+                {
+                    if (drugi.Count == 0)
+                    {
+                        return "prefab " + RekwizytPrefab + " nie powstał";
+                    }
+                    IMyCubeGrid grid = drugi[0];
+                    if (!_doSprzatniecia.Contains(grid))
+                    {
+                        _doSprzatniecia.Add(grid);
+                    }
+                    // Bez tego kroku Q1 i Q2 przechodziłyby także wtedy, gdyby reguła zawsze
+                    // mówiła „nie" — a wtedy zestrzelenie statku przestałoby cokolwiek znaczyć
+                    // i nikt by tego nie zauważył. Pytamy PREDYKATEM, nie zamykając siatki:
+                    // prawdziwe grid_destroyed zabrałoby -30 relacji, których autotest nie
+                    // ma jak oddać.
+                    _combat.ZarejestrujTrafienieDlaTestu(grid, "KRW", 0);
+                    return _combat.CzyDespawnZglosiZniszczenie(grid.EntityId)
+                        ? ""
+                        : "świeżo ostrzelana siatka NIE liczy się jako zniszczona — zestrzelenie " +
+                          "statku frakcji przestało cokolwiek znaczyć dla relacji";
+                },
+            });
+
+            kroki.Add(new Krok
+            {
+                Nazwa = "Q4. granica 30 s: stare trafienie + despawn = brak grid_destroyed",
+                Grupa = "despawn",
+                Start = () =>
+                {
+                    licznikPrzed = _combat.ZgloszoneZniszczenia;
+                    if (drugi.Count > 0)
+                    {
+                        // Ten sam grid, ale trafienie POSTARZONE tuż za okno. To realny
+                        // przebieg: gracz postrzelał patrol, odleciał, a MES posprzątał
+                        // kadłub minutę później. Rozbrajamy przy okazji siatkę przed
+                        // sprzątaniem — z trafieniem świeżym z Q3 jej zamknięcie wysłałoby
+                        // prawdziwe grid_destroyed.
+                        _combat.ZarejestrujTrafienieDlaTestu(
+                            drugi[0], "KRW", CombatTracker.FreshDamageTicks + Sekunda);
+                        if (!drugi[0].MarkedForClose)
+                        {
+                            drugi[0].Close();
+                        }
+                    }
+                },
+                CzekajTikow = 2 * Sekunda, // NEGATYWNE — bez Poll
+                Sprawdz = () =>
+                {
+                    if (drugi.Count == 0)
+                    {
+                        return "nie było siatki z Q3 — krok nic nie sprawdził";
+                    }
+                    return _combat.ZgloszoneZniszczenia != licznikPrzed
+                        ? "trafienie starsze niż okno " + (CombatTracker.FreshDamageTicks / Sekunda) +
+                          " s dało grid_destroyed — despawn po dawnej potyczce liczy się jak " +
+                          "zestrzelenie"
+                        : "";
                 },
             });
         }
@@ -999,14 +1171,13 @@ namespace ZyweFrakcje
             // i z jakiego powodu, zamiast dowiadywać się o tym po miesiącu.
             DodajKontraktTyp(kroki, "KRW", "nagroda", "HEL", true, 2 * Sekunda);
             DodajKontraktTyp(kroki, "WGR", "transport", null, true, 2 * Sekunda);
-            DodajKontraktTyp(kroki, "HEL", "eskorta", null, true, 2 * Sekunda);
+            // `eskorta` nie jest już zamawiana — typ usunięty 2026-08-09 razem z obsługą
+            // w Contracts.cs, więc sekcja pokrywa SZEŚĆ typów, nie siedem.
             // Te dwa najpierw STAWIAJĄ rekwizyt (SpawnPrefab jest asynchroniczny), stąd
             // dłuższe okno — kontrakt powstaje dopiero w callbacku spawnu.
             DodajKontraktTyp(kroki, "WGR", "naprawa", null, true, 12 * Sekunda);
             DodajKontraktTyp(kroki, "WGR", "poszukiwania", null, true, 12 * Sekunda);
-            // wlasne ma wagę 0 w configu (typ bez warunku wykonania) — sprawdzamy tylko, czy
-            // definicja z ContractTypes.sbc w ogóle się wczytała.
-            DodajKontraktTyp(kroki, "KRW", "wlasne", null, true, 2 * Sekunda);
+            DodajFundamentCustom(kroki);
 
             kroki.Add(new Krok
             {
@@ -1067,6 +1238,70 @@ namespace ZyweFrakcje
         /// Jeden typ zlecenia: zamów u frakcji, odczekaj na rozstrzygnięcie, porównaj typ
         /// zamówiony z tym, który NAPRAWDĘ powstał.
         /// </summary>
+        /// <summary>
+        /// ETAP 0 rodziny „custom" (docs/zlecenia-custom.md) — jedyny krok tej sekcji, który
+        /// jest TWARDY dla zejścia na dostawę.
+        ///
+        /// PO CO. Plan przebudowy zleceń zakłada, że `wlasne` przestaje być rodzajem roboty
+        /// i staje się SZABLONEM, na którym staną nasze własne rodzaje (polowanie, trybut,
+        /// konwoj, pakt) — takie, których vanilla nie potrafi wyrazić, bo warunek zwycięstwa
+        /// piszemy my. Cała ta rodzina stoi na jednym niesprawdzonym założeniu: że gra
+        /// wczytuje `mod/Data/ContractTypes.sbc` i przyjmuje `MyContractCustom` na naszym
+        /// bloku kontraktów. Dopóki tego nie wiemy, projektowanie czterech rodzajów jest
+        /// budowaniem na piasku — a dokładnie ten błąd kosztował trzy przebiegi przy eskorcie.
+        ///
+        /// CO TO DOWODZI. `OstatniTyp == "wlasne"` znaczy, że `AddContract` przyjął nasz
+        /// custom kontrakt — czyli `MyDefinitionId` się rozwinął ORAZ podtyp `ZF_Zlecenie`
+        /// istnieje w danych gry. Gdyby definicji nie było, `AddContract` odmówiłby i mod
+        /// zszedłby na DOSTAWĘ; do 2026-08-09 było to tylko OSTRZEŻENIE, więc taki wynik
+        /// przechodził jako łagodna żółta linijka.
+        ///
+        /// CZEGO NIE DOWODZI (i dlatego to nie koniec Etapu 0):
+        ///  * czy terminal pokazuje NASZ tytuł, czy generyczną nazwę typu — to widzi tylko
+        ///    człowiek, więc krok wypisuje na czacie, czego szukać;
+        ///  * czy `TryFinishCustomContract` naprawdę domyka kontrakt i wypłaca — to jest
+        ///    ryzyko Etapu 1 i powód, dla którego Etap 1 wiezie JEDEN rodzaj, nie cztery.
+        /// </summary>
+        private void DodajFundamentCustom(List<Krok> kroki)
+        {
+            kroki.Add(new Krok
+            {
+                Nazwa = "FUNDAMENT custom: gra przyjmuje MyContractCustom z definicji ZF_Zlecenie",
+                Grupa = "kontrakty",
+                Start = () =>
+                {
+                    if (_contracts == null)
+                    {
+                        return;
+                    }
+                    _kontraktLicznik = _contracts.LicznikRozstrzygniec;
+                    _contracts.Create("KRW", "wlasne", KontraktNagroda, KontraktCzasMin, null);
+                },
+                CzekajTikow = 2 * Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    string blad = SprawdzKontrakt("wlasne");
+                    if (blad.Length > 0)
+                    {
+                        return blad + ". TO BLOKUJE CAŁĄ RODZINĘ WŁASNYCH RODZAJÓW ZLECEŃ " +
+                               "(polowanie/trybut/konwoj/pakt — docs/zlecenia-custom.md): bez " +
+                               "działającego MyContractCustom nie ma jak wystawić zlecenia " +
+                               "z własnym warunkiem wykonania. Sprawdź, czy gra wczytała " +
+                               "mod/Data/ContractTypes.sbc (log SE, szukaj \"ZF_Zlecenie\")";
+                    }
+                    // Poll: to leci dokładnie raz, bo po pustym wyniku krok się kończy.
+                    string nazwa = _contracts.OstatniaNazwaCustom;
+                    Powiedz("  ^ fundament stoi. TERAZ TY: otwórz terminal zleceń KRW i sprawdź, " +
+                            "czy zlecenie nazywa się \"" + (nazwa ?? "(mod nie podał nazwy)") +
+                            "\". Jeśli widzisz tam generyczną nazwę typu, definicja się wczytała, " +
+                            "ale UI jej nie używa — to zmienia projekt (jedna definicja wspólna " +
+                            "kontra jedna na rodzaj, patrz docs/zlecenia-custom.md).");
+                    return "";
+                },
+            });
+        }
+
         private void DodajKontraktTyp(List<Krok> kroki, string tag, string typ, string cel,
                                       bool miekki, int okno)
         {
@@ -1097,7 +1332,7 @@ namespace ZyweFrakcje
         /// powstało. Flaga `miekki` przy typie zlecenia miała łagodzić JEDNĄ rzecz: zejście
         /// typu na dostawę, gdy w świecie nie ma celu (I15 — dopuszczalne i opisane).
         /// Łagodziła jednak wszystko, co zwróci <see cref="SprawdzKontrakt"/>, więc gdy gra
-        /// odrzucała kontrakt CAŁKOWICIE, sześć z siedmiu typów meldowało OSTRZEŻENIE, a
+        /// odrzucała kontrakt CAŁKOWICIE, pięć z sześciu typów meldowało OSTRZEŻENIE, a
         /// „dostawa" (jedyna z miekki=false) FAIL — ten sam powód, dwie różne barwy w tym
         /// samym przebiegu. Stąd wrażenie, że wynik autotestu jest losowy (2026-08-05).
         /// </summary>

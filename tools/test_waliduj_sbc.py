@@ -19,6 +19,11 @@ KORZEN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WALIDATOR = os.path.join(KORZEN, "tools", "waliduj_sbc.py")
 
 
+def _rules(korzen_danych):
+    """rules.toml leży OBOK kopii mod/Data w katalogu tymczasowym (patrz main)."""
+    return os.path.join(os.path.dirname(korzen_danych), "rules.toml")
+
+
 def uruchom(korzen_danych):
     # encoding= JAWNIE (2026-08-04): bez tego `text=True` dekoduje po locale rodzica
     # (na polskim Windowsie cp1250), a walidator pisze UTF-8, gdy w środowisku stoi
@@ -26,7 +31,7 @@ def uruchom(korzen_danych):
     # cokolwiek sprawdzić. errors="replace", bo krzaki w komunikacie są mniej groźne
     # niż wywrócony test.
     proces = subprocess.run(
-        [sys.executable, WALIDATOR, "--korzen", korzen_danych],
+        [sys.executable, WALIDATOR, "--korzen", korzen_danych, "--rules", _rules(korzen_danych)],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     return proces.returncode, proces.stdout + proces.stderr
 
@@ -182,38 +187,93 @@ USTERKI = [
      lambda d: podmien(os.path.join(d, "ZF_Manipulations.sbc"),
                        "</EntityComponents>", "</EntityComponent>"),
      "nie parsuje się jako XML"),
+
+    # --- dług techniczny: waga typu zlecenia kontra to, co mod naprawdę umie ---
+    # Typ, którego mod nie umie zbudować, degraduje CICHO: switch zejdzie na `default`,
+    # wystawi dostawę i zamelduje sukces. Wracamy tu usuniętą eskortą, bo to prawdziwy
+    # przypadek — dokładnie tak wyglądał przez trzy przebiegi, zanim dekompilacja
+    # pokazała, że gra nie ma tego typu.
+    ("waga dla typu, dla którego Contracts.cs nie ma case'a",
+     lambda d: podmien(_rules(d), "poszukiwania = 1\n", "poszukiwania = 1\neskorta = 1\n"),
+     "switch zejdzie na `default`"),
+
+    # Ten sam brak, ale wprowadzony od strony KODU: typ zostaje w configu, znika obsługa.
+    # Bez tego przypadku reguła sprawdzałaby tylko literówki w rules.toml.
+    ("Contracts.cs traci case dla typu, który brain nadal losuje",
+     lambda d: podmien(os.path.join(d, "Scripts", "ZyweFrakcje", "Contracts.cs"),
+                       'case "poszukiwania":', 'case "poszukiwania_wylaczone":'),
+     "Contracts.cs nie ma dla niego `case`"),
+
+    # Blokada „wymagana" ORAZ dokładny kształt błędu z 2026-08-08: waga wraca nie
+    # w wartości domyślnej, tylko w nadpisaniu frakcji — a ono wygrywa. To jest ten
+    # przypadek, którego nie łapał żaden test przez tydzień.
+    ("wlasne włączone przez NADPISANIE FRAKCJI (domyślnie dalej 0)",
+     lambda d: podmien(_rules(d), "dlug_test.\nwlasne = 0", "dlug_test.\nwlasne = 2"),
+     "nie zawiera \"TryFinishCustomContract\""),
+]
+
+# Usterki, które mają dać OSTRZEŻENIE, nie błąd: kod moda jest kompletny, wątpliwa jest
+# sama mechanika gry. Walidator ma wtedy wrócić zerem, ale powiedzieć o tym głośno —
+# ostrzeżenie, które nigdy nie pada, jest tak samo bezwartościowe jak test bez asercji.
+OSTRZEZENIA = [
+    ("nagroda włączona (kod gotowy, mechanika niepotwierdzona w grze)",
+     lambda d: podmien(_rules(d), "nagroda = 0", "nagroda = 2"),
+     "liczy zabicia GRACZY, nie NPC"),
 ]
 
 
-def main():
-    zrodlo = os.path.join(KORZEN, "mod", "Data")
+def przygotuj(tmp):
+    """Świeża kopia danych moda ORAZ configu brainu — obie strony granicy w jednym miejscu.
 
-    kod, wyjscie = uruchom(zrodlo)
+    rules.toml musi lecieć razem z mod/Data, bo kontrola długu kontraktów zestawia wagę
+    typu z kodem C#. Kopiujemy go nawet do przebiegu na czystych danych, żeby ta ścieżka
+    była dokładnie ta sama, co w przebiegach z usterką.
+    """
+    kopia = os.path.join(tmp, "Data")
+    shutil.copytree(os.path.join(KORZEN, "mod", "Data"), kopia)
+    shutil.copyfile(os.path.join(KORZEN, "brain", "configs", "rules.toml"), _rules(kopia))
+    return kopia
+
+
+def sprawdz_przypadek(opis, psuj, oczekiwane, ma_byc_bledem):
+    """Psuje dane na kopii i wymaga, żeby walidator to zauważył. True = zdał."""
+    with tempfile.TemporaryDirectory() as tmp:
+        kopia = przygotuj(tmp)
+        psuj(kopia)
+        kod, wyjscie = uruchom(kopia)
+        if ma_byc_bledem and kod == 0:
+            print("FAIL {} — walidator NIE zauważył usterki".format(opis))
+            return False
+        if not ma_byc_bledem and kod != 0:
+            print("FAIL {} — miało być OSTRZEŻENIE, a walidator zwrócił błąd:\n{}"
+                  .format(opis, wyjscie))
+            return False
+        if oczekiwane not in wyjscie:
+            print("FAIL {} — komunikat nie pasuje (brak \"{}\"):\n{}"
+                  .format(opis, oczekiwane, wyjscie))
+            return False
+        print("OK   {}".format(opis))
+        return True
+
+
+def main():
+    with tempfile.TemporaryDirectory() as tmp:
+        kod, wyjscie = uruchom(przygotuj(tmp))
     if kod != 0:
         print("Walidator zgłasza błędy na CZYSTYCH danych — najpierw napraw mod:\n" + wyjscie)
         return 1
     print("OK   dane w repo przechodzą walidację")
 
-    bledy = 0
+    zdane = 0
     for opis, psuj, oczekiwane in USTERKI:
-        with tempfile.TemporaryDirectory() as tmp:
-            kopia = os.path.join(tmp, "Data")
-            shutil.copytree(zrodlo, kopia)
-            psuj(kopia)
-            kod, wyjscie = uruchom(kopia)
-            if kod == 0:
-                print("FAIL {} — walidator NIE zauważył usterki".format(opis))
-                bledy += 1
-            elif oczekiwane not in wyjscie:
-                print("FAIL {} — zgłoszony błąd nie pasuje (brak \"{}\"):\n{}"
-                      .format(opis, oczekiwane, wyjscie))
-                bledy += 1
-            else:
-                print("OK   {}".format(opis))
+        zdane += sprawdz_przypadek(opis, psuj, oczekiwane, ma_byc_bledem=True)
+    for opis, psuj, oczekiwane in OSTRZEZENIA:
+        zdane += sprawdz_przypadek(opis, psuj, oczekiwane, ma_byc_bledem=False)
 
+    wszystkich = len(USTERKI) + len(OSTRZEZENIA)
     print("")
-    print("Kontrtest: {} z {} usterek wykrytych.".format(len(USTERKI) - bledy, len(USTERKI)))
-    return 1 if bledy else 0
+    print("Kontrtest: {} z {} usterek wykrytych.".format(zdane, wszystkich))
+    return 1 if zdane != wszystkich else 0
 
 
 if __name__ == "__main__":

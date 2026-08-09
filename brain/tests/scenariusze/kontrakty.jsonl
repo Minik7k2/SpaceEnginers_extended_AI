@@ -27,9 +27,11 @@
 {"oczekuj": "kontrakt", "frakcja": "WGR", "typ": "poszukiwania", "min_nagroda": 13500, "max_nagroda": 13500}
 {"type": "debug_command", "ts": 25000, "data": {"cmd": "kontrakt", "faction": "KRW", "kind": "wlasne"}}
 {"oczekuj": "kontrakt", "frakcja": "KRW", "typ": "wlasne", "min_nagroda": 16500, "max_nagroda": 16500}
+# Typ `eskorta` USUNIĘTY 2026-08-09 (gra nie ma definicji ContractTypeEscort). Zamiast
+# sprawdzać, ile kosztowałby, sprawdzamy, że zamówienie go NIE tworzy już zlecenia —
+# usunięcie ma być pełne, a nie samo wyzerowanie wagi.
 {"type": "debug_command", "ts": 30000, "data": {"cmd": "kontrakt", "faction": "HEL", "kind": "eskorta"}}
-{"oczekuj": "kontrakt", "frakcja": "HEL", "typ": "eskorta", "min_nagroda": 21000, "max_nagroda": 21000}
-# Eskorta NIE wysyła konwoju przy wystawieniu — dopiero gdy gracz przyjmie zlecenie (I17).
+{"oczekuj": "brak_kontraktu", "frakcja": "HEL"}
 {"oczekuj": "brak_spawnu", "frakcja": "HEL"}
 
 {"opis": "I14. Nagroda za głowę: cel bierze się z POLITYKI (najgorszy wróg wystawcy)"}

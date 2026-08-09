@@ -22,8 +22,11 @@ namespace ZyweFrakcje
     ///   transport    MyContractHauling      drugi blok ekonomiczny
     ///   naprawa      MyContractRepair       uszkodzona siatka frakcji
     ///   poszukiwania MyContractSearch       odległa siatka + promień
-    ///   eskorta      MyContractEscort       trasa (dwa punkty) + właściciel konwoju
     ///   wlasne       MyContractCustom       definicja z mod/Data/ContractTypes.sbc
+    /// Typu `eskorta` (MyContractEscort) tu NIE MA — usunięty 2026-08-09. Klasa dalej jest
+    /// w API, ale gra nie wozi definicji ContractTypeEscort, więc AddContract zwracało Error
+    /// przy KAŻDEJ próbie i to bez wpisu do logu. Implementacja i pełne ustalenie
+    /// z dekompilacji zostają w historii gita — nie w żywym kodzie.
     /// Gdy celu nie ma w świecie (albo gra odrzuci kontrakt), schodzimy na DOSTAWĘ i to
     /// ona wraca w contract_created — brain utrwala typ, który naprawdę powstał, nie ten,
     /// o który prosił. Bez tego zlecenie po prostu przepadałoby bez śladu.
@@ -62,8 +65,6 @@ namespace ZyweFrakcje
         private const double PropSearchMeters = 8000;  // gdzie frakcja gubi moduł (od gracza)
         private const double PropWreckMeters = 2500;   // wrak zostawiamy przy stacji frakcji
         private const float PropFreeRadius = 50;
-        // Eskorta bez drugiej stacji w świecie: trasa prowadzi tyle metrów w stronę gracza.
-        private const double EscortMeters = 20000;
         // Definicja własnego typu zlecenia (mod/Data/ContractTypes.sbc). Trzymana jako TEKST
         // i rozwijana przez MyDefinitionId.TryParse, żeby mod nie zależał od typu
         // MyObjectBuilder_ContractTypeDefinition (nie ma go w whiteliście ModAPI).
@@ -98,12 +99,24 @@ namespace ZyweFrakcje
         public string OstatniPowod { get; private set; } // powód odmowy albo zejścia na dostawę
         public int LicznikRozstrzygniec { get; private set; }
 
+        /// <summary>
+        /// Nazwa PL, pod którą powstało ostatnie zlecenie typu „wlasne" (null dla pozostałych
+        /// typów — te nazywa gra). Autotest nie ma jak zajrzeć do terminala, więc podaje ją
+        /// graczowi na czacie: sprawdzenie, czy UI naprawdę pokazuje nasz tytuł, a nie
+        /// generyczną nazwę typu, jest jedyną połową tego testu wymagającą ludzkiego oka.
+        /// </summary>
+        public string OstatniaNazwaCustom { get; private set; }
+
         private void Rozstrzygniete(string zadany, string powstal, long id, string powod)
         {
             OstatniZadanyTyp = zadany;
             OstatniTyp = powstal;
             OstatnieId = id;
             OstatniPowod = powod;
+            if (powstal != "wlasne")
+            {
+                OstatniaNazwaCustom = null; // zeszło na dostawę — nasza nazwa nie doszła do gry
+            }
             LicznikRozstrzygniec++;
         }
 
@@ -434,63 +447,6 @@ namespace ZyweFrakcje
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
 
-                case "eskorta":
-                {
-                    // ESKORTY NIE DA SIĘ WYSTAWIĆ — TYP ZOSTAŁ USUNIĘTY Z GRY.
-                    // Ustalone 2026-08-05 i to jest fakt o danych gry, nie hipoteza:
-                    // `MyContractGenerator.CreateCustomEscortContract` zaczyna się od
-                    //     if (!(new MyContractEscort().GetDefinition()
-                    //           is MyContractTypeEscortDefinition def))
-                    //         return MyContractCreationResults.Error;
-                    // a w Content/Data nie ma ŻADNEGO wpisu tego typu. Gra wozi dziś osiem
-                    // definicji zleceń: Deliver, Find, GridHauling, Hunt, ObtainAndDeliver,
-                    // PvEBounty, Repair, Salvage. Escort wśród nich nie ma, więc warunek
-                    // wywala się zawsze i zwraca Error BEZ WPISU DO LOGU — stąd „gra odrzuciła
-                    // kontrakt" bez jednego śladu, którego szukaliśmy przez trzy przebiegi.
-                    // Nie próbujemy więc i nie udajemy, że to przypadek: mówimy prawdę
-                    // i schodzimy na dostawę. Gdyby Keen kiedyś przywrócił ten typ, wystarczy
-                    // usunąć ten blok — kod poniżej jest kompletny i sprawdzony.
-                    powod = "typ eskorty został usunięty z gry (brak definicji ContractTypeEscort " +
-                            "w danych) — nie da się go wystawić";
-                    return false;
-                }
-
-                case "eskorta_nieuzywane":
-                {
-                    string ignored;
-                    long owner = FactionEconomy.FindTargetIdentity(faction, out ignored);
-                    if (owner == 0)
-                    {
-                        powod = "frakcja nie ma tożsamości właściciela konwoju";
-                        return false;
-                    }
-                    // Trasa: ze stacji frakcji do drugiej stacji, a gdy jej nie ma — 20 km
-                    // w stronę gracza (żeby konwój dało się w ogóle spotkać).
-                    EconomyBlock target = FactionEconomy.FindHaulTarget(faction, start.GridId, FactionEconomy.BlockOwner(start.BlockId));
-                    Vector3D end;
-                    string gdzie;
-                    if (target != null)
-                    {
-                        end = target.Position;
-                        gdzie = target.GridName ?? "innej stacji";
-                    }
-                    else
-                    {
-                        Vector3D player = PlayerPosition(start.Position);
-                        Vector3D dir = player - start.Position;
-                        dir = dir.LengthSquared() > 1 ? Vector3D.Normalize(dir) : Vector3D.Right;
-                        end = start.Position + dir * EscortMeters;
-                        gdzie = "punktu spotkania " + (int)(EscortMeters / 1000) + " km od stacji";
-                    }
-                    var c = new MyContractEscort(start.BlockId, money, collateral, durationSeconds,
-                                                 start.Position, end, owner);
-                    c.OnContractSucceeded = onSuccess;
-                    c.OnContractFailed = onFail;
-                    c.OnContractAcquired = onTaken;
-                    opis = "eskorta konwoju do " + gdzie;
-                    return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
-                }
-
                 case "wlasne":
                 {
                     MyDefinitionId definitionId;
@@ -512,6 +468,9 @@ namespace ZyweFrakcje
                     c.OnContractFailed = onFail;
                     c.OnContractAcquired = onTaken;
                     opis = nazwa;
+                    // Zapamiętujemy nazwę, o którą prosiliśmy — Rozstrzygniete() skasuje ją,
+                    // jeśli AddContract odmówi i zejdziemy na dostawę.
+                    OstatniaNazwaCustom = nazwa;
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
 

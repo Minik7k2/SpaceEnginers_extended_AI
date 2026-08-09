@@ -156,7 +156,8 @@ namespace ZyweFrakcje
             // które sprawdza: cennik, kontrakty, hybrydę reputacji i żądania okupu. Autotest
             // podaje im dokładnie takie ładunki, jakie przysłałby brain, więc sekcje działają
             // także wtedy, gdy zf_brain.exe nie jest uruchomiony.
-            _autotest = new Autotest(_events, _prices, _contracts, _reputation, _ransom, _crew);
+            _autotest = new Autotest(_events, _prices, _contracts, _reputation, _ransom, _crew,
+                                     _combat);
         }
 
         protected override void UnloadData()
@@ -551,7 +552,7 @@ namespace ZyweFrakcje
                 if (czesci.Length == 0)
                 {
                     MyAPIGateway.Utilities.ShowMessage("ZF",
-                        "Użycie: /zf kontrakt <frakcja> [typ] (typy: dostawa, nagroda, transport, naprawa, poszukiwania, eskorta, wlasne)");
+                        "Użycie: /zf kontrakt <frakcja> [typ] (typy: dostawa, nagroda, transport, naprawa, poszukiwania, wlasne)");
                 }
                 else
                 {
