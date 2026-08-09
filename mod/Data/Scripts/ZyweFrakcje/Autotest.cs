@@ -1177,9 +1177,7 @@ namespace ZyweFrakcje
             // dłuższe okno — kontrakt powstaje dopiero w callbacku spawnu.
             DodajKontraktTyp(kroki, "WGR", "naprawa", null, true, 12 * Sekunda);
             DodajKontraktTyp(kroki, "WGR", "poszukiwania", null, true, 12 * Sekunda);
-            // wlasne ma wagę 0 w configu (typ bez warunku wykonania) — sprawdzamy tylko, czy
-            // definicja z ContractTypes.sbc w ogóle się wczytała.
-            DodajKontraktTyp(kroki, "KRW", "wlasne", null, true, 2 * Sekunda);
+            DodajFundamentCustom(kroki);
 
             kroki.Add(new Krok
             {
@@ -1240,6 +1238,70 @@ namespace ZyweFrakcje
         /// Jeden typ zlecenia: zamów u frakcji, odczekaj na rozstrzygnięcie, porównaj typ
         /// zamówiony z tym, który NAPRAWDĘ powstał.
         /// </summary>
+        /// <summary>
+        /// ETAP 0 rodziny „custom" (docs/zlecenia-custom.md) — jedyny krok tej sekcji, który
+        /// jest TWARDY dla zejścia na dostawę.
+        ///
+        /// PO CO. Plan przebudowy zleceń zakłada, że `wlasne` przestaje być rodzajem roboty
+        /// i staje się SZABLONEM, na którym staną nasze własne rodzaje (polowanie, trybut,
+        /// konwoj, pakt) — takie, których vanilla nie potrafi wyrazić, bo warunek zwycięstwa
+        /// piszemy my. Cała ta rodzina stoi na jednym niesprawdzonym założeniu: że gra
+        /// wczytuje `mod/Data/ContractTypes.sbc` i przyjmuje `MyContractCustom` na naszym
+        /// bloku kontraktów. Dopóki tego nie wiemy, projektowanie czterech rodzajów jest
+        /// budowaniem na piasku — a dokładnie ten błąd kosztował trzy przebiegi przy eskorcie.
+        ///
+        /// CO TO DOWODZI. `OstatniTyp == "wlasne"` znaczy, że `AddContract` przyjął nasz
+        /// custom kontrakt — czyli `MyDefinitionId` się rozwinął ORAZ podtyp `ZF_Zlecenie`
+        /// istnieje w danych gry. Gdyby definicji nie było, `AddContract` odmówiłby i mod
+        /// zszedłby na DOSTAWĘ; do 2026-08-09 było to tylko OSTRZEŻENIE, więc taki wynik
+        /// przechodził jako łagodna żółta linijka.
+        ///
+        /// CZEGO NIE DOWODZI (i dlatego to nie koniec Etapu 0):
+        ///  * czy terminal pokazuje NASZ tytuł, czy generyczną nazwę typu — to widzi tylko
+        ///    człowiek, więc krok wypisuje na czacie, czego szukać;
+        ///  * czy `TryFinishCustomContract` naprawdę domyka kontrakt i wypłaca — to jest
+        ///    ryzyko Etapu 1 i powód, dla którego Etap 1 wiezie JEDEN rodzaj, nie cztery.
+        /// </summary>
+        private void DodajFundamentCustom(List<Krok> kroki)
+        {
+            kroki.Add(new Krok
+            {
+                Nazwa = "FUNDAMENT custom: gra przyjmuje MyContractCustom z definicji ZF_Zlecenie",
+                Grupa = "kontrakty",
+                Start = () =>
+                {
+                    if (_contracts == null)
+                    {
+                        return;
+                    }
+                    _kontraktLicznik = _contracts.LicznikRozstrzygniec;
+                    _contracts.Create("KRW", "wlasne", KontraktNagroda, KontraktCzasMin, null);
+                },
+                CzekajTikow = 2 * Sekunda,
+                Poll = true,
+                Sprawdz = () =>
+                {
+                    string blad = SprawdzKontrakt("wlasne");
+                    if (blad.Length > 0)
+                    {
+                        return blad + ". TO BLOKUJE CAŁĄ RODZINĘ WŁASNYCH RODZAJÓW ZLECEŃ " +
+                               "(polowanie/trybut/konwoj/pakt — docs/zlecenia-custom.md): bez " +
+                               "działającego MyContractCustom nie ma jak wystawić zlecenia " +
+                               "z własnym warunkiem wykonania. Sprawdź, czy gra wczytała " +
+                               "mod/Data/ContractTypes.sbc (log SE, szukaj \"ZF_Zlecenie\")";
+                    }
+                    // Poll: to leci dokładnie raz, bo po pustym wyniku krok się kończy.
+                    string nazwa = _contracts.OstatniaNazwaCustom;
+                    Powiedz("  ^ fundament stoi. TERAZ TY: otwórz terminal zleceń KRW i sprawdź, " +
+                            "czy zlecenie nazywa się \"" + (nazwa ?? "(mod nie podał nazwy)") +
+                            "\". Jeśli widzisz tam generyczną nazwę typu, definicja się wczytała, " +
+                            "ale UI jej nie używa — to zmienia projekt (jedna definicja wspólna " +
+                            "kontra jedna na rodzaj, patrz docs/zlecenia-custom.md).");
+                    return "";
+                },
+            });
+        }
+
         private void DodajKontraktTyp(List<Krok> kroki, string tag, string typ, string cel,
                                       bool miekki, int okno)
         {

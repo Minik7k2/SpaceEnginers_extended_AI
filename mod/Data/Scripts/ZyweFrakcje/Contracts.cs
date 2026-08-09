@@ -99,12 +99,24 @@ namespace ZyweFrakcje
         public string OstatniPowod { get; private set; } // powód odmowy albo zejścia na dostawę
         public int LicznikRozstrzygniec { get; private set; }
 
+        /// <summary>
+        /// Nazwa PL, pod którą powstało ostatnie zlecenie typu „wlasne" (null dla pozostałych
+        /// typów — te nazywa gra). Autotest nie ma jak zajrzeć do terminala, więc podaje ją
+        /// graczowi na czacie: sprawdzenie, czy UI naprawdę pokazuje nasz tytuł, a nie
+        /// generyczną nazwę typu, jest jedyną połową tego testu wymagającą ludzkiego oka.
+        /// </summary>
+        public string OstatniaNazwaCustom { get; private set; }
+
         private void Rozstrzygniete(string zadany, string powstal, long id, string powod)
         {
             OstatniZadanyTyp = zadany;
             OstatniTyp = powstal;
             OstatnieId = id;
             OstatniPowod = powod;
+            if (powstal != "wlasne")
+            {
+                OstatniaNazwaCustom = null; // zeszło na dostawę — nasza nazwa nie doszła do gry
+            }
             LicznikRozstrzygniec++;
         }
 
@@ -456,6 +468,9 @@ namespace ZyweFrakcje
                     c.OnContractFailed = onFail;
                     c.OnContractAcquired = onTaken;
                     opis = nazwa;
+                    // Zapamiętujemy nazwę, o którą prosiliśmy — Rozstrzygniete() skasuje ją,
+                    // jeśli AddContract odmówi i zejdziemy na dostawę.
+                    OstatniaNazwaCustom = nazwa;
                     return Added(MyAPIGateway.ContractSystem.AddContract(c), faction, out contractId, out powod);
                 }
 

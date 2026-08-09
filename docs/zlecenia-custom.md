@@ -188,8 +188,20 @@ powstaje na NASZYM bloku kontraktów. **Nikt tego nie potwierdził.** I18 w
 („albo zlecenie jest w terminalu, albo na czacie leci komunikat o odrzuceniu") — to test
 bez asercji.
 
-Do zrobienia: twardy krok w `/zf autotest kontrakty` — zamów `wlasne`, wymagaj kontraktu
-**z naszą nazwą** (np. „Kontrabanda Krwawej Ręki"), a nie cichej dostawy.
+**Kod bramki: GOTOWY (2026-08-09), wynik: NIEZNANY do przebiegu w grze.**
+`/zf autotest kontrakty` ma krok „FUNDAMENT custom", jedyny w tej sekcji TWARDY dla
+zejścia na dostawę. Do 2026-08-09 to samo sprawdzenie było OSTRZEŻENIEM, więc brak
+działającego custom kontraktu przechodził jako łagodna żółta linijka.
+
+Co dowodzi: `OstatniTyp == "wlasne"` znaczy, że `AddContract` przyjął custom kontrakt,
+czyli podtyp `ZF_Zlecenie` ISTNIEJE w danych gry. Gdyby definicji nie było, mod zszedłby
+na dostawę.
+
+Czego NIE dowodzi — i dlatego Etap 0 kończy dopiero przebieg z człowiekiem przy sterach:
+- czy terminal pokazuje NASZ tytuł („Kontrabanda Krwawej Ręki"), czy generyczną nazwę
+  typu. Krok wypisuje na czacie, czego szukać. Jeśli UI ignoruje nasz tytuł, zmienia to
+  projekt: jedna definicja wspólna kontra jedna definicja na rodzaj.
+- czy `TryFinishCustomContract` domyka kontrakt i wypłaca — to ryzyko Etapu 1.
 
 Jeśli padnie: rodzina B jest niemożliwa, `wlasne` idzie do wycięcia jak eskorta, a ten
 dokument zostaje w repo jako zapis „dlaczego nie".

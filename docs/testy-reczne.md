@@ -75,8 +75,12 @@ grą — czy ModAPI naprawdę robi to, co zakładamy. Wynik leci na czat i do `e
 - `/zf autotest kontrakty` — **najważniejsza z nowych**: zamawia po kolei wszystkie sześć
   typów zleceń i porównuje typ ZAMÓWIONY z tym, który NAPRAWDĘ powstał. Mod ma przy
   zleceniach ostatnie słowo i przy braku celu po cichu wystawia dostawę (I15) — dotąd
-  nie było jak zauważyć, że jakiś typ od tygodni degraduje. Sprawdza też, że `Duration`
-  jest w MINUTACH i że zlecenie wisi na bloku frakcji. Zlecenia i rekwizyty kasuje po sobie.
+  nie było jak zauważyć, że jakiś typ od tygodni degraduje.
+  Jeden krok jest TWARDY: „FUNDAMENT custom" sprawdza, czy gra przyjmuje `MyContractCustom`
+  z naszej definicji `ZF_Zlecenie`. Od jego wyniku zależy CAŁA rodzina własnych rodzajów
+  zleceń (`docs/zlecenia-custom.md`), więc zejście na dostawę nie jest tu ostrzeżeniem.
+  Sprawdza też, że `Duration` jest w MINUTACH i że zlecenie wisi na bloku frakcji.
+  Zlecenia i rekwizyty kasuje po sobie.
 - `/zf autotest reputacja` — sekcja M bez klikania w okno frakcji: czy cel z brainu ląduje
   w grze, czy trafia w progi etykiet (±500), czy działa polityka frakcja↔frakcja i — sedno
   hybrydy — czy mod PRZYWRACA swój cel po tym, jak gra ruszy reputację po swojemu (M5).
@@ -472,15 +476,23 @@ Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
   testów pilnujących, żeby nie wrócił. Implementacja siedzi w historii gita.
   `/zf kontrakt HEL eskorta` odpowiada dziś „nieznany typ zlecenia", a wpis `eskorta`
   w `[kontrakty.typy]` wywala config brainu — usunięcie jest pełne i głośne.
-- [x] **I18. Własny typ (eksperymentalny):** `/zf kontrakt KRW wlasne` → albo w terminalu
-  jest zlecenie „Kontrabanda Krwawej Ręki" z polskim opisem, albo na czacie leci
-  `niemożliwe (brak definicji …)` / `gra odrzuciła kontrakt` i dostajemy dostawę.
-  Sprawdź log SE: jeśli narzeka na `ContractTypes.sbc`, kontener/pola definicji trzeba
-  poprawić wg vanilla `Content/Data/ContractTypes.sbc`. Do czasu potwierdzenia można
-  ustawić `wlasne = 0` w `[kontrakty.typy]`.
-  UWAGA: gdy zlecenie POWSTANIE, ale nie da się go wykonać (gra nie wie, kiedy je
-  zamknąć), po `czas_min` wygaśnie jako ZAWALONE i zabierze relację (`-kontrakt_min ×
-  mnożnik`). Dlatego I18 rób na świecie testowym, a nie na tym, w którym się grasz.
+- [ ] **I18. FUNDAMENT rodziny custom** — od tego kroku zależy cały
+  `docs/zlecenia-custom.md`, więc nie jest już „eksperymentalny".
+  Kratka wróciła na pustą: stara wersja tego testu przechodziła W OBIE STRONY („albo
+  zlecenie jest w terminalu, ALBO na czacie leci komunikat o odrzuceniu"), czyli była
+  odhaczona, nie sprawdzając niczego. Test bez asercji.
+  Automat: `/zf autotest kontrakty`, krok „FUNDAMENT custom" — TWARDY. Dowodzi, że
+  `AddContract` przyjął `MyContractCustom`, czyli podtyp `ZF_Zlecenie` istnieje w danych gry.
+  Ręcznie zostaje połowa, której automat nie dosięga: **otwórz terminal zleceń KRW i sprawdź,
+  czy zlecenie nazywa się „Kontrabanda Krwawej Ręki"** z polskim opisem. Jeśli widzisz tam
+  generyczną nazwę typu — definicja się wczytała, ale UI jej nie używa, a to zmienia projekt
+  (jedna definicja wspólna kontra jedna na rodzaj).
+  Gdy krok padnie: sprawdź log SE pod kątem `ZF_Zlecenie`; jeśli narzeka na
+  `ContractTypes.sbc`, kontener/pola definicji trzeba poprawić wg vanilla
+  `Content/Data/ContractTypes.sbc`.
+  UWAGA: zlecenie `wlasne` NIE MA dziś warunku wykonania, więc po `czas_min` wygaśnie jako
+  ZAWALONE i zabierze relację (`-kontrakt_min × mnożnik`). Autotest kasuje swoje zlecenia po
+  sobie, ale ręczne `/zf kontrakt KRW wlasne` rób na świecie testowym.
 - [x] **I19. Mnożnik trudności:** wykonaj `nagroda` (mnożnik 1.6) → w konsoli
   `relacja KRW->gracz +32 za wykonany kontrakt (nagroda, mnożnik 1.6)`, czyli więcej
   niż +20 z dostawy. Kwota nagrody też jest przemnożona.

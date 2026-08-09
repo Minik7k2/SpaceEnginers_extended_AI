@@ -326,6 +326,11 @@ docs/protocol.md                # spec mostka JSONL
   Hak: `ContractManager.OstatniTyp`/`OstatniPowod`/`LicznikRozstrzygniec`.
   **Sekcja `reputacja`** pokrywa hybrydę (M1–M3, M5, M7) — łącznie z tym, czy mod przywraca
   swój cel po tym, jak gra ruszy reputację sama.
+  **Krok „FUNDAMENT custom"** (2026-08-09) jest jedynym w sekcji kontraktów TWARDYM dla
+  zejścia na dostawę: sprawdza, czy gra przyjmuje `MyContractCustom` z naszej definicji
+  `ZF_Zlecenie`. Od tego zależy CAŁA planowana rodzina własnych rodzajów zleceń
+  (`docs/zlecenia-custom.md`), a do tej pory brak działającego custom kontraktu przechodził
+  jako łagodne ostrzeżenie.
   **Sekcja `despawn`** (2026-08-08) spłaca kontrtest zaległy od Etapu 2 — patrz Etap 2 wyżej.
   Jest jedyną sekcją, której sedno jest NEGATYWNE („nic się nie stało"), więc ma kontrolę
   dodatnią: bez niej reguła zwracająca zawsze „nie" przechodziłaby na zielono, a zestrzelenie
