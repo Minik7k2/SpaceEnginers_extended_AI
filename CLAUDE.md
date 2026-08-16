@@ -242,6 +242,25 @@ docs/protocol.md                # spec mostka JSONL
   wylądować kilkaset metrów od siebie. Warunek postawienia jest STANEM ŚWIATA, nie zapisem
   w storage — stąd idempotencja po wczytaniu świata i samodzielna odbudowa po zburzeniu
   (karencja ~5 min). `/zf stacja` zostaje jako rusztowanie testowe, ale nie jest konieczne.
+  **PUŁAPKA — vanillowy prefab to REKWIZYT ENCOUNTERU, nie stacja frakcji (2026-08-16).**
+  Objaw zgłoszony przez gracza: „stacja powstaje zniszczona". Przyczyna nie leży w spawnie,
+  tylko w tym, CO stawiamy. `GE_LogisticsFacility` (HEL) to placówka Factorum z GŁOWICAMI
+  spiętymi z automatyką: na widok gracza nadaje ostrzeżenie i ODPALA SAMOZNISZCZENIE
+  (opis encounteru na oficjalnej wiki — gracz ma zestrzelić głowice przed końcem odliczania).
+  Stacja powstaje CAŁA i rozpada się dopiero przy pierwszym dolocie, czyli dokładnie wtedy,
+  gdy gracz pierwszy raz na nią patrzy — stąd wrażenie, że przychodzi już zniszczona.
+  Prefaby `RE*` to z kolei Random Encounters, czyli PORZUCONE WRAKI: w tym samym prefabie
+  jadą siatki „Debris" i „Dead Engineer", a poszycie jest podziurawione z założenia.
+  Poprawka: po spawnie (i raz po wczytaniu świata, bo stare zapisy mają stację uzbrojoną)
+  `StationSpawner.Rozbroj` usuwa głowice z CAŁEGO kompleksu i wyłącza automatykę
+  (`EventControllerBlock`/`TimerBlock`/`BroadcastController`), a `ObsluzRemont` dospawuje
+  uszkodzone bloki porcjami po 200 na tik (3 tys. bloków w jednym tiku widać jako zwis).
+  GRANICA: welder naprawia blok, który ISTNIEJE — dziur po blokach, których w prefabie nie
+  ma, nie wypełni nic. Dlatego wartością jest rozbrojenie, a remont tylko sprząta po nim.
+  Zakres rozbrojenia i remontu jest zawężony do siatek STATYCZNYCH tej frakcji w promieniu
+  1,5 km (`KompleksWokol`) — bez tego mod naprawiałby za darmo bazę gracza obok i leczył
+  świeżo ostrzelane rajdery. Strażnicy: `/zf autotest stacje` liczy głowice (twardo, ma być
+  0) i procent uszkodzonych bloków (miękko) przez `StationSpawner.StanStacji`.
   **PUŁAPKA — `result[0]` ze `SpawnPrefab` to nie stacja (2026-08-04).** Prefaby encounterów
   wożą po kilka siatek i pierwsza bywa dekoracją: `RE19_PirateDepot[0]` to „Debris" (18 bloków,
   stacja jest pod `[2]`, 425 bloków), `RE05_StagingStation[0]` to „Dead Engineer" (1 blok,
@@ -290,6 +309,21 @@ docs/protocol.md                # spec mostka JSONL
   a nie MES — profile MES ich nie obejmują. Programowa daje przy okazji imiona botów
   i uchwyty `entityId` pod rozkazy z brainu (Etap C/D: postacie w SQLite, radio od osoby,
   pamięć imienna). Boty NIE chodzą po małych siatkach — stąd załogi tylko na dużych.
+  **PUŁAPKA — węzeł spawnu to domyślnie TAKŻE POSZYCIE ZEWNĘTRZNE (2026-08-16).** Objaw:
+  „boty latają po prostu w przestrzeni". `GetAvailableGridNodes` z `onlyAirtightNodes=false`
+  (domyślne) zwraca również kratki przy zewnętrznej ścianie, a w kompleksie stacji pierwsza
+  pod ręką bywa 57-blokowa ładownia, która wnętrza nie ma wcale — `/zf zaloga` meldował wtedy
+  „2 wolne węzły" i bot powstawał na burcie, w zerowej grawitacji, skąd odpływał. Drugą
+  połową był SPOSÓB stawiania: dawaliśmy `Vector3.Forward/Up`, czyli osie ŚWIATA, choć API
+  mówi wprost przy `GetGridMapMatrix` — „HINT: Use this as the orientation for bots spawned
+  on this grid!" — więc bot stawał przekręcony względem pokładu. Teraz `Crew.SprobujKompleks`
+  robi DWA przebiegi po siatkach kompleksu (posortowanych OD NAJWIĘKSZEJ): najpierw pyta
+  o węzły HERMETYCZNE, a na poszycie schodzi dopiero, gdy żadna siatka wnętrza nie ma —
+  i mówi o tym na czacie, bo taki bot faktycznie może odpłynąć. Orientacja idzie z macierzy
+  mapy siatki. Gdyby ostrzeżenie o poszyciu padało regularnie (wraki bywają nieszczelne,
+  a hala z rusztowań nie trzyma ciśnienia), następnym krokiem jest `GetInteriorNodes`
+  (`enclosureRating`, nie ciśnienie) — asynchroniczne, więc wymaga przejęcia wyniku
+  w tiku głównym.
   DO WERYFIKACJI: wartości `[BotType]`/`[BotBehavior]` wzięte z opisu na Workshopie,
   nie z plików moda (nie było go na dysku); wiki MES ostrzega, że `BotType` to pole
   `Name` z SBC, a nie SubtypeId.

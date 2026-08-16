@@ -402,6 +402,25 @@ Teraz własność nadajemy PO dołożeniu bloków, w obu ścieżkach.
 - [ ] **I1d. Odbudowa po zniszczeniu:** zburz stację frakcji → po ~5 min karencji frakcja
   stawia nową. Sprawdź, że w międzyczasie czat NIE spamuje komunikatem co 30 s.
 
+**PUŁAPKA — stacja wysadza się sama (znalezione 2026-08-16 ze zgłoszenia gracza).**
+Objaw: „stacja powstaje zniszczona". Powstaje CAŁA — rozpada się dopiero przy pierwszym
+dolocie, czyli wtedy, gdy gracz pierwszy raz ją widzi, więc wygląda to na uszkodzenie
+przy spawnie. `GE_LogisticsFacility` (HEL) to placówka Factorum z GŁOWICAMI spiętymi
+z automatyką: encounter z założenia grozi samozniszczeniem i detonuje, gdy gracz podleci.
+Prefaby `RE*` (KRW, WGR) to Random Encounters, czyli porzucone wraki — dziury i pogięte
+poszycie są w nich CELOWE (w tym samym prefabie jadą „Debris" i „Dead Engineer").
+Poprawka: `StationSpawner` po spawnie rozbraja kompleks (kasuje głowice, wyłącza
+kontrolery zdarzeń, timery i nadajniki) i dospawuje uszkodzone bloki porcjami. Stare
+zapisy dostają ten sam przelot raz po wczytaniu świata. Czego to NIE naprawi: dziur po
+blokach, których w prefabie nie ma — welder naprawia tylko blok, który istnieje.
+
+- [ ] **I1e. Stacja nie wybucha:** dolec do stacji HEL i postój przy niej minutę →
+  ŻADNEJ detonacji, żadnego odliczania na czacie. Automat: `/zf autotest stacje`
+  (krok „rozbrojona (zero głowic z encounteru)" — twardy).
+- [ ] **I1f. Kadłub po remoncie:** obejrzyj stację z bliska → poszycie nie jest pogięte
+  i nie prześwituje. Automat: ten sam przebieg, krok „kadłub wyremontowany" (miękki,
+  bo dziury po nieistniejących blokach zostają dziurami — to nie jest błąd remontu).
+
 - [x] **I2. Wymuszone zlecenie:** `/zf kontrakt WGR` → konsola braina
   `contract_create [WGR] dostawa za N kr`, a na czacie `[ZF] Nowe zlecenie WGR: …`.
   Jeśli zamiast tego „pominięty: frakcja nie ma bloku…" — patrz I1.
@@ -808,8 +827,25 @@ załogi to **BŁĄD**. Wcześniej było to zawsze ostrzeżenie i przebieg z 2026
 zameldował „bez AiEnabled to normalne" na świecie, w którym AiEnabled v1.9 było aktywne —
 czyli cztery prawdziwe porażki przebrane za łagodne żółte linijki.
 
+**PUŁAPKA — bot na burcie zamiast we wnętrzu (znalezione 2026-08-16 ze zgłoszenia gracza).**
+Objaw: „załoga nie respi się na siatce stacji, boty latają po prostu w przestrzeni".
+Dwa niezależne błędy naraz. (1) `GetAvailableGridNodes` domyślnie (`onlyAirtightNodes=false`)
+zwraca TAKŻE kratki przy zewnętrznej ścianie, a `Crew.cs` brał pierwszą siatkę kompleksu
+z brzegu — w kompleksie Helionu bywa nią 57-blokowa ładownia, która wnętrza nie ma wcale
+(`/zf zaloga` meldował wtedy „2 wolne węzły"). Bot powstawał na poszyciu, w zerowej
+grawitacji, i odpływał. (2) Orientację braliśmy ze ŚWIATA (`Vector3.Forward/Up`), choć API
+mówi wprost przy `GetGridMapMatrix`: „HINT: Use this as the orientation for bots spawned on
+this grid!" — więc bot stawał przekręcony względem pokładu. Teraz: dwa przebiegi po siatkach
+kompleksu od największej, najpierw węzły HERMETYCZNE, poszycie dopiero jako ostateczność
+(z ostrzeżeniem na czacie), orientacja z macierzy mapy siatki.
+
+- [ ] **P0. Węzły są ze środka:** przy stacji `/zf zaloga` → linia `GetAvailableGridNodes`
+  ma powiedzieć **HERMETYCZNYCH**, a `GetGridMapMatrix` — że orientacja jest znana.
+  Gdy pada wariant „tylko NIEHERMETYCZNYCH", bot stanie na burcie i odpłynie: to jest
+  moment na `GetInteriorNodes` (`enclosureRating`), a nie na kolejne poprawki spawnu.
 - [ ] **P1. Załoga na stacji:** dolec bliżej niż 3 km do stacji frakcji → po ~1 min po
-  pokładzie chodzą postacie NPC. Automat: `/zf autotest boty` (OSTRZEŻENIE bez AiEnabled).
+  pokładzie chodzą postacie NPC **wewnątrz kadłuba**. Automat: `/zf autotest boty`
+  (OSTRZEŻENIE bez AiEnabled).
 - [ ] **P2. Załoga na statku rajdowym:** `/zf raid KRW` w kosmosie, podleć bliżej niż
   1,5 km (trigger `PlayerNear`) → na pokładzie pojawia się załoga. Boty NIE chodzą po
   małych siatkach, więc to działa tylko dla dużych kadłubów rajdowych.

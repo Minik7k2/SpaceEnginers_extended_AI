@@ -83,6 +83,12 @@ namespace ZyweFrakcje
         private readonly List<Zamowienie> _doZatowarowania = new List<Zamowienie>();
         private int _tick;
 
+        // Stacje, którym już rozbroiliśmy pułapkę i zleciliśmy remont (patrz sekcja niżej).
+        // Klucz to EntityId siatki, więc rzecz jest odporna na powtórne wejście w tę samą
+        // stację i na wczytanie świata (zbiór jest pusty, więc po reloadzie przelatujemy raz).
+        private readonly HashSet<long> _zabezpieczone = new HashSet<long>();
+        private bool _wszystkoZabezpieczone;
+
         // Rytm rozruchu: dopóki któraś frakcja nie ma stacji, budzimy się co ~2 s.
         private const int RozruchTicks = 120;
 
@@ -117,6 +123,7 @@ namespace ZyweFrakcje
         {
             _tick = tick;
             ZatowarujOczekujace(tick);
+            ObsluzRemont();
 
             if (_spawning)
             {
@@ -142,6 +149,13 @@ namespace ZyweFrakcje
             if (tick % co != 0)
             {
                 return;
+            }
+            if (!_wszystkoZabezpieczone)
+            {
+                // Stacje z wczytanego zapisu (sprzed tej poprawki) też mają zostać rozbrojone
+                // i wyremontowane. Po jednym przelocie na siatkę zbiór _zabezpieczone gasi
+                // ten kod do końca sesji.
+                ZabezpieczIstniejace();
             }
             IMyPlayer player = MyAPIGateway.Session.Player;
             if (player == null || player.Character == null)
@@ -248,6 +262,12 @@ namespace ZyweFrakcje
             long owner = OwnerDla(tag);
             string czego = DodajBlokiEkonomiczne(stacja, owner, tag);
             PrzypiszFrakcji(stacja, owner);
+            if (_zabezpieczone.Add(stacja.EntityId))
+            {
+                List<IMyCubeGrid> kompleks = KompleksWokol(stacja, owner);
+                czego += Rozbroj(kompleks);
+                ZakolejkujRemont(kompleks, owner, tag);
+            }
 
             bool widoczna = FactionEconomy.FindContractBlock(tag) != null;
             MyAPIGateway.Utilities.ShowMessage("ZF",
@@ -278,6 +298,366 @@ namespace ZyweFrakcje
                 return;
             }
             grid.ChangeGridOwnership(owner, MyOwnershipShareModeEnum.Faction);
+        }
+
+        // ============ STACJA MA NIE WYBUCHAĆ I NIE STAĆ W GRUZACH (2026-08-16) ============
+        //
+        // Objaw zgłoszony przez gracza: „stacja powstaje zniszczona". Przyczyna nie leży
+        // po stronie spawnu — leży w tym, CO stawiamy. Vanillowe prefaby, po które sięgamy,
+        // nie są „stacjami frakcji", tylko REKWIZYTAMI ENCOUNTERÓW, a te są zaprojektowane
+        // jako pułapka albo jako wrak:
+        //
+        //   • `GE_LogisticsFacility` (HEL) to placówka Factorum, która na widok gracza NADAJE
+        //     ostrzeżenie i ODPALA SAMOZNISZCZENIE — na pokładzie stoją głowice bojowe spięte
+        //     z automatyką. Stacja powstaje CAŁA i rozpada się dopiero wtedy, gdy gracz do niej
+        //     doleci, czyli dokładnie wtedy, gdy pierwszy raz na nią patrzy. Stąd wrażenie, że
+        //     „powstaje zniszczona": nikt nie widział jej całej, bo widok z bliska jest już po
+        //     detonacji. (Opis encounteru na oficjalnej wiki: Broadcast Controller grozi
+        //     samozniszczeniem, gracz ma zestrzelić głowice przed końcem odliczania.)
+        //   • Prefaby `RE*` to Random Encounters, czyli PORZUCONE WRAKI. W tym samym prefabie
+        //     jadą siatki „Debris" i „Dead Engineer" (mamy to spisane w GlownaSiatka niżej),
+        //     a poszycie jest podziurawione i pogięte Z ZAŁOŻENIA — tak wygląda rekwizyt
+        //     opowiadający o katastrofie sprzed lat.
+        //
+        // Frakcja, która w tej stacji MIESZKA, nie trzymałaby pod podłogą uzbrojonych głowic
+        // ani nie zostawiła dziur w kadłubie. Po spawnie robimy więc dwie rzeczy: rozbrajamy
+        // pułapkę (zanim gracz w ogóle wystartuje w tamtą stronę — stacja stoi 8-15 km od
+        // niego, więc mamy zapas) i przeprowadzamy remont.
+        //
+        // GRANICA REMONTU: dospawać da się tylko blok, który JESZCZE ISTNIEJE. Dziur po
+        // blokach, których w prefabie nie ma albo które wyleciały w powietrze, żaden welder
+        // nie wypełni — od tego jest rozbrojenie, czyli niedopuszczenie do wybuchu.
+
+        // Automatyka, która w encounterze służy wyłącznie do odpalenia pułapki. Porównujemy
+        // podciąg TypeIdString, tak samo jak FactionEconomy.HasBlockOfType — dzięki temu nie
+        // musimy odwoływać się do interfejsów, których starsze wersje gry mogą nie mieć.
+        private static readonly string[] TypyPulapki =
+        {
+            "EventControllerBlock", // wykrywa zbliżenie gracza i odpala łańcuch
+            "TimerBlock",           // odlicza do detonacji
+            "BroadcastController",  // nadaje „stacja się wysadzi"
+        };
+
+        /// <summary>
+        /// Usuwa głowice i wyłącza automatykę samozniszczenia na CAŁYM kompleksie stacji.
+        /// Zwraca dopisek dla gracza albo pusty string, gdy nie było czego rozbrajać —
+        /// milczenie w tym miejscu byłoby mylące, bo to jest zmiana w cudzym prefabie.
+        /// </summary>
+        private static string Rozbroj(List<IMyCubeGrid> kompleks)
+        {
+            int glowice = 0;
+            int automatyka = 0;
+            var bloki = new List<IMySlimBlock>();
+            var doUsuniecia = new List<IMySlimBlock>();
+
+            for (int g = 0; g < kompleks.Count; g++)
+            {
+                IMyCubeGrid grid = kompleks[g];
+                if (grid == null || grid.MarkedForClose)
+                {
+                    continue;
+                }
+                bloki.Clear();
+                doUsuniecia.Clear();
+                grid.GetBlocks(bloki);
+
+                for (int i = 0; i < bloki.Count; i++)
+                {
+                    IMyCubeBlock fat = bloki[i].FatBlock;
+                    if (fat == null)
+                    {
+                        continue;
+                    }
+                    var glowica = fat as IMyWarhead;
+                    if (glowica != null)
+                    {
+                        // Najpierw zatrzymujemy odliczanie, dopiero potem usuwamy blok:
+                        // kolejność jest darmowa, a wariant „kasujemy odliczającą głowicę"
+                        // jest dokładnie tym, czego nie chcemy testować na żywym świecie.
+                        glowica.StopCountdown();
+                        doUsuniecia.Add(bloki[i]);
+                        glowice++;
+                        continue;
+                    }
+                    string typ = fat.BlockDefinition.TypeIdString;
+                    if (typ == null || !CzyPulapka(typ))
+                    {
+                        continue;
+                    }
+                    var timer = fat as IMyTimerBlock;
+                    if (timer != null)
+                    {
+                        timer.StopCountdown();
+                    }
+                    var funkcyjny = fat as IMyFunctionalBlock;
+                    if (funkcyjny != null && funkcyjny.Enabled)
+                    {
+                        funkcyjny.Enabled = false;
+                        automatyka++;
+                    }
+                }
+
+                // Usuwamy PO przejściu listy — modyfikowanie siatki w trakcie iteracji po
+                // jej własnych blokach to proszenie się o niespójność.
+                for (int i = 0; i < doUsuniecia.Count; i++)
+                {
+                    grid.RemoveBlock(doUsuniecia[i]);
+                }
+            }
+
+            if (glowice == 0 && automatyka == 0)
+            {
+                return "";
+            }
+            return " Rozbrojono pułapkę encounteru: głowic " + glowice +
+                   ", wyłączonej automatyki " + automatyka + ".";
+        }
+
+        private static bool CzyPulapka(string typeId)
+        {
+            for (int i = 0; i < TypyPulapki.Length; i++)
+            {
+                if (typeId.IndexOf(TypyPulapki[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Remont idzie PORCJAMI. Kompleks Helionu to ~3 tys. bloków, a przespawanie ich
+        // w jednym tiku widać jako zacięcie obrazu — dokładnie tak samo jak zatowarowanie
+        // sklepu, które z tego powodu jest odroczone.
+        private const int BlokowNaTik = 200;
+
+        private struct RemontZlecenie
+        {
+            public long GridId;
+            public long Owner;
+            public string Tag;
+        }
+
+        private readonly List<RemontZlecenie> _doRemontu = new List<RemontZlecenie>();
+        private List<IMySlimBlock> _remontBloki;
+        private RemontZlecenie _remontBiezacy;
+        private int _remontIndex;
+        private int _remontNaprawionych;
+
+        private void ZakolejkujRemont(List<IMyCubeGrid> kompleks, long owner, string tag)
+        {
+            for (int i = 0; i < kompleks.Count; i++)
+            {
+                IMyCubeGrid grid = kompleks[i];
+                if (grid == null || grid.MarkedForClose)
+                {
+                    continue;
+                }
+                _doRemontu.Add(new RemontZlecenie
+                {
+                    GridId = grid.EntityId,
+                    Owner = owner,
+                    Tag = tag,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Dospawuje uszkodzone bloki stacji porcjami po <see cref="BlokowNaTik"/>.
+        /// Wołane co tik z <see cref="Update"/>; gdy kolejka jest pusta, kosztuje jedno
+        /// porównanie.
+        /// </summary>
+        private void ObsluzRemont()
+        {
+            if (_remontBloki == null)
+            {
+                if (_doRemontu.Count == 0)
+                {
+                    return;
+                }
+                _remontBiezacy = _doRemontu[0];
+                _doRemontu.RemoveAt(0);
+                var grid = MyAPIGateway.Entities.GetEntityById(_remontBiezacy.GridId) as IMyCubeGrid;
+                if (grid == null || grid.MarkedForClose)
+                {
+                    return; // siatki już nie ma — następna przy kolejnym tiku
+                }
+                _remontBloki = new List<IMySlimBlock>();
+                grid.GetBlocks(_remontBloki);
+                _remontIndex = 0;
+            }
+
+            int koniec = Math.Min(_remontIndex + BlokowNaTik, _remontBloki.Count);
+            for (; _remontIndex < koniec; _remontIndex++)
+            {
+                IMySlimBlock blok = _remontBloki[_remontIndex];
+                if (blok == null || blok.IsDestroyed)
+                {
+                    continue;
+                }
+                if (blok.IsFullIntegrity && !blok.HasDeformation)
+                {
+                    continue;
+                }
+                // Wartość z góry duża: gra i tak przycina do pełnej wytrzymałości bloku,
+                // a my nie musimy znać jego definicji (ten sam chwyt co przy baterii).
+                blok.IncreaseMountLevel(blok.MaxIntegrity, _remontBiezacy.Owner);
+                _remontNaprawionych++;
+            }
+
+            if (_remontIndex < _remontBloki.Count)
+            {
+                return;
+            }
+            _remontBloki = null;
+            if (_doRemontu.Count == 0 && _remontNaprawionych > 0)
+            {
+                MyAPIGateway.Utilities.ShowMessage("ZF",
+                    "Remont stacji " + _remontBiezacy.Tag + ": dospawano " + _remontNaprawionych +
+                    " uszkodzonych bloków (vanillowy prefab encounteru przychodzi jako wrak). " +
+                    "Dziur po blokach, których w prefabie nie ma, nie da się wypełnić.");
+                _remontNaprawionych = 0;
+            }
+        }
+
+        /// <summary>
+        /// Kompleks stacji: sama siatka plus STATYCZNE siatki tej samej frakcji w pobliżu
+        /// (vanillowa stacja to zwykle kilkanaście osobnych siatek — kadłub, cumy, kontenery,
+        /// przekaźnik, i to na nich potrafią stać głowice).
+        ///
+        /// Warunek własności i statyczności jest tu KONIECZNY, nie kosmetyczny: bez niego
+        /// remont naprawiałby za darmo bazę gracza stojącą obok, a rozbrojenie kasowałoby mu
+        /// głowice. Statyczność odsiewa przy okazji statki rajdowe frakcji — świeżo ostrzelany
+        /// rajder ma zostać ostrzelany, a nie wyremontowany.
+        /// </summary>
+        private static List<IMyCubeGrid> KompleksWokol(IMyCubeGrid stacja, long owner)
+        {
+            var lista = new List<IMyCubeGrid>();
+            if (stacja == null)
+            {
+                return lista;
+            }
+            lista.Add(stacja);
+            if (owner == 0)
+            {
+                return lista;
+            }
+
+            Vector3D srodek = stacja.GetPosition();
+            var entities = new HashSet<IMyEntity>();
+            MyAPIGateway.Entities.GetEntities(entities, e => e is IMyCubeGrid);
+            foreach (IMyEntity entity in entities)
+            {
+                var grid = entity as IMyCubeGrid;
+                if (grid == null || grid.MarkedForClose || grid.EntityId == stacja.EntityId ||
+                    !grid.IsStatic)
+                {
+                    continue;
+                }
+                if (Vector3D.DistanceSquared(srodek, grid.GetPosition()) >
+                    PromienKompleksu * PromienKompleksu)
+                {
+                    continue;
+                }
+                List<long> wlasciciele = grid.BigOwners;
+                if (wlasciciele == null || !wlasciciele.Contains(owner))
+                {
+                    continue;
+                }
+                lista.Add(grid);
+            }
+            return lista;
+        }
+
+        // Największy kompleks (Helion) rozciąga się na kilkaset metrów — z zapasem.
+        private const double PromienKompleksu = 1500;
+
+        /// <summary>
+        /// Rozbraja i remontuje stacje, które JUŻ stoją w świecie (wczytany zapis sprzed tej
+        /// poprawki). Bez tego kroku poprawka działałaby wyłącznie dla nowych światów, a
+        /// gracz z uzbrojoną stacją Factorum w zapisie zostałby z nią na zawsze.
+        /// Przelot jest jednorazowy per siatka (<see cref="_zabezpieczone"/>).
+        /// </summary>
+        private void ZabezpieczIstniejace()
+        {
+            bool zostaloCos = false;
+            for (int i = 0; i < Tags.Length; i++)
+            {
+                string tag = Tags[i];
+                if (MyAPIGateway.Session.Factions.TryGetFactionByTag(tag) == null)
+                {
+                    continue;
+                }
+                IMyCubeGrid stacja = ZnajdzStacjeFrakcji(tag);
+                if (stacja == null)
+                {
+                    zostaloCos = true; // stacja dopiero powstanie — wrócimy tu po niej
+                    continue;
+                }
+                if (_zabezpieczone.Contains(stacja.EntityId))
+                {
+                    continue;
+                }
+                long owner = OwnerDla(tag);
+                if (owner == 0)
+                {
+                    // Tożsamość frakcji potrafi nie istnieć przez pierwsze sekundy po wczytaniu
+                    // świata. Bez niej KompleksWokol nie rozpozna reszty kompleksu, więc NIE
+                    // odhaczamy stacji — wrócimy tu przy następnym przebiegu.
+                    zostaloCos = true;
+                    continue;
+                }
+                _zabezpieczone.Add(stacja.EntityId);
+
+                List<IMyCubeGrid> kompleks = KompleksWokol(stacja, owner);
+                string rozbrojenie = Rozbroj(kompleks);
+                ZakolejkujRemont(kompleks, owner, tag);
+                if (rozbrojenie.Length > 0)
+                {
+                    MyAPIGateway.Utilities.ShowMessage("ZF", "Stacja " + tag + " —" + rozbrojenie);
+                }
+            }
+            _wszystkoZabezpieczone = !zostaloCos;
+        }
+
+        /// <summary>
+        /// Stan kompleksu stacji frakcji dla autotestu: ile stoi na nim GŁOWIC (po rozbrojeniu
+        /// ma być zero) i ile bloków jest uszkodzonych. false = frakcja nie ma stacji, więc
+        /// nie ma o czym mówić.
+        ///
+        /// Po co osobne wejście: bez policzenia głowic „rozbroiliśmy stację" znaczyłoby tylko
+        /// tyle, że kod się wykonał. Pytamy o STAN ŚWIATA, tak samo jak reszta strażników
+        /// w tym module.
+        /// </summary>
+        public static bool StanStacji(string tag, out int glowice, out int uszkodzone, out int wszystkie)
+        {
+            glowice = 0;
+            uszkodzone = 0;
+            wszystkie = 0;
+            IMyCubeGrid stacja = ZnajdzStacjeFrakcji(tag);
+            if (stacja == null)
+            {
+                return false;
+            }
+            List<IMyCubeGrid> kompleks = KompleksWokol(stacja, OwnerDla(tag));
+            var bloki = new List<IMySlimBlock>();
+            for (int g = 0; g < kompleks.Count; g++)
+            {
+                bloki.Clear();
+                kompleks[g].GetBlocks(bloki);
+                for (int i = 0; i < bloki.Count; i++)
+                {
+                    wszystkie++;
+                    if (!bloki[i].IsFullIntegrity || bloki[i].HasDeformation)
+                    {
+                        uszkodzone++;
+                    }
+                    if (bloki[i].FatBlock is IMyWarhead)
+                    {
+                        glowice++;
+                    }
+                }
+            }
+            return true;
         }
 
         /// <summary>
@@ -396,9 +776,17 @@ namespace ZyweFrakcje
                         // DRUGI raz, już PO dołożeniu bloków — patrz PrzypiszFrakcji.
                         PrzypiszFrakcji(grid, owner);
 
+                        // ROZBROJENIE MUSI IŚĆ NA CAŁY `result`, nie na samą główną siatkę:
+                        // głowice pułapki stoją w encounterze także na siatkach pobocznych,
+                        // a wtedy wybuch zabiera ze sobą kadłub stojący 20 m dalej.
+                        _zabezpieczone.Add(grid.EntityId);
+                        string rozbrojenie = Rozbroj(result);
+                        ZakolejkujRemont(result, owner, tag);
+
                         double km = Vector3D.Distance(playerPos, pos) / 1000.0;
                         MyAPIGateway.Utilities.ShowMessage("ZF",
-                            tag + " postawiła stację " + km.ToString("0.0") + " km stąd" + czego);
+                            tag + " postawiła stację " + km.ToString("0.0") + " km stąd" + czego +
+                            rozbrojenie);
                     }
                     catch (Exception e)
                     {
