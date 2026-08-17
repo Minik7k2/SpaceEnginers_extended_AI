@@ -622,6 +622,59 @@ namespace ZyweFrakcje
                     },
                 });
 
+                // I1e. Stacja nie może się wysadzić graczowi w twarz (2026-08-16).
+                // Vanillowe prefaby, po które sięga StationSpawner, to rekwizyty encounterów:
+                // `GE_LogisticsFacility` wozi GŁOWICE spięte z automatyką, która odpala
+                // samozniszczenie na widok gracza. Objaw był mylący — „stacja powstaje
+                // zniszczona" — bo detonacja zachodzi dopiero przy pierwszym dolocie, czyli
+                // wtedy, gdy gracz po raz pierwszy ją widzi. Liczymy STAN ŚWIATA, nie fakt
+                // wykonania kodu: po rozbrojeniu na kompleksie ma nie zostać ANI JEDNA głowica.
+                kroki.Add(new Krok
+                {
+                    Nazwa = "stacja " + tag + ": rozbrojona (zero głowic z encounteru)",
+                    Poll = true,
+                    CzekajTikow = 150 * Sekunda,
+                    Sprawdz = () =>
+                    {
+                        int glowice, uszkodzone, wszystkie;
+                        if (!StationSpawner.StanStacji(tag, out glowice, out uszkodzone, out wszystkie))
+                        {
+                            return "nie ma stacji " + tag + " (czekaj na StationSpawner)";
+                        }
+                        return glowice == 0
+                            ? ""
+                            : "na kompleksie stoi " + glowice + " głowic — StationSpawner ich nie " +
+                              "usunął, stacja wysadzi się przy pierwszym dolocie gracza";
+                    },
+                });
+
+                // I1f. Miękki, bo REMONT MA GRANICĘ: dospawać da się blok, który istnieje,
+                // a dziury po blokach, których w prefabie nie ma, zostaną dziurami. Ostrzeżenie
+                // ma powiedzieć, ILE kadłuba jest w gruzach — bez tego „stacja wygląda na
+                // zniszczoną" pozostaje wrażeniem, którego nie da się z niczym porównać.
+                kroki.Add(new Krok
+                {
+                    Nazwa = "stacja " + tag + ": kadłub wyremontowany",
+                    Miekki = true,
+                    Poll = true,
+                    CzekajTikow = 150 * Sekunda,
+                    Sprawdz = () =>
+                    {
+                        int glowice, uszkodzone, wszystkie;
+                        if (!StationSpawner.StanStacji(tag, out glowice, out uszkodzone, out wszystkie))
+                        {
+                            return "nie ma stacji " + tag + " (czekaj na StationSpawner)";
+                        }
+                        if (wszystkie == 0 || uszkodzone * 100 <= wszystkie)
+                        {
+                            return ""; // poniżej 1% — to już nie jest wrak, tylko patyna
+                        }
+                        return uszkodzone + " z " + wszystkie + " bloków wciąż uszkodzonych (" +
+                               (uszkodzone * 100 / wszystkie) + "%) — remont jeszcze trwa albo " +
+                               "prefab ma dziury nie do zaspawania";
+                    },
+                });
+
                 // I1b. Pełny test („zapisz i wczytaj świat") wymaga reloadu, ale objaw, którego
                 // szukamy, jest widoczny od razu: druga stacja tej samej frakcji w świecie.
                 // Miękki, bo `/zf stacja` (rusztowanie testowe) legalnie robi drugą siatkę.

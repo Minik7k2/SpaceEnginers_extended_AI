@@ -215,12 +215,36 @@ namespace ZyweFrakcje
                 return;
             }
 
+            MatrixD mapa;
+            Vector3D gora = Vector3D.Up;
+            Vector3D przod = Vector3D.Forward;
+            bool mamMacierz = _api.GetGridMapMatrix(duza, true, out mapa);
+            if (mamMacierz)
+            {
+                gora = mapa.Up;
+                przod = mapa.Forward;
+            }
+            Powiedz("GetGridMapMatrix: " + (mamMacierz
+                ? "mam orientację mapy (bot stanie zgodnie z pokładem)"
+                : "BRAK — bot pójdzie z orientacją świata, może stanąć bokiem do podłogi"));
+
+            // Pytamy dokładnie tak, jak pyta kod produkcyjny: najpierw wnętrze, potem poszycie.
             var wezly = new List<Vector3D>();
-            _api.GetAvailableGridNodes(duza, CrewPerStation, wezly, null, false);
-            Powiedz("GetAvailableGridNodes: " + wezly.Count + " wolnych węzłów");
+            _api.GetAvailableGridNodes(duza, CrewPerStation, wezly, gora, true);
+            bool wnetrze = wezly.Count > 0;
+            if (!wnetrze)
+            {
+                _api.GetAvailableGridNodes(duza, CrewPerStation, wezly, gora, false);
+            }
+            Powiedz("GetAvailableGridNodes: " + wezly.Count + " wolnych węzłów, " +
+                    (wnetrze
+                        ? "HERMETYCZNYCH (wnętrze — bot ma po czym chodzić)"
+                        : "tylko NIEHERMETYCZNYCH (poszycie zewnętrzne — w zerowej grawitacji " +
+                          "bot z niego odpłynie; to jest przyczyna „botów latających w kosmosie”)"));
             if (wezly.Count == 0)
             {
-                Powiedz("STOP: nie ma gdzie postawić bota (brak wnętrza / węzłów).");
+                Powiedz("STOP: nie ma gdzie postawić bota (brak wnętrza / węzłów). " +
+                        "Spróbuj innej siatki kompleksu — kod produkcyjny robi to sam.");
                 return;
             }
 
@@ -241,7 +265,7 @@ namespace ZyweFrakcje
             // odróżnić „bot powstał, tylko go nie widzisz" od „AiEnabled zwrócił nic".
             Powiedz("wysyłam zlecenie… (odpowiedź przyjdzie asynchronicznie)");
             _api.SpawnBotQueued(BotType[index], "ZF Test",
-                                new MyPositionAndOrientation(wezly[0], Vector3.Forward, Vector3.Up),
+                                new MyPositionAndOrientation(wezly[0], (Vector3)przod, (Vector3)gora),
                                 duza, Role[index], wlasciciel, null,
                                 postac =>
                                 {
@@ -337,8 +361,59 @@ namespace ZyweFrakcje
         /// <summary>
         /// Próbuje obsadzić kolejno siatki kompleksu stacji tej frakcji. true = któraś siatka
         /// dostała próbę w tym przebiegu (i nie ma co robić nic więcej).
+        ///
+        /// DWA PRZEBIEGI, NIE JEDEN (2026-08-16). Wcześniej braliśmy pierwszą siatkę z brzegu
+        /// i stawialiśmy bota na PIERWSZYM wolnym węźle, jaki dała AiEnabled — a te węzły
+        /// domyślnie obejmują też poszycie ZEWNĘTRZNE. W kompleksie Helionu pierwsza pod ręką
+        /// bywa 57-blokowa ładownia, która wnętrza nie ma wcale: `/zf zaloga` meldował wtedy
+        /// „2 wolne węzły", bot powstawał na zewnętrznej ścianie w zerowej grawitacji i odpływał
+        /// w przestrzeń. Stąd „boty latają po prostu w kosmosie".
+        /// Dlatego najpierw pytamy WSZYSTKIE siatki kompleksu o węzły HERMETYCZNE (wnętrze),
+        /// a dopiero gdy żadna takich nie ma, schodzimy na poszycie — i mówimy o tym głośno,
+        /// bo taki bot faktycznie może odpłynąć.
         /// </summary>
         private bool SprobujKompleks(int index, EconomyBlock stacja, int tick, Vector3D pozycjaGracza)
+        {
+            List<IMyCubeGrid> kolejka = Kompleks(index, stacja, pozycjaGracza);
+
+            for (int przebieg = 0; przebieg < 2; przebieg++)
+            {
+                bool naZewnatrz = przebieg == 1;
+                for (int k = 0; k < kolejka.Count; k++)
+                {
+                    IMyCubeGrid grid = kolejka[k];
+                    int next;
+                    if (_nextTry.TryGetValue(grid.EntityId, out next) && tick < next)
+                    {
+                        continue;
+                    }
+                    Wynik wynik = Uzupelnij(index, new EconomyBlock
+                    {
+                        GridId = grid.EntityId,
+                        Position = grid.GetPosition(),
+                        GridName = grid.DisplayName,
+                    }, tick, naZewnatrz);
+                    if (wynik != Wynik.BrakMiejsca)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // Żadna siatka kompleksu nie dała ani wnętrza, ani poszycia — karencja na wszystkie,
+            // żeby nie przemielać kompleksu co 15 s.
+            for (int k = 0; k < kolejka.Count; k++)
+            {
+                _nextTry[kolejka[k].EntityId] = tick + RetryTicks;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Siatki kompleksu stacji w zasięgu gracza, OD NAJWIĘKSZEJ. Kolejność ma znaczenie:
+        /// wnętrze, po którym bot ma chodzić, jest na głównym kadłubie, a nie na kontenerze.
+        /// </summary>
+        private static List<IMyCubeGrid> Kompleks(int index, EconomyBlock stacja, Vector3D pozycjaGracza)
         {
             var kolejka = new List<IMyCubeGrid>();
             var glowna = MyAPIGateway.Entities.GetEntityById(stacja.GridId) as IMyCubeGrid;
@@ -363,24 +438,36 @@ namespace ZyweFrakcje
                 kolejka.Add(grid);
             }
 
-            for (int k = 0; k < kolejka.Count; k++)
+            // Sortowanie ręczne, przez wybór: siatek kompleksu jest kilkanaście, a liczenie
+            // bloków (3 tys. u Helionu) w komparatorze wołanym O(n log n) razy byłoby drogie
+            // przy zerowym zysku. Liczymy raz na siatkę.
+            var rozmiary = new List<int>(kolejka.Count);
+            for (int i = 0; i < kolejka.Count; i++)
             {
-                IMyCubeGrid grid = kolejka[k];
-                int next;
-                if (_nextTry.TryGetValue(grid.EntityId, out next) && tick < next)
+                rozmiary.Add(LiczBloki(kolejka[i]));
+            }
+            for (int i = 0; i < kolejka.Count; i++)
+            {
+                int najwiekszy = i;
+                for (int j = i + 1; j < kolejka.Count; j++)
+                {
+                    if (rozmiary[j] > rozmiary[najwiekszy])
+                    {
+                        najwiekszy = j;
+                    }
+                }
+                if (najwiekszy == i)
                 {
                     continue;
                 }
-                _nextTry[grid.EntityId] = tick + RetryTicks;
-                Uzupelnij(index, new EconomyBlock
-                {
-                    GridId = grid.EntityId,
-                    Position = grid.GetPosition(),
-                    GridName = grid.DisplayName,
-                });
-                return true;
+                IMyCubeGrid tmpGrid = kolejka[i];
+                kolejka[i] = kolejka[najwiekszy];
+                kolejka[najwiekszy] = tmpGrid;
+                int tmpRozmiar = rozmiary[i];
+                rozmiary[i] = rozmiary[najwiekszy];
+                rozmiary[najwiekszy] = tmpRozmiar;
             }
-            return false;
+            return kolejka;
         }
 
         /// <summary>
@@ -431,24 +518,39 @@ namespace ZyweFrakcje
                     {
                         continue;
                     }
-                    _nextTry[grid.EntityId] = tick + RetryTicks;
-                    Uzupelnij(i, new EconomyBlock
+                    var blok = new EconomyBlock
                     {
                         GridId = grid.EntityId,
                         Position = pozycja,
                         GridName = grid.DisplayName,
-                    });
+                    };
+                    // Ta sama kolejność co przy stacjach: najpierw wnętrze kadłuba, dopiero
+                    // potem poszycie. Kadłub rajdowy wnętrze zwykle ma, więc drugi przebieg
+                    // jest tu wyjątkiem, a nie regułą.
+                    if (Uzupelnij(i, blok, tick, false) == Wynik.BrakMiejsca &&
+                        Uzupelnij(i, blok, tick, true) == Wynik.BrakMiejsca)
+                    {
+                        _nextTry[grid.EntityId] = tick + RetryTicks;
+                    }
                     return; // jeden statek na przebieg
                 }
             }
         }
 
-        private void Uzupelnij(int index, EconomyBlock stacja)
+        /// <summary>Czym skończyła się próba obsadzenia jednej siatki.</summary>
+        private enum Wynik
+        {
+            Postawiono,   // poszło zlecenie do AiEnabled
+            Czekam,       // mapa w budowie albo załoga już w komplecie — nie ma co robić
+            BrakMiejsca,  // ta siatka nie daje węzłów — wolno spróbować następnej
+        }
+
+        private Wynik Uzupelnij(int index, EconomyBlock stacja, int tick, bool naZewnatrz)
         {
             var grid = MyAPIGateway.Entities.GetEntityById(stacja.GridId) as IMyCubeGrid;
             if (grid == null)
             {
-                return;
+                return Wynik.BrakMiejsca;
             }
             // Bez mapy siatki bot nie ma po czym chodzić. AiEnabled buduje ją asynchronicznie,
             // więc przy pierwszym podejściu zwykle jeszcze jej nie ma — zamawiamy i wracamy
@@ -456,46 +558,70 @@ namespace ZyweFrakcje
             var duzaSiatka = grid as MyCubeGrid;
             if (duzaSiatka == null || !_api.IsValidForPathfinding(grid))
             {
-                Ostrzez("stacja " + Tags[index] + " nie nadaje się pod boty (pathfinding)");
-                return;
+                // To NIE jest powód do alarmu na poziomie kompleksu: kontener bez wnętrza
+                // legalnie nie nadaje się pod boty, a obok stoi kadłub, który się nadaje.
+                return Wynik.BrakMiejsca;
             }
             if (!_api.IsGridMapReady(duzaSiatka))
             {
                 _api.CreateGridMap(duzaSiatka);
                 _nextTry[stacja.GridId] = 0; // mapa w budowie — spróbuj przy najbliższej okazji
-                return;
+                return Wynik.Czekam;
             }
 
             int brakuje = CrewPerStation - PolicZaloge(stacja);
             if (brakuje <= 0)
             {
-                return;
+                _nextTry[stacja.GridId] = tick + RetryTicks;
+                return Wynik.Czekam;
+            }
+
+            // ORIENTACJA Z MAPY SIATKI, nie ze świata (2026-08-16). API mówi to wprost przy
+            // GetGridMapMatrix: „HINT: Use this as the orientation for bots spawned on this
+            // grid!". Dotąd dawaliśmy Vector3.Forward/Up, czyli osie ŚWIATA — bot powstawał
+            // przekręcony względem pokładu stacji (a stacja stoi tak, jak ją obrócił spawn),
+            // więc jego „dół" nie miał nic wspólnego z podłogą, po której miał chodzić.
+            MatrixD mapa;
+            Vector3D gora = Vector3D.Up;
+            Vector3D przod = Vector3D.Forward;
+            if (_api.GetGridMapMatrix(duzaSiatka, true, out mapa))
+            {
+                gora = mapa.Up;
+                przod = mapa.Forward;
             }
 
             var wezly = new List<Vector3D>();
-            _api.GetAvailableGridNodes(duzaSiatka, brakuje, wezly, null, false);
+            // onlyAirtightNodes = true → tylko wnętrze. To jest sedno poprawki: bot postawiony
+            // na poszyciu zewnętrznym w zerowej grawitacji nie ma się czego trzymać.
+            _api.GetAvailableGridNodes(duzaSiatka, brakuje, wezly, gora, !naZewnatrz);
             if (wezly.Count == 0)
             {
-                Ostrzez("na stacji " + Tags[index] + " nie ma wolnych miejsc dla załogi");
-                return;
+                return Wynik.BrakMiejsca;
+            }
+            if (naZewnatrz)
+            {
+                Ostrzez("żadna siatka stacji " + Tags[index] + " nie ma hermetycznego wnętrza — " +
+                        "stawiam załogę na poszyciu, w zerowej grawitacji może odpłynąć");
             }
 
             string ignored;
             long owner = FactionEconomy.FindTargetIdentity(Tags[index], out ignored);
             if (owner == 0)
             {
-                return;
+                return Wynik.BrakMiejsca;
             }
 
+            _nextTry[stacja.GridId] = tick + RetryTicks;
             for (int i = 0; i < wezly.Count && i < brakuje; i++)
             {
-                var pozycja = new MyPositionAndOrientation(wezly[i], Vector3.Forward, Vector3.Up);
+                var pozycja = new MyPositionAndOrientation(wezly[i], (Vector3)przod, (Vector3)gora);
                 // Imię jest tu tylko etykietą; docelowo (Etap C) postać ma mieć rekord
                 // w SQLite po stronie brainu, a to imię ma z niego pochodzić.
                 string imie = Imie(Tags[index], i);
                 _api.SpawnBotQueued(BotType[index], imie, pozycja, duzaSiatka,
                                     Role[index], owner, Kolor[index], null);
             }
+            return Wynik.Postawiono;
         }
 
         /// <summary>Ile postaci frakcji kręci się już przy tej stacji.</summary>
