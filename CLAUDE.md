@@ -142,11 +142,13 @@ docs/protocol.md                # spec mostka JSONL
   kluczowane pełną ścieżką (offset starego świata przesłaniał krótszy
   events.jsonl nowego → „brak odczytów") + config per maszyna
   (rules.local.toml).
-- **Etap 3 — silnik:** ✅ (kod + testy + --replay na prawdziwej sesji; do
-  weryfikacji w grze wg docs/testy-reczne.md) SQLite wg schema.sql, reguły
+- **Etap 3 — silnik:** ✅ (kod + testy + --replay na prawdziwej sesji;
+  zweryfikowane W GRZE wg docs/testy-reczne.md sekcje B–C) SQLite wg schema.sql, reguły
   relacji, tick, maszyna stanów, tryb `--mock-llm` (same szablony fallback).
-- **Etap 4 — głos:** ✅ (kod + smoke test na sucho: @KRW → odpowiedź modelu
-  w commands.jsonl; do weryfikacji w grze wg docs/testy-reczne.md sekcja D)
+- **Etap 4 — głos:** ✅ (kod + smoke test na sucho; zweryfikowane W GRZE wg
+  docs/testy-reczne.md sekcja D — frakcje odpowiadają głosem modelu, potwierdzone
+  przez gracza 2026-09-23). To jest ostatni etap potwierdzony w całości; Etapy 5–6
+  i załogi NPC mają kod, ale produkcja stoi tutaj.)
   integracja llama.cpp, GBNF, karty person, walidacja+retry. Wątek LlmWorker,
   prompt = persona + pamięć frakcji + kontekst z silnika, fallback na szablony.
 - **Etap 5 — ręce:** ✅ radio na czacie (format `[RADIO | NAZWA]`, kolejka
