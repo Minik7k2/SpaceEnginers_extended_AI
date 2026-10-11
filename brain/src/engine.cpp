@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <sstream>
 
 namespace zf {
 
@@ -20,14 +21,20 @@ constexpr double kFullDamage = 2000.0;
 // Wartość handlu (kredyty) dla handel_max — powyżej delta się już nie pogłębia (Etap 6).
 constexpr double kFullTrade = 5000.0;
 
-std::string data_str(const Event& ev, const char* key) {
-    return ev.data.contains(key) && ev.data[key].is_string() ? ev.data[key].get<std::string>()
-                                                             : std::string{};
-}
-
-double data_num(const Event& ev, const char* key) {
-    return ev.data.contains(key) && ev.data[key].is_number() ? ev.data[key].get<double>() : 0.0;
-}
+// Doklejane do kontekstu rozmowy, gdy frakcja prowadzi działania zbrojne
+// (chat_expects_decision) — LLM decyduje wtedy o odpuszczeniu albo trybucie.
+constexpr const char* kDecisionPrompt =
+    " Prowadzicie teraz działania zbrojne przeciw graczowi. Masz dwie osobne "
+    "decyzje w polach JSON (obie domyślnie false). \"odpuszcza\": wpisz true, "
+    "jeśli TERAZ odwołujesz atak (przyjmujesz kredyty, kapitulację albo rozejm). "
+    "\"zada_surowce\": wpisz true, jeśli zamiast tego ŻĄDASZ trybutu w surowcach — "
+    "każesz graczowi dostarczyć ładunek do wyznaczonej skrzynki zrzutu, a ogień "
+    "wstrzymujesz dopiero na czas dostawy. Ustaw najwyżej jedno z nich na true; "
+    "jeśli odmawiasz wszystkiego, oba zostaw false. W samej wypowiedzi (pole "
+    "\"tresc\") NIE pisz nazw tych pól ani true/false — to ma być wyłącznie "
+    "kwestia radiowa w twoim charakterze. Jeśli żądasz trybutu, zapowiedz to po "
+    "swojemu; konkretną ilość i miejsce zrzutu poda osobny komunikat. Decyduj "
+    "wedle swojej natury i tego, co gracz wam zrobił.";
 
 // Klucz surowca -> nazwa po polsku do promptu. Brain operuje kluczami (mod tłumaczy je na
 // SubtypeId), ale model ma mówić do gracza po ludzku.
@@ -77,14 +84,15 @@ bool is_own_faction(const std::string& tag) {
     return tag == "HEL" || tag == "KRW" || tag == "WGR";
 }
 
+bool is_known_contract_kind(const std::string& kind) {
+    const auto& kinds = Config::contract_kinds();
+    return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
+}
+
 // Typ kontraktu z brakującego/nieznanego pola. Stare zapisy (przed rozbudową typów)
 // i mod bez naszej wersji Contracts.cs przysyłają puste pole — to była dostawa.
 std::string kontrakt_kind_or_default(const std::string& kind) {
-    if (kind.empty()) {
-        return "dostawa";
-    }
-    const auto& kinds = Config::contract_kinds();
-    return std::find(kinds.begin(), kinds.end(), kind) != kinds.end() ? kind : "dostawa";
+    return is_known_contract_kind(kind) ? kind : "dostawa";
 }
 
 // Rozbija listę surowców "Iron,Nickel,Silicon" z configu na wektor kluczy;
@@ -106,6 +114,28 @@ std::vector<std::string> split_items(const std::string& csv) {
         items.push_back(cur);
     }
     return items;
+}
+
+// Opróżnia bufor wychodzący (spawny, kontrakty, reputacja...) — wspólne dla take_*().
+template <class T>
+std::vector<T> take(std::vector<T>& pending) {
+    std::vector<T> taken;
+    taken.swap(pending);
+    return taken;
+}
+
+// Komunikat techniczny na czat (odpowiedzi na /zf ...). Pusty kind = nigdy przez LLM.
+RadioOut system_msg(std::string text) {
+    return {"SYSTEM", std::move(text), "white", 0, {}, {}};
+}
+
+// Wartość z widełek [lo, hi] wg t z [0, 1] (siła ostrzału, wartość handlu, relacja).
+double lerp(double lo, double hi, double t) {
+    return lo + (hi - lo) * t;
+}
+
+std::int64_t minutes_ms(int minutes) {
+    return static_cast<std::int64_t>(minutes) * 60000;
 }
 
 } // namespace
@@ -232,6 +262,50 @@ void Engine::set_active_raid(const std::string& faction, std::int64_t now_ms) {
     db_.set_kv(raid_key(faction), now_ms);
 }
 
+std::optional<FactionRow> Engine::find_faction(const std::string& tag) const {
+    for (FactionRow& row : db_.list_factions()) {
+        if (row.tag == tag) {
+            return std::move(row);
+        }
+    }
+    return std::nullopt;
+}
+
+std::string Engine::faction_state(const std::string& tag) const {
+    const auto row = find_faction(tag);
+    return row ? row->state : "spokoj";
+}
+
+bool Engine::on_cooldown(const std::string& key, std::int64_t period_ms, std::int64_t now_ms) const {
+    const std::int64_t last = db_.get_kv(key);
+    return last != 0 && now_ms - last < period_ms;
+}
+
+double Engine::shift_player_relation(const std::string& faction, double delta, const std::string& why) {
+    const double value = db_.adjust_relation(faction, kPlayer, delta);
+    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta) << " " << why
+              << " => " << format_value(value) << "\n";
+    return value;
+}
+
+std::string Engine::contract_faction(const Event& ev, const std::string& contract_id) const {
+    // Z pola zdarzenia, a gdy go nie ma — z bazy po ID kontraktu (mod po wczytaniu
+    // świata zna tylko ID, przypisanie do frakcji trzyma brain).
+    std::string faction = ev.str("faction");
+    if (faction.empty() && !contract_id.empty()) {
+        faction = db_.get_contract_faction(contract_id);
+    }
+    return faction;
+}
+
+void Engine::push_template_voice(std::vector<RadioOut>& out, const std::string& faction) const {
+    // Głos frakcji szablonem (pusty kind = z pominięciem LLM) — komendy deterministyczne.
+    const std::string voice = render_first(faction, {"neutral"});
+    if (!voice.empty()) {
+        out.push_back({faction, voice, faction_color(faction), 0, {}, {}});
+    }
+}
+
 std::string Engine::render_first(const std::string& faction, std::initializer_list<const char*> kinds,
                                  const std::map<std::string, std::string>& vars) const {
     for (const char* kind : kinds) {
@@ -261,23 +335,15 @@ void Engine::emit(std::vector<RadioOut>& out, const std::string& faction, const 
 
     if (!kind.empty()) {
         const RelationRow rel = db_.get_relation(faction, kPlayer);
-        std::string state = "spokoj";
-        for (const FactionRow& row : db_.list_factions()) {
-            if (row.tag == faction) {
-                state = row.state;
-            }
-        }
         context += " Wasza relacja z graczem: " + format_value(rel.value) + " (" +
-                   state_display(state) + ").";
+                   state_display(faction_state(faction)) + ").";
     }
     out.push_back({faction, text, faction_color(faction), priority, kind, std::move(context),
                    expect_decision, std::move(player_msg)});
 }
 
 std::vector<SpawnOut> Engine::take_spawns() {
-    std::vector<SpawnOut> taken;
-    taken.swap(pending_spawns_);
-    return taken;
+    return take(pending_spawns_);
 }
 
 void Engine::request_spawn(const std::string& faction, const std::string& kind, const Config& cfg,
@@ -297,9 +363,7 @@ void Engine::request_spawn(const std::string& faction, const std::string& kind, 
         if (!cfg.spawn_wlaczone) {
             return;
         }
-        const std::int64_t cooldown_ms = static_cast<std::int64_t>(cfg.spawn_cooldown_min) * 60000;
-        const std::int64_t last = db_.get_kv(spawn_key(faction));
-        if (last != 0 && now_ms - last < cooldown_ms) {
+        if (on_cooldown(spawn_key(faction), minutes_ms(cfg.spawn_cooldown_min), now_ms)) {
             return;
         }
     }
@@ -314,10 +378,8 @@ void Engine::request_spawn(const std::string& faction, const std::string& kind, 
 
 void Engine::update_state(const std::string& faction, const Config& cfg, std::int64_t now_ms,
                           std::vector<RadioOut>& out) {
-    const auto rows = db_.list_factions();
-    const auto row = std::find_if(rows.begin(), rows.end(),
-                                  [&](const FactionRow& r) { return r.tag == faction; });
-    if (row == rows.end()) {
+    const auto row = find_faction(faction);
+    if (!row) {
         return;
     }
 
@@ -371,29 +433,27 @@ void Engine::update_state(const std::string& faction, const Config& cfg, std::in
 }
 
 std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::int64_t now_ms) {
+    using Handler = void (Engine::*)(const Event&, const Config&, std::int64_t,
+                                     std::vector<RadioOut>&);
+    // session_start i heartbeat nie mają handlera — liczy się tylko resync niżej.
+    static const std::map<std::string, Handler> kHandlers = {
+        {"combat_hit", &Engine::handle_combat_hit},
+        {"grid_destroyed", &Engine::handle_grid_destroyed},
+        {"proximity", &Engine::handle_proximity},
+        {"chat_message", &Engine::handle_chat},
+        {"debug_command", &Engine::handle_debug},
+        {"trade", &Engine::handle_trade},
+        {"contract_created", &Engine::handle_contract_created},
+        {"contract_taken", &Engine::handle_contract_taken},
+        {"contract_done", &Engine::handle_contract_done},
+        {"ransom_paid", &Engine::handle_ransom_paid},
+        {"ransom_expired", &Engine::handle_ransom_expired},
+    };
+
     std::vector<RadioOut> out;
-    if (ev.type == "combat_hit") {
-        handle_combat_hit(ev, cfg, now_ms, out);
-    } else if (ev.type == "grid_destroyed") {
-        handle_grid_destroyed(ev, cfg, now_ms, out);
-    } else if (ev.type == "proximity") {
-        handle_proximity(ev, cfg, now_ms, out);
-    } else if (ev.type == "chat_message") {
-        handle_chat(ev, cfg, now_ms, out);
-    } else if (ev.type == "debug_command") {
-        handle_debug(ev, cfg, now_ms, out);
-    } else if (ev.type == "trade") {
-        handle_trade(ev, cfg, now_ms, out);
-    } else if (ev.type == "contract_created") {
-        handle_contract_created(ev, cfg, now_ms, out);
-    } else if (ev.type == "contract_taken") {
-        handle_contract_taken(ev, cfg, now_ms, out);
-    } else if (ev.type == "contract_done") {
-        handle_contract_done(ev, cfg, now_ms, out);
-    } else if (ev.type == "ransom_paid") {
-        handle_ransom_paid(ev, cfg, now_ms, out);
-    } else if (ev.type == "ransom_expired") {
-        handle_ransom_expired(ev, cfg, now_ms, out);
+    const auto handler = kHandlers.find(ev.type);
+    if (handler != kHandlers.end()) {
+        (this->*handler->second)(ev, cfg, now_ms, out);
     }
     // Świeżo wczytany świat ma reputację z zapisu (albo z DefaultRelation w SBC), a nie
     // z naszej bazy — po session_start przepisujemy WSZYSTKO, bez czekania na zmianę.
@@ -405,15 +465,11 @@ std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::
 }
 
 std::vector<ContractOut> Engine::take_contracts() {
-    std::vector<ContractOut> taken;
-    taken.swap(pending_contracts_);
-    return taken;
+    return take(pending_contracts_);
 }
 
 std::vector<ReputationOut> Engine::take_reputations() {
-    std::vector<ReputationOut> taken;
-    taken.swap(pending_reputations_);
-    return taken;
+    return take(pending_reputations_);
 }
 
 void Engine::sync_reputations(const Config& cfg, bool force) {
@@ -462,9 +518,7 @@ void Engine::sync_reputations(const Config& cfg, bool force) {
 }
 
 std::vector<PriceOut> Engine::take_prices() {
-    std::vector<PriceOut> taken;
-    taken.swap(pending_prices_);
-    return taken;
+    return take(pending_prices_);
 }
 
 void Engine::sync_prices(const Config& cfg, bool force) {
@@ -499,27 +553,22 @@ void Engine::sync_prices(const Config& cfg, bool force) {
 
 void Engine::handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                std::vector<RadioOut>& out) {
-    const std::string faction = data_str(ev, "faction");
+    const std::string faction = ev.str("faction");
     if (faction.empty()) {
         return;
     }
     ensure_known_faction(faction);
 
-    const double damage = data_num(ev, "damage");
-    const double t = std::clamp(damage / kFullDamage, 0.0, 1.0);
-    const double delta = cfg.ostrzal_min + (cfg.ostrzal_max - cfg.ostrzal_min) * t;
-    const double value = db_.adjust_relation(faction, kPlayer, delta);
-    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta)
-              << " za ostrzał => " << format_value(value) << "\n";
+    const double t = std::clamp(ev.num("damage") / kFullDamage, 0.0, 1.0);
+    shift_player_relation(faction, lerp(cfg.ostrzal_min, cfg.ostrzal_max, t), "za ostrzał");
     db_.add_memory(now_ms, faction, "ostrzal", 0,
-                   "Gracz ostrzelał " + faction + " (" + data_str(ev, "weapon") + ").");
+                   "Gracz ostrzelał " + faction + " (" + ev.str("weapon") + ").");
 
     // Atak na wroga frakcji cieszy jej wrogów: +bonus u każdej frakcji będącej
     // z ostrzelaną w relacji <= prog_wrogi. Z cooldownem — mod zgłasza combat_hit co 3 s,
     // więc bez niego jedna dłuższa strzelanina wywindowała relacje u wszystkich wrogów
     // ostrzelanej frakcji (obserwacja z gry: +15 u HEL i WGR w 20 sekund).
-    const std::int64_t enemy_cd_ms =
-        static_cast<std::int64_t>(std::max(0, cfg.atak_na_wroga_cooldown_min)) * 60 * 1000;
+    const std::int64_t enemy_cd_ms = minutes_ms(std::max(0, cfg.atak_na_wroga_cooldown_min));
     for (const FactionRow& other : db_.list_factions()) {
         if (other.tag == faction) {
             continue;
@@ -531,22 +580,20 @@ void Engine::handle_combat_hit(const Event& ev, const Config& cfg, std::int64_t 
                 continue; // ta sama potyczka — bonus już wypłacony
             }
             enemy_bonus_at_[key] = now_ms;
-            const double v = db_.adjust_relation(other.tag, kPlayer, cfg.atak_na_wroga_bonus);
-            std::cout << "[brain] relacja " << other.tag << "->gracz "
-                      << format_value(cfg.atak_na_wroga_bonus) << " (wróg " << faction
-                      << " ostrzelany) => " << format_value(v) << "\n";
+            shift_player_relation(other.tag, cfg.atak_na_wroga_bonus,
+                                  "(wróg " + faction + " ostrzelany)");
         }
     }
 
     update_state(faction, cfg, now_ms, out);
     emit(out, faction, render_first(faction, {"grozba", "zal", "neutral"}, {{"sekundy", "60"}}),
          1, cfg, now_ms, "grozba",
-         "Gracz właśnie ostrzelał wasz statek (broń: " + data_str(ev, "weapon") + "). Zareaguj.");
+         "Gracz właśnie ostrzelał wasz statek (broń: " + ev.str("weapon") + "). Zareaguj.");
 }
 
 void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                    std::vector<RadioOut>& out) {
-    const std::string faction = data_str(ev, "faction");
+    const std::string faction = ev.str("faction");
     if (faction.empty()) {
         return;
     }
@@ -555,8 +602,7 @@ void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int6
     // Stacja (siatka statyczna) to nie to samo co statek: kara jest wyższa, a do tego
     // zostaje TRWAŁY modyfikator — sufit relacji. Świat mściwy z CLAUDE.md: takiego
     // czynu nie zmyje ani dryf, ani okup; górna granica sympatii frakcji spada na stałe.
-    const bool is_station = ev.data.contains("is_station") && ev.data["is_station"].is_boolean() &&
-                            ev.data["is_station"].get<bool>();
+    const bool is_station = ev.flag("is_station", false);
     const std::string what = is_station ? "stację" : "statek";
     const double delta = is_station ? cfg.zniszczenie_stacji : cfg.zniszczenie_statku;
 
@@ -566,16 +612,14 @@ void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int6
                   << format_value(cfg.sufit_po_zniszczeniu_stacji) << " (zniszczona stacja)\n";
     }
 
-    const double value = db_.adjust_relation(faction, kPlayer, delta);
-    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta)
-              << " za zniszczenie " << (is_station ? "stacji" : "statku") << " => "
-              << format_value(value) << "\n";
+    shift_player_relation(faction, delta,
+                          std::string("za zniszczenie ") + (is_station ? "stacji" : "statku"));
+    const std::string grid_name = ev.str("grid");
     db_.add_memory(now_ms, faction, is_station ? "zniszczenie_stacji" : "zniszczenie_statku", 2,
-                   "Gracz zniszczył " + what + " \"" + data_str(ev, "grid") + "\" frakcji " + faction +
+                   "Gracz zniszczył " + what + " \"" + grid_name + "\" frakcji " + faction +
                        (is_station ? " — tego nie zapomnimy nigdy." : "."));
 
     update_state(faction, cfg, now_ms, out);
-    const std::string grid_name = data_str(ev, "grid");
     const std::string ctx =
         is_station
             ? "Gracz właśnie zniszczył waszą STACJĘ \"" + grid_name +
@@ -587,8 +631,8 @@ void Engine::handle_grid_destroyed(const Event& ev, const Config& cfg, std::int6
 
 void Engine::handle_proximity(const Event& ev, const Config& cfg, std::int64_t now_ms,
                               std::vector<RadioOut>& out) {
-    const std::string faction = data_str(ev, "faction");
-    if (faction.empty() || data_str(ev, "state") != "enter") {
+    const std::string faction = ev.str("faction");
+    if (faction.empty() || ev.str("state") != "enter") {
         return;
     }
     ensure_known_faction(faction);
@@ -613,113 +657,103 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
     // Saldo gracza dosyłane przez mod (ModAPI ma je od ręki, brain nie ma jak policzyć).
     // Bramka kredytowa przyjmuje tylko ofertę pokrytą saldem — inaczej "dam ci milion"
     // z pustym kontem kupowałoby pokój za darmo.
-    if (ev.data.contains("balans") && ev.data["balans"].is_number()) {
-        player_balance_ = static_cast<std::int64_t>(ev.data["balans"].get<double>());
+    if (ev.has_num("balans")) {
+        player_balance_ = static_cast<std::int64_t>(ev.num("balans"));
     }
 
-    const std::string target = data_str(ev, "target");
+    const std::string target = ev.str("target");
     if (target.empty()) {
         return;
     }
     // Bez wymogu zasięgu (config/test) traktujemy wszystko jak w zasięgu.
-    std::string signal = data_str(ev, "signal");
+    std::string signal = ev.str("signal");
     if (signal.empty() || !cfg.radio_wymagaj_zasiegu) {
         signal = "clear";
     }
-    for (const FactionRow& row : db_.list_factions()) {
-        if (row.tag == target) {
-            if (signal == "none") {
-                // Poza zasięgiem: frakcja nie słyszy. Krótkie echo SYSTEM, żeby gracz
-                // wiedział, że to nie błąd, tylko brak łączności.
-                out.push_back({"SYSTEM", "Brak zasięgu — " + target + " nie odpowiada.",
-                               "white", 0, {}, {}});
-                std::cerr << "[brain] chat: " << target << " poza zasięgiem — brak odpowiedzi\n";
-                return;
-            }
-            const double value = db_.get_relation(target, kPlayer).value;
-            const char* kind = value <= cfg.prog_wrogi ? "kpina" : "neutral";
-
-            if (signal == "weak") {
-                // Szum: frakcja słyszy tylko strzępy — ma REAGOWAĆ na zakłócenia (kazać
-                // powtórzyć/podejść), nie zgadywać treści. Bez decyzji o okupie/rozejmie:
-                // nie da się przyjąć oferty, której się nie dosłyszało (Etap 5c).
-                std::string ctx = "Odbierasz od gracza zaszumioną, rwącą się transmisję radiową — "
-                                  "docierają tylko strzępy: \"" + data_str(ev, "text") +
-                                  "\". NIE znasz pełnej treści i nie zgaduj, o co chodziło. Zareaguj "
-                                  "na słaby sygnał po swojemu: zaznacz, że trzeszczy/rwie się, i każ "
-                                  "powtórzyć albo podejść bliżej.";
-                emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
-                     kind, ctx, /*expect_decision=*/false);
-                return;
-            }
-
-            const bool decyzja = chat_expects_decision(target, now_ms);
-            std::string ctx = "Gracz nadaje do was przez radio: \"" + data_str(ev, "text") +
-                              "\". Odpowiedz mu.";
-
-            // Wiszący trybut w kontekście: bez tego na pytanie "ile mi zostało czasu?"
-            // model zmyślał, bo o żadnym terminie nie wiedział (obserwacja z gry).
-            const auto ransom = pending_ransoms_.find(target);
-            if (ransom != pending_ransoms_.end()) {
-                const std::int64_t left_ms = ransom->second.deadline_ms - now_ms;
-                if (left_ms > 0) {
-                    const std::int64_t left_min = (left_ms + 59999) / 60000;
-                    ctx += " Wisi twoje żądanie trybutu: gracz ma dostarczyć " +
-                           std::to_string(ransom->second.amount) + " " +
-                           item_pl(ransom->second.item) +
-                           " do skrzynki zrzutu (ma ją oznaczoną na mapie jako ZRZUT " + target +
-                           "), a do końca terminu zostało mu " + std::to_string(left_min) +
-                           " min. Jeśli pyta o czas, ilość albo miejsce — podaj te liczby wprost "
-                           "i nie zmyślaj innych.";
-                } else {
-                    pending_ransoms_.erase(target); // termin minął, zaraz przyjdzie ransom_expired
-                }
-            }
-            if (decyzja) {
-                ctx += " Prowadzicie teraz działania zbrojne przeciw graczowi. Masz dwie osobne "
-                       "decyzje w polach JSON (obie domyślnie false). \"odpuszcza\": wpisz true, "
-                       "jeśli TERAZ odwołujesz atak (przyjmujesz kredyty, kapitulację albo rozejm). "
-                       "\"zada_surowce\": wpisz true, jeśli zamiast tego ŻĄDASZ trybutu w surowcach — "
-                       "każesz graczowi dostarczyć ładunek do wyznaczonej skrzynki zrzutu, a ogień "
-                       "wstrzymujesz dopiero na czas dostawy. Ustaw najwyżej jedno z nich na true; "
-                       "jeśli odmawiasz wszystkiego, oba zostaw false. W samej wypowiedzi (pole "
-                       "\"tresc\") NIE pisz nazw tych pól ani true/false — to ma być wyłącznie "
-                       "kwestia radiowa w twoim charakterze. Jeśli żądasz trybutu, zapowiedz to po "
-                       "swojemu; konkretną ilość i miejsce zrzutu poda osobny komunikat. Decyduj "
-                       "wedle swojej natury i tego, co gracz wam zrobił.";
-            }
-            emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
-                 kind, ctx, decyzja, /*player_msg=*/data_str(ev, "text"));
-            return;
-        }
+    if (!find_faction(target)) {
+        return; // adresat spoza bazy — nikt nie odbiera
     }
+    if (signal == "none") {
+        // Poza zasięgiem: frakcja nie słyszy. Krótkie echo SYSTEM, żeby gracz
+        // wiedział, że to nie błąd, tylko brak łączności.
+        out.push_back(system_msg("Brak zasięgu — " + target + " nie odpowiada."));
+        std::cerr << "[brain] chat: " << target << " poza zasięgiem — brak odpowiedzi\n";
+        return;
+    }
+    const double value = db_.get_relation(target, kPlayer).value;
+    const char* kind = value <= cfg.prog_wrogi ? "kpina" : "neutral";
+
+    if (signal == "weak") {
+        // Szum: frakcja słyszy tylko strzępy — ma REAGOWAĆ na zakłócenia (kazać
+        // powtórzyć/podejść), nie zgadywać treści. Bez decyzji o okupie/rozejmie:
+        // nie da się przyjąć oferty, której się nie dosłyszało (Etap 5c).
+        std::string ctx = "Odbierasz od gracza zaszumioną, rwącą się transmisję radiową — "
+                          "docierają tylko strzępy: \"" + ev.str("text") +
+                          "\". NIE znasz pełnej treści i nie zgaduj, o co chodziło. Zareaguj "
+                          "na słaby sygnał po swojemu: zaznacz, że trzeszczy/rwie się, i każ "
+                          "powtórzyć albo podejść bliżej.";
+        emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
+             kind, ctx, /*expect_decision=*/false);
+        return;
+    }
+
+    const bool decyzja = chat_expects_decision(target, now_ms);
+    std::string ctx = "Gracz nadaje do was przez radio: \"" + ev.str("text") +
+                      "\". Odpowiedz mu.";
+
+    ctx += pending_ransom_context(target, now_ms);
+    if (decyzja) {
+        ctx += kDecisionPrompt;
+    }
+    emit(out, target, render_first(target, {kind, "neutral"}), 0, cfg, now_ms,
+         kind, ctx, decyzja, /*player_msg=*/ev.str("text"));
+}
+
+std::string Engine::pending_ransom_context(const std::string& faction, std::int64_t now_ms) {
+    // Wiszący trybut w kontekście: bez tego na pytanie "ile mi zostało czasu?"
+    // model zmyślał, bo o żadnym terminie nie wiedział (obserwacja z gry).
+    const auto ransom = pending_ransoms_.find(faction);
+    if (ransom == pending_ransoms_.end()) {
+        return {};
+    }
+    const std::int64_t left_ms = ransom->second.deadline_ms - now_ms;
+    if (left_ms <= 0) {
+        pending_ransoms_.erase(ransom); // termin minął, zaraz przyjdzie ransom_expired
+        return {};
+    }
+    const std::int64_t left_min = (left_ms + 59999) / 60000;
+    return " Wisi twoje żądanie trybutu: gracz ma dostarczyć " +
+           std::to_string(ransom->second.amount) + " " + item_pl(ransom->second.item) +
+           " do skrzynki zrzutu (ma ją oznaczoną na mapie jako ZRZUT " + faction +
+           "), a do końca terminu zostało mu " + std::to_string(left_min) +
+           " min. Jeśli pyta o czas, ilość albo miejsce — podaj te liczby wprost "
+           "i nie zmyślaj innych.";
 }
 
 void Engine::handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
                           std::vector<RadioOut>& out) {
-    const std::string faction = data_str(ev, "faction");
+    const std::string faction = ev.str("faction");
     if (faction.empty()) {
         return;
     }
     ensure_known_faction(faction);
 
-    const std::string kind = data_str(ev, "kind"); // buy/sell — informacyjnie
-    const double value = data_num(ev, "value");
+    std::string kind = ev.str("kind"); // buy/sell — informacyjnie
+    if (kind.empty()) {
+        kind = "wymiana";
+    }
+    const double value = ev.num("value");
     const double t = std::clamp(value / kFullTrade, 0.0, 1.0);
-    const double delta = cfg.handel_min + (cfg.handel_max - cfg.handel_min) * t;
-    const double rel = db_.adjust_relation(faction, kPlayer, delta);
-    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta) << " za handel ("
-              << (kind.empty() ? "wymiana" : kind) << " " << format_value(value) << ") => "
-              << format_value(rel) << "\n";
-    db_.add_memory(now_ms, faction, "handel", 0,
-                   "Gracz handlował z " + faction + " (" + (kind.empty() ? "wymiana" : kind) + ").");
+    shift_player_relation(faction, lerp(cfg.handel_min, cfg.handel_max, t),
+                          "za handel (" + kind + " " + format_value(value) + ")");
+    db_.add_memory(now_ms, faction, "handel", 0, "Gracz handlował z " + faction + " (" + kind + ").");
     update_state(faction, cfg, now_ms, out); // handel bez radia — zbyt częsty, żeby nadawać
 }
 
 void Engine::handle_contract_created(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                      std::vector<RadioOut>& out) {
-    const std::string contract_id = data_str(ev, "contract_id");
-    const std::string faction = data_str(ev, "faction");
+    const std::string contract_id = ev.str("contract_id");
+    const std::string faction = ev.str("faction");
     if (contract_id.empty() || faction.empty()) {
         return;
     }
@@ -729,14 +763,14 @@ void Engine::handle_contract_created(const Event& ev, const Config& cfg, std::in
     // contract_done to stąd bierzemy frakcję — mod nie musi jej pamiętać.
     // Mod mógł zamienić typ na dostawę (brak celu w świecie) — utrwalamy TO, co
     // naprawdę powstało w grze, bo od tego zależy mnożnik przy rozliczeniu.
-    const std::string kind = kontrakt_kind_or_default(data_str(ev, "kind"));
+    const std::string kind = kontrakt_kind_or_default(ev.str("kind"));
     db_.upsert_contract(contract_id, faction, kind, "open", ev.data.dump());
     std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", " << kind
               << ") wystawiony w grze\n";
 
     // Głos frakcji: ogłoszenie zlecenia. {oferta} podstawia opis z moda (co i za ile).
-    const std::string opis = data_str(ev, "opis");
-    const std::string reward = data_str(ev, "reward_str");
+    const std::string opis = ev.str("opis");
+    const std::string reward = ev.str("reward_str");
     emit(out, faction, render_first(faction, {"oferta", "neutral"}, {{"oferta", opis},
                                                                     {"kwota", reward}}),
          0, cfg, now_ms, "oferta",
@@ -747,11 +781,8 @@ void Engine::handle_contract_created(const Event& ev, const Config& cfg, std::in
 
 void Engine::handle_contract_taken(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                    std::vector<RadioOut>& out) {
-    const std::string contract_id = data_str(ev, "contract_id");
-    std::string faction = data_str(ev, "faction");
-    if (faction.empty() && !contract_id.empty()) {
-        faction = db_.get_contract_faction(contract_id);
-    }
+    const std::string contract_id = ev.str("contract_id");
+    const std::string faction = contract_faction(ev, contract_id);
     if (faction.empty()) {
         std::cerr << "[brain] contract_taken bez frakcji i bez znanego ID (" << contract_id
                   << ") — pomijam\n";
@@ -768,7 +799,7 @@ void Engine::handle_contract_taken(const Event& ev, const Config& cfg, std::int6
     }
 
     const std::string kind = kontrakt_kind_or_default(
-        contract_id.empty() ? data_str(ev, "kind") : db_.get_contract_kind(contract_id));
+        contract_id.empty() ? ev.str("kind") : db_.get_contract_kind(contract_id));
     std::cout << "[brain] kontrakt " << contract_id << " (" << faction << ", " << kind
               << ") przyjęty przez gracza\n";
 
@@ -804,11 +835,8 @@ void Engine::handle_contract_taken(const Event& ev, const Config& cfg, std::int6
             if (db_.get_relation(faction, other.tag).value > cfg.prog_wrogi) {
                 continue; // nie są wrogami wystawcy — nic im do tego
             }
-            const double rel =
-                db_.adjust_relation(other.tag, kPlayer, cfg.kontrakt_przyjety_u_wroga);
-            std::cout << "[brain] relacja " << other.tag << "->gracz "
-                      << format_value(cfg.kontrakt_przyjety_u_wroga) << " za przyjęcie zlecenia od "
-                      << faction << " => " << format_value(rel) << "\n";
+            shift_player_relation(other.tag, cfg.kontrakt_przyjety_u_wroga,
+                                  "za przyjęcie zlecenia od " + faction);
             db_.add_memory(now_ms, other.tag, "zlecenie_wroga", 0,
                            "Gracz przyjął zlecenie od " + faction + ", z którym jesteśmy na wojennej stopie.");
             update_state(other.tag, cfg, now_ms, out);
@@ -825,13 +853,8 @@ void Engine::handle_contract_taken(const Event& ev, const Config& cfg, std::int6
 
 void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                   std::vector<RadioOut>& out) {
-    const std::string contract_id = data_str(ev, "contract_id");
-    // Frakcja: z pola zdarzenia, a gdy go nie ma — z bazy po ID kontraktu (mod po
-    // wczytaniu świata zna tylko ID, przypisanie do frakcji trzyma brain).
-    std::string faction = data_str(ev, "faction");
-    if (faction.empty() && !contract_id.empty()) {
-        faction = db_.get_contract_faction(contract_id);
-    }
+    const std::string contract_id = ev.str("contract_id");
+    const std::string faction = contract_faction(ev, contract_id);
     if (faction.empty()) {
         std::cerr << "[brain] contract_done bez frakcji i bez znanego ID (" << contract_id
                   << ") — pomijam\n";
@@ -839,9 +862,7 @@ void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64
     }
     ensure_known_faction(faction);
 
-    const bool success = !ev.data.contains("success") || !ev.data["success"].is_boolean()
-                             ? true
-                             : ev.data["success"].get<bool>();
+    const bool success = ev.flag("success", true);
     if (!contract_id.empty()) {
         db_.set_contract_status(contract_id, success ? "done" : "failed");
     }
@@ -851,10 +872,10 @@ void Engine::handle_contract_done(const Event& ev, const Config& cfg, std::int64
     const std::string kind = kontrakt_kind_or_default(db_.get_contract_kind(contract_id));
     const double mult = contract_kind_multiplier(cfg, kind);
     const double delta = (success ? cfg.kontrakt_max : -cfg.kontrakt_min) * mult;
-    const double rel = db_.adjust_relation(faction, kPlayer, delta);
-    std::cout << "[brain] relacja " << faction << "->gracz " << format_value(delta)
-              << (success ? " za wykonany kontrakt (" : " za zawalony kontrakt (") << kind
-              << ", mnożnik " << mult << ") => " << format_value(rel) << "\n";
+    std::ostringstream why;
+    why << (success ? "za wykonany kontrakt (" : "za zawalony kontrakt (") << kind << ", mnożnik "
+        << mult << ")";
+    shift_player_relation(faction, delta, why.str());
     db_.add_memory(now_ms, faction, success ? "kontrakt_ok" : "kontrakt_fail", 0,
                    success ? "Gracz wykonał kontrakt dla " + faction + "."
                            : "Gracz zawalił kontrakt dla " + faction + ".");
@@ -884,9 +905,7 @@ void Engine::maybe_offer_contract(const std::string& faction, const Config& cfg,
     if (db_.count_open_contracts(faction) >= cfg.kontrakty_max_otwartych) {
         return;
     }
-    const std::int64_t cooldown_ms = static_cast<std::int64_t>(cfg.kontrakty_cooldown_min) * 60000;
-    const std::int64_t last = db_.get_kv(contract_key(faction));
-    if (last != 0 && now_ms - last < cooldown_ms) {
+    if (on_cooldown(contract_key(faction), minutes_ms(cfg.kontrakty_cooldown_min), now_ms)) {
         return;
     }
     db_.set_kv(contract_key(faction), now_ms);
@@ -919,13 +938,7 @@ std::string Engine::worst_enemy_of(const std::string& faction, const Config& cfg
 }
 
 std::string Engine::pick_contract_kind(const std::string& faction, const Config& cfg) {
-    std::string state = "spokoj";
-    for (const FactionRow& row : db_.list_factions()) {
-        if (row.tag == faction) {
-            state = row.state;
-            break;
-        }
-    }
+    const std::string state = faction_state(faction);
     // Nagroda za głowę wymaga celu; bez wroga w polityce typ w ogóle nie wchodzi do
     // losowania (inaczej mod dostawałby zlecenie, które i tak musi zamienić na dostawę).
     const bool bounty_possible = !worst_enemy_of(faction, cfg).empty();
@@ -966,8 +979,7 @@ void Engine::queue_contract(const std::string& faction, const std::string& kind,
                               : 0.0;
     const double mult = contract_kind_multiplier(cfg, kind);
     const auto reward = static_cast<std::int64_t>(
-        (cfg.kontrakty_nagroda_min + (cfg.kontrakty_nagroda_max - cfg.kontrakty_nagroda_min) * t) *
-        mult);
+        lerp(cfg.kontrakty_nagroda_min, cfg.kontrakty_nagroda_max, t) * mult);
 
     const std::string target = kind == "nagroda" ? worst_enemy_of(faction, cfg) : std::string{};
 
@@ -985,10 +997,8 @@ bool Engine::chat_expects_decision(const std::string& faction, std::int64_t now_
     if (has_active_raid(faction, now_ms)) {
         return true;
     }
-    const auto rows = db_.list_factions();
-    const auto row = std::find_if(rows.begin(), rows.end(),
-                                  [&](const FactionRow& r) { return r.tag == faction; });
-    return row != rows.end() && (row->state == "napiecie" || row->state == "wojna");
+    const std::string state = faction_state(faction);
+    return state == "napiecie" || state == "wojna";
 }
 
 void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
@@ -1018,9 +1028,7 @@ std::int64_t Engine::cash_ransom_threshold(const std::string& faction, const Con
 }
 
 std::vector<std::pair<std::string, std::int64_t>> Engine::take_standdowns() {
-    std::vector<std::pair<std::string, std::int64_t>> taken;
-    taken.swap(pending_standdowns_);
-    return taken;
+    return take(pending_standdowns_);
 }
 
 void Engine::request_goods_ransom(const std::string& faction, const Config& cfg,
@@ -1059,14 +1067,12 @@ void Engine::request_goods_ransom(const std::string& faction, const Config& cfg,
 }
 
 std::vector<RansomDemandOut> Engine::take_ransom_demands() {
-    std::vector<RansomDemandOut> taken;
-    taken.swap(pending_ransom_demands_);
-    return taken;
+    return take(pending_ransom_demands_);
 }
 
 void Engine::handle_ransom_paid(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                 std::vector<RadioOut>& out) {
-    const std::string faction = data_str(ev, "faction");
+    const std::string faction = ev.str("faction");
     if (faction.empty()) {
         return;
     }
@@ -1074,8 +1080,8 @@ void Engine::handle_ransom_paid(const Event& ev, const Config& cfg, std::int64_t
     pending_ransoms_.erase(faction);
     set_active_raid(faction, 0); // trybut dostarczony — rajd odwołany (mod despawnuje statki)
 
-    const std::string item = data_str(ev, "item");
-    const std::int64_t amount = static_cast<std::int64_t>(data_num(ev, "amount"));
+    const std::string item = ev.str("item");
+    const std::int64_t amount = static_cast<std::int64_t>(ev.num("amount"));
     const double rel = db_.adjust_relation(faction, kPlayer, cfg.okup_bonus_dostawa);
 
     // Odkup CZYNEM (nie czasem): udana dostawa zmniejsza trwałą nieufność świata mściwego.
@@ -1098,7 +1104,7 @@ void Engine::handle_ransom_paid(const Event& ev, const Config& cfg, std::int64_t
 
 void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int64_t now_ms,
                                    std::vector<RadioOut>& out) {
-    const std::string faction = data_str(ev, "faction");
+    const std::string faction = ev.str("faction");
     if (faction.empty()) {
         return;
     }
@@ -1109,7 +1115,7 @@ void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int6
     // Mod zgłasza powód. "brak_skrzynki" = to skrzynka przepadła (sprzątacz śmieci SE),
     // a nie gracz zawiódł — kasujemy żądanie bez kary i bez nieufności. Karanie za własny
     // brak skrzynki byłoby najgorszą wersją świata mściwego.
-    if (data_str(ev, "reason") == "brak_skrzynki") {
+    if (ev.str("reason") == "brak_skrzynki") {
         std::cout << "[brain] okup surowcowy " << faction
                   << ": skrzynka zrzutu przepadła — żądanie anulowane BEZ kary\n";
         return;
@@ -1133,129 +1139,124 @@ void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int6
 
 void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
                           std::vector<RadioOut>& out) {
-    const std::string cmd = data_str(ev, "cmd");
+    const std::string cmd = ev.str("cmd");
     if (cmd == "rel") {
-        out.push_back({"SYSTEM", relations_report(), "white", 0, {}, {}});
+        out.push_back(system_msg(relations_report()));
     } else if (cmd == "tick") {
         std::vector<RadioOut> tick_out = tick(cfg, now_ms, /*force=*/true);
-        out.push_back({"SYSTEM", "Tick wymuszony.", "white", 0, {}, {}});
+        out.push_back(system_msg("Tick wymuszony."));
         out.insert(out.end(), tick_out.begin(), tick_out.end());
     } else if (cmd == "spawn") {
-        // /zf raid <frakcja> [kind]: wymuszony spawn do testu potoku (omija cooldown).
-        const std::string faction = data_str(ev, "faction");
-        std::string state = "spokoj";
-        bool known = false;
-        for (const FactionRow& row : db_.list_factions()) {
-            if (row.tag == faction) {
-                state = row.state;
-                known = true;
-            }
-        }
-        if (!known) {
-            out.push_back({"SYSTEM", "Nie znam frakcji \"" + faction + "\" — spawn pominięty.", "white", 0, {}, {}});
-            return;
-        }
-        std::string kind = data_str(ev, "kind");
-        if (kind.empty()) {
-            kind = kind_for_state(state);
-        }
-        request_spawn(faction, kind, cfg, now_ms, "Ręcznie wywołany spawn (/zf raid).", /*force=*/true);
-        out.push_back({"SYSTEM", "Spawn zlecony: " + faction + " (" + kind + ").", "white", 0, {}, {}});
+        debug_spawn(ev, cfg, now_ms, out);
     } else if (cmd == "kontrakt") {
-        // /zf kontrakt <frakcja>: wymuszona oferta (omija cooldown i limit otwartych) —
-        // test potoku kontraktów bez czekania na tick i bez zabawy relacjami.
-        const std::string faction = data_str(ev, "faction");
-        if (!is_own_faction(faction)) {
-            out.push_back({"SYSTEM", "Kontrakty wystawiają tylko HEL/KRW/WGR (nie \"" + faction + "\").",
-                           "white", 0, {}, {}});
-            return;
-        }
-        // Opcjonalny typ: "/zf kontrakt KRW nagroda" testuje konkretną klasę kontraktu
-        // bez czekania na losowanie. Bez typu — normalne losowanie wagami.
-        const std::string wanted = data_str(ev, "kind");
-        std::string kind = wanted;
-        if (!kind.empty()) {
-            const auto& kinds = Config::contract_kinds();
-            if (std::find(kinds.begin(), kinds.end(), kind) == kinds.end()) {
-                std::string known;
-                for (const std::string& k : kinds) {
-                    known += (known.empty() ? "" : ", ") + k;
-                }
-                out.push_back({"SYSTEM", "Nieznany typ zlecenia \"" + kind + "\". Znane: " + known + ".",
-                               "white", 0, {}, {}});
-                return;
-            }
-            if (kind == "nagroda" && worst_enemy_of(faction, cfg).empty()) {
-                out.push_back({"SYSTEM", "Frakcja " + faction +
-                                             " nie ma wroga w polityce — nagroda za głowę nie ma celu.",
-                               "white", 0, {}, {}});
-                return;
-            }
-        } else {
-            kind = pick_contract_kind(faction, cfg);
-            if (kind.empty()) {
-                out.push_back({"SYSTEM", "Żaden typ zlecenia nie ma wagi > 0 ([kontrakty.typy]).",
-                               "white", 0, {}, {}});
-                return;
-            }
-        }
-        // Relacja = próg: wymuszone zlecenie jest najtańsze z widełek, żeby test nie
-        // zależał od stanu relacji (a mnożnik typu i tak jest widoczny w kwocie).
-        queue_contract(faction, kind, cfg.kontrakty_prog_relacji, cfg, now_ms);
-        db_.set_kv(contract_key(faction), now_ms);
-        out.push_back({"SYSTEM", "Zlecenie " + faction + " (" + kind + ") — wystawiam.",
-                       "white", 0, {}, {}});
+        debug_contract(ev, cfg, now_ms, out);
     } else if (cmd == "okup") {
-        // /zf okup <frakcja>: deterministyczny wyzwalacz de-eskalacji — niezależny od
-        // LLM (qwen-3B bywa za słaby, by sam trafnie odpuścić). Odwołuje aktywny rajd.
-        const std::string faction = data_str(ev, "faction");
-        if (!has_active_raid(faction, now_ms)) {
-            out.push_back({"SYSTEM", "Frakcja " + faction + " nie prowadzi rajdu — nie ma czego odwołać.",
-                           "white", 0, {}, {}});
-            return;
-        }
-        // Głos frakcji szablonem (pusty kind = z pominięciem LLM), potem naliczenie + stand_down.
-        const std::string voice = render_first(faction, {"neutral"});
-        if (!voice.empty()) {
-            out.push_back({faction, voice, faction_color(faction), 0, {}, {}});
-        }
-        apply_deescalation(faction, cfg, now_ms);
-        out.push_back({"SYSTEM", "Okup przyjęty: " + faction + " odwołuje rajd.", "white", 0, {}, {}});
+        debug_ransom(ev, cfg, now_ms, out);
     } else if (cmd == "okup-surowce") {
-        // /zf okup-surowce <frakcja>: deterministyczny wyzwalacz żądania trybutu (B+) —
-        // niezależny od LLM. Wymaga aktywnego rajdu (jak /zf okup).
-        const std::string faction = data_str(ev, "faction");
-        if (!has_active_raid(faction, now_ms)) {
-            out.push_back({"SYSTEM", "Frakcja " + faction + " nie prowadzi rajdu — nie ma pod co żądać trybutu.",
-                           "white", 0, {}, {}});
-            return;
-        }
-        if (pending_ransoms_.count(faction) > 0) {
-            out.push_back({"SYSTEM", "Frakcja " + faction + " już wystawiła żądanie trybutu.", "white", 0, {}, {}});
-            return;
-        }
-        // Głos frakcji szablonem (pusty kind = z pominięciem LLM), potem żądanie + ransom_demand.
-        const std::string voice = render_first(faction, {"neutral"});
-        if (!voice.empty()) {
-            out.push_back({faction, voice, faction_color(faction), 0, {}, {}});
-        }
-        request_goods_ransom(faction, cfg, now_ms);
-        out.push_back({"SYSTEM", "Żądanie trybutu wystawione: " + faction + ".", "white", 0, {}, {}});
+        debug_goods_ransom(ev, cfg, now_ms, out);
     }
+}
+
+void Engine::debug_spawn(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                         std::vector<RadioOut>& out) {
+    // /zf raid <frakcja> [kind]: wymuszony spawn do testu potoku (omija cooldown).
+    const std::string faction = ev.str("faction");
+    const auto row = find_faction(faction);
+    if (!row) {
+        out.push_back(system_msg("Nie znam frakcji \"" + faction + "\" — spawn pominięty."));
+        return;
+    }
+    std::string kind = ev.str("kind");
+    if (kind.empty()) {
+        kind = kind_for_state(row->state);
+    }
+    request_spawn(faction, kind, cfg, now_ms, "Ręcznie wywołany spawn (/zf raid).", /*force=*/true);
+    out.push_back(system_msg("Spawn zlecony: " + faction + " (" + kind + ")."));
+}
+
+void Engine::debug_contract(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                            std::vector<RadioOut>& out) {
+    // /zf kontrakt <frakcja>: wymuszona oferta (omija cooldown i limit otwartych) —
+    // test potoku kontraktów bez czekania na tick i bez zabawy relacjami.
+    const std::string faction = ev.str("faction");
+    if (!is_own_faction(faction)) {
+        out.push_back(system_msg("Kontrakty wystawiają tylko HEL/KRW/WGR (nie \"" + faction + "\")."));
+        return;
+    }
+    // Opcjonalny typ: "/zf kontrakt KRW nagroda" testuje konkretną klasę kontraktu
+    // bez czekania na losowanie. Bez typu — normalne losowanie wagami.
+    std::string kind = ev.str("kind");
+    if (!kind.empty()) {
+        if (!is_known_contract_kind(kind)) {
+            std::string known;
+            for (const std::string& k : Config::contract_kinds()) {
+                known += (known.empty() ? "" : ", ") + k;
+            }
+            out.push_back(system_msg("Nieznany typ zlecenia \"" + kind + "\". Znane: " + known + "."));
+            return;
+        }
+        if (kind == "nagroda" && worst_enemy_of(faction, cfg).empty()) {
+            out.push_back(system_msg("Frakcja " + faction +
+                                     " nie ma wroga w polityce — nagroda za głowę nie ma celu."));
+            return;
+        }
+    } else {
+        kind = pick_contract_kind(faction, cfg);
+        if (kind.empty()) {
+            out.push_back(system_msg("Żaden typ zlecenia nie ma wagi > 0 ([kontrakty.typy])."));
+            return;
+        }
+    }
+    // Relacja = próg: wymuszone zlecenie jest najtańsze z widełek, żeby test nie
+    // zależał od stanu relacji (a mnożnik typu i tak jest widoczny w kwocie).
+    queue_contract(faction, kind, cfg.kontrakty_prog_relacji, cfg, now_ms);
+    db_.set_kv(contract_key(faction), now_ms);
+    out.push_back(system_msg("Zlecenie " + faction + " (" + kind + ") — wystawiam."));
+}
+
+void Engine::debug_ransom(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                          std::vector<RadioOut>& out) {
+    // /zf okup <frakcja>: deterministyczny wyzwalacz de-eskalacji — niezależny od
+    // LLM (qwen-3B bywa za słaby, by sam trafnie odpuścić). Odwołuje aktywny rajd.
+    const std::string faction = ev.str("faction");
+    if (!has_active_raid(faction, now_ms)) {
+        out.push_back(system_msg("Frakcja " + faction + " nie prowadzi rajdu — nie ma czego odwołać."));
+        return;
+    }
+    push_template_voice(out, faction);
+    apply_deescalation(faction, cfg, now_ms);
+    out.push_back(system_msg("Okup przyjęty: " + faction + " odwołuje rajd."));
+}
+
+void Engine::debug_goods_ransom(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                std::vector<RadioOut>& out) {
+    // /zf okup-surowce <frakcja>: deterministyczny wyzwalacz żądania trybutu (B+) —
+    // niezależny od LLM. Wymaga aktywnego rajdu (jak /zf okup).
+    const std::string faction = ev.str("faction");
+    if (!has_active_raid(faction, now_ms)) {
+        out.push_back(
+            system_msg("Frakcja " + faction + " nie prowadzi rajdu — nie ma pod co żądać trybutu."));
+        return;
+    }
+    if (pending_ransoms_.count(faction) > 0) {
+        out.push_back(system_msg("Frakcja " + faction + " już wystawiła żądanie trybutu."));
+        return;
+    }
+    push_template_voice(out, faction);
+    request_goods_ransom(faction, cfg, now_ms);
+    out.push_back(system_msg("Żądanie trybutu wystawione: " + faction + "."));
 }
 
 std::vector<RadioOut> Engine::tick(const Config& cfg, std::int64_t now_ms, bool force) {
     std::vector<RadioOut> out;
 
-    const std::int64_t tick_ms = static_cast<std::int64_t>(cfg.tick_co_minut) * 60000;
-    const std::int64_t last_tick = db_.get_kv(kLastTickKey);
-    if (!force && last_tick != 0 && now_ms - last_tick < tick_ms) {
+    if (!force && on_cooldown(kLastTickKey, minutes_ms(cfg.tick_co_minut), now_ms)) {
         return out;
     }
     db_.set_kv(kLastTickKey, now_ms);
 
     // 1) Dryf: relacje wolno wracają do 0 (dryf_pkt na dryf_co_minut).
-    const std::int64_t drift_period_ms = static_cast<std::int64_t>(cfg.dryf_co_minut) * 60000;
+    const std::int64_t drift_period_ms = minutes_ms(cfg.dryf_co_minut);
     std::int64_t last_drift = db_.get_kv(kLastDriftKey);
     if (last_drift == 0) {
         last_drift = now_ms; // pierwszy tick świata — dryf liczymy od teraz

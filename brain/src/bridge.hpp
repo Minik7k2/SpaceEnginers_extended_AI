@@ -14,6 +14,20 @@ namespace zf {
 struct Event {
     std::string type;
     nlohmann::json data;
+
+    // Odczyt pól `data` odporny na brak klucza i zły typ — mod bywa starszy od braina,
+    // a linia z obcym kształtem ma dać wartość domyślną, nie wyjątek w pętli mostka.
+    std::string str(const char* key) const {
+        return data.contains(key) && data[key].is_string() ? data[key].get<std::string>()
+                                                           : std::string{};
+    }
+    double num(const char* key) const {
+        return data.contains(key) && data[key].is_number() ? data[key].get<double>() : 0.0;
+    }
+    bool has_num(const char* key) const { return data.contains(key) && data[key].is_number(); }
+    bool flag(const char* key, bool fallback) const {
+        return data.contains(key) && data[key].is_boolean() ? data[key].get<bool>() : fallback;
+    }
 };
 
 // Czyta events.jsonl (+ rotowane events-NNNN.jsonl) pisane przez mod. Offsety (liczba

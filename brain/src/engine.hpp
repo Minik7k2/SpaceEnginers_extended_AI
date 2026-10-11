@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -205,6 +206,19 @@ private:
     void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
 
     void ensure_known_faction(const std::string& tag);
+    // Wiersz frakcji z bazy (nullopt = nieznany tag) i sam jej stan ("spokoj" dla nieznanej).
+    std::optional<FactionRow> find_faction(const std::string& tag) const;
+    std::string faction_state(const std::string& tag) const;
+    // Czy od znacznika czasu pod `key` w SQLite minęło mniej niż period_ms (0 = nigdy).
+    bool on_cooldown(const std::string& key, std::int64_t period_ms, std::int64_t now_ms) const;
+    // Zmiana relacji frakcja->gracz z linią logu "relacja X->gracz <delta> <why> => <wynik>".
+    double shift_player_relation(const std::string& faction, double delta, const std::string& why);
+    // Frakcja kontraktu z pola zdarzenia albo z bazy po ID ("" = nie wiadomo).
+    std::string contract_faction(const Event& ev, const std::string& contract_id) const;
+    // Głos frakcji szablonem "neutral" z pominięciem LLM (komendy /zf okup...).
+    void push_template_voice(std::vector<RadioOut>& out, const std::string& faction) const;
+    // Opis wiszącego trybutu do kontekstu rozmowy ("" = brak; przeterminowany zostaje skasowany).
+    std::string pending_ransom_context(const std::string& faction, std::int64_t now_ms);
     // Startowe relacje frakcja↔frakcja (raz na świat) — bez nich polityka nie istnieje.
     void seed_faction_politics();
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
@@ -244,6 +258,15 @@ private:
                      std::vector<RadioOut>& out);
     void handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
+    // Poszczególne komendy /zf obsługiwane przez handle_debug.
+    void debug_spawn(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                     std::vector<RadioOut>& out);
+    void debug_contract(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                        std::vector<RadioOut>& out);
+    void debug_ransom(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                      std::vector<RadioOut>& out);
+    void debug_goods_ransom(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                            std::vector<RadioOut>& out);
     // Etap 6 — ekonomia: handel podnosi relację (+1..+3), wykonany kontrakt (+kontrakt_max),
     // zawalony (-kontrakt_min); status kontraktu utrwalany w SQLite.
     void handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
