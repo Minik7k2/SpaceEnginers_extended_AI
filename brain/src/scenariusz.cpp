@@ -386,30 +386,30 @@ void sprawdz_oczekiwanie(const nlohmann::json& linia, Bufory& buf, Db& db, Engin
         return;
     }
 
-    // Ścieżka, którą w grze uruchamia odpowiedź modelu: kwota z wiadomości gracza +
-    // próg + saldo => decyzja. Testujemy TĘ SAMĄ funkcję, której używa main.cpp.
+    // Ścieżka, którą w grze uruchamia odpowiedź modelu: Engine::on_llm_reply, ta sama
+    // metoda, którą woła main.cpp. Pola "odpuszcza"/"zada_surowce" udają decyzję modelu
+    // (domyślnie false — model niczego nie postanowił), "wiadomosc" to tekst gracza.
     if (rodzaj == "okup_kredytowy") {
-        const std::string wiadomosc = linia.value("wiadomosc", std::string{});
-        const std::int64_t oferta = parse_ransom_amount(wiadomosc);
-        const std::int64_t prog = engine.cash_ransom_threshold(frakcja, cfg);
-        const OcenaOkupu ocena = ocen_oferte_okupu(oferta, prog, engine.player_balance());
+        LlmReply odpowiedz;
+        odpowiedz.faction = frakcja;
+        odpowiedz.player_msg = linia.value("wiadomosc", std::string{});
+        odpowiedz.deescalate = linia.value("odpuszcza", false);
+        odpowiedz.demand_goods = linia.value("zada_surowce", false);
+        // Opis liczony PRZED decyzją: de-eskalacja podnosi relację, a z nią próg.
+        const std::string opis = "okup kredytowy " + frakcja + " (oferta " +
+                                 std::to_string(parse_ransom_amount(odpowiedz.player_msg)) +
+                                 ", próg " + std::to_string(engine.cash_ransom_threshold(frakcja, cfg)) +
+                                 ", saldo " + std::to_string(engine.player_balance()) + ")";
+        const OcenaOkupu ocena = engine.on_llm_reply(odpowiedz, cfg, now_ms);
         const char* nazwa = ocena == OcenaOkupu::Wiazaca      ? "pokoj"
                             : ocena == OcenaOkupu::BezPokrycia ? "pusta_obietnica"
                             : ocena == OcenaOkupu::ZaMalo      ? "za_malo"
                                                                 : "brak";
         const std::string oczekiwany = linia.value("wynik", std::string{"pokoj"});
-        k.sprawdz(oczekiwany == nazwa,
-                  "okup kredytowy " + frakcja + " (oferta " + std::to_string(oferta) + ", próg " +
-                      std::to_string(prog) + ", saldo " + std::to_string(engine.player_balance()) +
-                      ") => " + oczekiwany,
-                  nazwa);
-        // Jak w main.cpp: oferta wiążąca kończy rajd niezależnie od decyzji modelu.
-        if (ocena == OcenaOkupu::Wiazaca) {
-            engine.apply_deescalation(frakcja, cfg, now_ms, oferta);
-            for (auto& sd : engine.take_standdowns()) {
-                buf.standdowny.push_back(std::move(sd));
-            }
-        }
+        k.sprawdz(oczekiwany == nazwa, opis + " => " + oczekiwany, nazwa);
+        // Skutki decyzji widzą kolejne oczekiwania (stand_down / okup_zadanie / brak_*).
+        buf.standdowny = engine.take_standdowns();
+        buf.okupy = engine.take_ransom_demands();
         return;
     }
 
@@ -435,40 +435,6 @@ void sprawdz_oczekiwanie(const nlohmann::json& linia, Bufory& buf, Db& db, Engin
 }
 
 } // namespace
-
-std::int64_t parse_ransom_amount(const std::string& text) {
-    for (std::size_t i = 0; i < text.size();) {
-        if (text[i] >= '0' && text[i] <= '9') {
-            std::size_t j = i;
-            while (j < text.size() && text[j] >= '0' && text[j] <= '9') {
-                ++j;
-            }
-            if (j - i >= 2 && j - i <= 12) { // ignoruj pojedyncze cyfry i absurdy (overflow)
-                std::int64_t val = 0;
-                for (std::size_t k = i; k < j; ++k) {
-                    val = val * 10 + (text[k] - '0');
-                }
-                return val;
-            }
-            i = j;
-        } else {
-            ++i;
-        }
-    }
-    return 0;
-}
-
-OcenaOkupu ocen_oferte_okupu(std::int64_t oferta, std::int64_t prog, std::int64_t saldo) {
-    if (prog <= 0 || saldo < 0) {
-        // Bramka wyłączona albo saldo nieznane — nie kupujemy obietnic, których nie da
-        // się sprawdzić (mod dosyła saldo w chat_message; -1 = nie wie).
-        return OcenaOkupu::Brak;
-    }
-    if (oferta < prog) {
-        return OcenaOkupu::ZaMalo;
-    }
-    return saldo >= oferta ? OcenaOkupu::Wiazaca : OcenaOkupu::BezPokrycia;
-}
 
 WynikScenariusza uruchom_scenariusz(const std::string& sciezka, const Config& cfg,
                                     const std::string& fallback_path, std::ostream& out) {

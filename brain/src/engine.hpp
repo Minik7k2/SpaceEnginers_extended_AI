@@ -92,6 +92,32 @@ struct ContractOut {
     std::string target_faction;
 };
 
+// Kwota okupu wyłuskana z wiadomości gracza: pierwszy ciąg 2–12 cyfr
+// ("biorę okup, oto 4000 sztabek" -> 4000). 0 = brak kwoty (okup symboliczny).
+// Bez wyjątków (reguła pętli mostka): akumulacja ręczna, absurdalnie długie ciągi pomijane.
+std::int64_t parse_ransom_amount(const std::string& text);
+
+// Ocena oferty okupu w kredytach. Jedna funkcja dla gry, testów i scenariuszy — obserwacja z gry była taka, że model potrafi zapętlić targ
+// i NIGDY nie ustawić odpuszcza=true, więc konkretna oferta pokryta saldem musi
+// kończyć rajd niezależnie od niego.
+enum class OcenaOkupu {
+    Brak,          // bramka wyłączona configiem albo saldo gracza nieznane
+    ZaMalo,        // oferta poniżej progu — targ trwa
+    BezPokrycia,   // oferta >= próg, ale gracz tyle nie ma — pusta obietnica
+    Wiazaca,       // oferta >= próg i pokryta saldem — pokój niezależnie od modelu
+};
+
+OcenaOkupu ocen_oferte_okupu(std::int64_t oferta, std::int64_t prog, std::int64_t saldo);
+
+// Odpowiedź modelu w tym, co obchodzi silnik. Celowo bez zależności od llm.hpp: ta sama
+// ścieżka decyzji ma iść z gry (main) i ze scenariuszy, które llama.cpp nie mają.
+struct LlmReply {
+    std::string faction;
+    std::string player_msg;      // surowa wiadomość gracza; pusta poza czatem
+    bool deescalate = false;     // pole JSON "odpuszcza"
+    bool demand_goods = false;   // pole JSON "zada_surowce"
+};
+
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
 // (spokoj/napiecie/wojna z histerezą), tick świata z dryfem i zdarzeniem losowym,
 // głos przez szablony fallback (do Etapu 4 zawsze "mock LLM").
@@ -146,6 +172,14 @@ public:
     void request_goods_ransom(const std::string& faction, const Config& cfg, std::int64_t now_ms);
     // Żądania trybutu nazbierane przez decyzję/komendę — zwraca i czyści bufor.
     std::vector<RansomDemandOut> take_ransom_demands();
+
+    // Skutki odpowiedzi modelu, wołane po każdym wyniku z wątku LLM. Pierwszeństwo:
+    // (1) oferta kredytowa pokryta saldem kończy rajd NIEZALEŻNIE od modelu (3B potrafi
+    // zapętlić targ i nigdy nie ustawić odpuszcza=true), (2) żądanie trybutu w surowcach,
+    // (3) odpuszczenie — z kwotą z wiadomości gracza, którą mod pobierze przy stand_down.
+    // Skutki lądują w take_standdowns()/take_ransom_demands(); zwrot to ocena oferty
+    // (log i scenariusze).
+    OcenaOkupu on_llm_reply(const LlmReply& reply, const Config& cfg, std::int64_t now_ms);
 
     // Ile kredytów gracz musi położyć na stole, żeby frakcja MUSIAŁA odwołać atak
     // niezależnie od decyzji modelu (0 = bramka wyłączona configiem).

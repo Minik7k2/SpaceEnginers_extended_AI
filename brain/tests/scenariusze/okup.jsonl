@@ -92,3 +92,29 @@
 {"type": "combat_hit", "ts": 125000, "data": {"attacker": 1, "faction": "KRW", "damage": 2000, "hits": 10, "weapon": "gatling"}}
 {"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -75}
 {"oczekuj": "prog_okupu", "frakcja": "KRW", "wartosc": 5250}
+
+{"opis": "Decyzja modelu: żądanie trybutu bez wiążącej oferty => ransom_demand, rajd trwa"}
+# Ta gałąź (LlmResult.demand_goods) żyła dotąd wyłącznie w main.cpp i nie miała testu.
+{"type": "debug_command", "ts": 130000, "data": {"cmd": "spawn", "faction": "KRW", "kind": "raid"}}
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "nic wam nie dam", "zada_surowce": true, "wynik": "za_malo"}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "ilosc_min": 50, "ilosc_max": 100, "deadline_s": 900}
+{"oczekuj": "brak_stand_down", "frakcja": "KRW"}
+
+{"opis": "Wiążąca oferta wygrywa z żądaniem surowców: pokój, trybut skasowany"}
+# Próg przy relacji -75 to 5250 kr, saldo 9000 (ostatni chat_message) — 6000 jest wiążące.
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "oto 6000 kredytow", "zada_surowce": true, "wynik": "pokoj"}
+{"oczekuj": "stand_down", "frakcja": "KRW", "okup": 6000}
+{"oczekuj": "brak_okupu", "frakcja": "KRW"}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -60}
+
+{"opis": "Model odpuszcza sam, bez kwoty => stand_down bez okupu"}
+{"type": "debug_command", "ts": 135000, "data": {"cmd": "spawn", "faction": "KRW", "kind": "raid"}}
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "dobra, rozejm", "odpuszcza": true, "wynik": "za_malo"}
+{"oczekuj": "stand_down", "frakcja": "KRW", "okup": 0}
+{"oczekuj": "relacja", "frakcja": "KRW", "wartosc": -45}
+
+{"opis": "Bez decyzji modelu i bez wiążącej oferty nic się nie dzieje"}
+{"type": "debug_command", "ts": 140000, "data": {"cmd": "spawn", "faction": "KRW", "kind": "raid"}}
+{"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "spadajcie", "wynik": "za_malo"}
+{"oczekuj": "brak_stand_down", "frakcja": "KRW"}
+{"oczekuj": "brak_okupu", "frakcja": "KRW"}

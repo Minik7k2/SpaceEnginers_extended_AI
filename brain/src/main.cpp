@@ -359,34 +359,10 @@ int main(int argc, char** argv) {
                         dq.pop_front();
                     }
                 }
-                // Twarda bramka na okup w kredytach: konkretna oferta pokryta saldem gracza
-                // kończy rajd, choćby model dalej mówił "dawaj więcej" (obserwacja z gry:
-                // 4,5B potrafi zapętlić targ i NIGDY nie ustawić odpuszcza=true).
-                const std::int64_t oferta = zf::parse_ransom_amount(res.player_msg);
-                const std::int64_t prog = engine.cash_ransom_threshold(res.faction, cfg);
-                const std::int64_t saldo = engine.player_balance();
-                // Ta sama funkcja jedzie w testach (scenariusze + engine_test) — decyzja
-                // o pokoju nie może się rozjechać między grą a tym, co sprawdza CI.
-                const zf::OcenaOkupu ocena = zf::ocen_oferte_okupu(oferta, prog, saldo);
-                const bool oferta_wiazaca = ocena == zf::OcenaOkupu::Wiazaca;
-                if (oferta_wiazaca) {
-                    std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
-                              << " kr >= próg " << prog << " kr (saldo " << saldo
-                              << ") — pokój niezależnie od decyzji modelu\n";
-                } else if (ocena == zf::OcenaOkupu::BezPokrycia) {
-                    std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
-                              << " kr bez pokrycia (saldo " << saldo << ") — pusta obietnica\n";
-                }
-
-                if (res.demand_goods && !oferta_wiazaca) {
-                    // B+: frakcja żąda trybutu w surowcach zamiast odpuścić — brain dobiera
-                    // towar/ilość/deadline z configu i wystawia ransom_demand (drenaż niżej).
-                    engine.request_goods_ransom(res.faction, cfg, now);
-                } else if (res.deescalate || oferta_wiazaca) {
-                    // Frakcja odpuszcza: kwota z wiadomości gracza (Etap 6) — mod pobierze ją
-                    // z konta przy stand_down.
-                    engine.apply_deescalation(res.faction, cfg, now, oferta);
-                }
+                // Decyzje (okup kredytowy, trybut, odpuszczenie) rozstrzyga silnik — ta sama
+                // ścieżka jedzie w scenariuszach, więc gra i CI nie mogą się rozjechać.
+                engine.on_llm_reply({res.faction, res.player_msg, res.deescalate, res.demand_goods},
+                                    cfg, now);
             }
             for (const auto& sd : engine.take_standdowns()) {
                 commands.write_stand_down(sd.first, sd.second);

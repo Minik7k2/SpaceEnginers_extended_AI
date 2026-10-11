@@ -1027,6 +1027,62 @@ std::int64_t Engine::cash_ransom_threshold(const std::string& faction, const Con
     return static_cast<std::int64_t>(static_cast<double>(cfg.deeskalacja_prog_kredyty) * mnoznik);
 }
 
+std::int64_t parse_ransom_amount(const std::string& text) {
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] >= '0' && text[i] <= '9') {
+            std::size_t j = i;
+            while (j < text.size() && text[j] >= '0' && text[j] <= '9') {
+                ++j;
+            }
+            if (j - i >= 2 && j - i <= 12) { // ignoruj pojedyncze cyfry i absurdy (overflow)
+                std::int64_t val = 0;
+                for (std::size_t k = i; k < j; ++k) {
+                    val = val * 10 + (text[k] - '0');
+                }
+                return val;
+            }
+            i = j;
+        } else {
+            ++i;
+        }
+    }
+    return 0;
+}
+
+OcenaOkupu ocen_oferte_okupu(std::int64_t oferta, std::int64_t prog, std::int64_t saldo) {
+    if (prog <= 0 || saldo < 0) {
+        // Bramka wyłączona albo saldo nieznane — nie kupujemy obietnic, których nie da
+        // się sprawdzić (mod dosyła saldo w chat_message; -1 = nie wie).
+        return OcenaOkupu::Brak;
+    }
+    if (oferta < prog) {
+        return OcenaOkupu::ZaMalo;
+    }
+    return saldo >= oferta ? OcenaOkupu::Wiazaca : OcenaOkupu::BezPokrycia;
+}
+
+OcenaOkupu Engine::on_llm_reply(const LlmReply& reply, const Config& cfg, std::int64_t now_ms) {
+    const std::int64_t oferta = parse_ransom_amount(reply.player_msg);
+    const std::int64_t prog = cash_ransom_threshold(reply.faction, cfg);
+    const OcenaOkupu ocena = ocen_oferte_okupu(oferta, prog, player_balance_);
+    const bool wiazaca = ocena == OcenaOkupu::Wiazaca;
+    if (wiazaca) {
+        std::cout << "[brain] okup kredytowy " << reply.faction << ": oferta " << oferta
+                  << " kr >= próg " << prog << " kr (saldo " << player_balance_
+                  << ") — pokój niezależnie od decyzji modelu\n";
+    } else if (ocena == OcenaOkupu::BezPokrycia) {
+        std::cout << "[brain] okup kredytowy " << reply.faction << ": oferta " << oferta
+                  << " kr bez pokrycia (saldo " << player_balance_ << ") — pusta obietnica\n";
+    }
+
+    if (reply.demand_goods && !wiazaca) {
+        request_goods_ransom(reply.faction, cfg, now_ms);
+    } else if (reply.deescalate || wiazaca) {
+        apply_deescalation(reply.faction, cfg, now_ms, oferta);
+    }
+    return ocena;
+}
+
 std::vector<std::pair<std::string, std::int64_t>> Engine::take_standdowns() {
     return take(pending_standdowns_);
 }

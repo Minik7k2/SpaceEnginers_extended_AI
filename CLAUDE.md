@@ -402,10 +402,14 @@ docs/protocol.md                # spec mostka JSONL
   obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
   `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
   Wcześniej CI robiło `grep` na stdout, czyli sprawdzało tylko, że brain się nie wywrócił.
-  Cztery pliki, 99 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
+  Cztery pliki, 112 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
   wyłącznie ręcznie:
   `ceny.jsonl` (N2–N8, N12), `kontrakty.jsonl` (I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, M4),
-  `okup.jsonl` (K2–K6, L1–L3), `reputacja.jsonl` (M1–M3, M7).
+  `okup.jsonl` (K2–K6, L1–L3 + decyzje modelu), `reputacja.jsonl` (M1–M3, M7).
+  Decyzję po odpowiedzi LLM (okup kredytowy / trybut / odpuszczenie) rozstrzyga
+  `Engine::on_llm_reply` — woła ją i `main.cpp`, i oczekiwanie `okup_kredytowy`
+  (pola `odpuszcza`/`zada_surowce` udają decyzję modelu). Wcześniej ta logika żyła
+  w pętli głównej, a scenariusz miał jej niepełną kopię bez gałęzi trybutu.
   Wartości nie są przepisane z przebiegu, tylko WYLICZONE z `rules.toml` — np. zlecenie
   wymuszone idzie po `prog_relacji`, czyli kosztuje dokładnie `nagroda_min × mnożnik typu`,
   co czyni tabelę `[kontrakty.mnoznik]` sprawdzalną co do złotówki i niezależną od losowania.
