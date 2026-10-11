@@ -124,6 +124,7 @@ public:
     }
     double col_num(int idx) const { return sqlite3_column_double(stmt_, idx); }
     int col_int(int idx) const { return sqlite3_column_int(stmt_, idx); }
+    std::int64_t col_i64(int idx) const { return sqlite3_column_int64(stmt_, idx); }
 
 private:
     sqlite3_stmt* stmt_ = nullptr;
@@ -228,6 +229,34 @@ void Db::set_ransom_broken(const std::string& faction, int value) {
            "INSERT INTO ransom_credibility (faction, broken) VALUES (?, ?) "
            "ON CONFLICT(faction) DO UPDATE SET broken = excluded.broken;");
     s.text(1, faction).i64(2, value).done();
+}
+
+std::optional<PendingRansom> Db::get_pending_ransom(const std::string& faction) const {
+    Stmt s(handle_, "SELECT item, amount, deadline_ms FROM pending_ransom WHERE faction = ?;");
+    s.text(1, faction);
+    if (!s.row()) {
+        return std::nullopt;
+    }
+    return PendingRansom{s.col_text(0), s.col_i64(1), s.col_i64(2)};
+}
+
+void Db::set_pending_ransom(const std::string& faction, const PendingRansom& ransom) {
+    Stmt s(handle_,
+           "INSERT INTO pending_ransom (faction, item, amount, deadline_ms) VALUES (?, ?, ?, ?) "
+           "ON CONFLICT(faction) DO UPDATE SET item = excluded.item, amount = excluded.amount, "
+           "deadline_ms = excluded.deadline_ms;");
+    s.text(1, faction).text(2, ransom.item).i64(3, ransom.amount).i64(4, ransom.deadline_ms).done();
+}
+
+void Db::clear_pending_ransom(const std::string& faction) {
+    Stmt s(handle_, "DELETE FROM pending_ransom WHERE faction = ?;");
+    s.text(1, faction).done();
+}
+
+int Db::clear_all_pending_ransoms() {
+    Stmt s(handle_, "DELETE FROM pending_ransom;");
+    s.done();
+    return sqlite3_changes(handle_);
 }
 
 void Db::upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,

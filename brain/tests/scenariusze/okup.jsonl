@@ -118,3 +118,29 @@
 {"oczekuj": "okup_kredytowy", "frakcja": "KRW", "wiadomosc": "spadajcie", "wynik": "za_malo"}
 {"oczekuj": "brak_stand_down", "frakcja": "KRW"}
 {"oczekuj": "brak_okupu", "frakcja": "KRW"}
+
+{"opis": "Restart braina w trakcie trybutu: żądanie przeżywa w SQLite, skrzynka się nie dubluje"}
+# Do 2026-10 żądanie siedziało tylko w RAM: po restarcie brain wystawiał DRUGIE żądanie
+# (ratował nas jedynie bezpiecznik po stronie moda), a frakcja nie znała terminu.
+{"type": "debug_command", "ts": 145000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "deadline_s": 900}
+{"restart": true}
+# Czat PRZED ponownym żądaniem: frakcja zna termin wyłącznie z bazy.
+# Termin 145000 + 900 s = 1045000; przy ts 150000 zostaje 895 s, czyli 15 min (w górę).
+{"type": "chat_message", "ts": 150000, "data": {"text": "@KRW ile mam czasu?", "target": "KRW", "signal": "clear", "balans": 9000}}
+{"oczekuj": "radio", "frakcja": "KRW", "zawiera": "zostało mu 15 min"}
+{"type": "debug_command", "ts": 160000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "brak_okupu", "frakcja": "KRW"}
+{"oczekuj": "radio", "frakcja": "SYSTEM", "zawiera": "już wystawiła"}
+
+{"opis": "Nowa sesja świata kasuje żądanie: mod nie utrwala skrzynek zrzutu"}
+{"type": "session_start", "ts": 170000, "data": {"world": "SCEN", "player_id": 1, "player_name": "Test", "mod_version": "test"}}
+{"type": "debug_command", "ts": 175000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "deadline_s": 900}
+
+{"opis": "Zgubiony ransom_expired: żądanie gaśnie samo dopiero po terminie + 5 min zapasu"}
+# Termin 175000 + 900 s = 1075000, zapas do 1375000. W zapasie żądanie dalej blokuje.
+{"type": "debug_command", "ts": 1300000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "brak_okupu", "frakcja": "KRW"}
+{"type": "debug_command", "ts": 1400000, "data": {"cmd": "okup-surowce", "faction": "KRW"}}
+{"oczekuj": "okup_zadanie", "frakcja": "KRW", "deadline_s": 900}

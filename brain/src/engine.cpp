@@ -262,6 +262,18 @@ void Engine::set_active_raid(const std::string& faction, std::int64_t now_ms) {
     db_.set_kv(raid_key(faction), now_ms);
 }
 
+std::optional<PendingRansom> Engine::active_ransom(const std::string& faction,
+                                                  std::int64_t now_ms) {
+    auto ransom = db_.get_pending_ransom(faction);
+    if (ransom && now_ms - ransom->deadline_ms > kRansomGraceMs) {
+        std::cout << "[brain] okup surowcowy " << faction
+                  << ": żądanie po terminie bez odpowiedzi moda — wygaszone\n";
+        db_.clear_pending_ransom(faction);
+        return std::nullopt;
+    }
+    return ransom;
+}
+
 std::optional<FactionRow> Engine::find_faction(const std::string& tag) const {
     for (FactionRow& row : db_.list_factions()) {
         if (row.tag == tag) {
@@ -435,8 +447,9 @@ void Engine::update_state(const std::string& faction, const Config& cfg, std::in
 std::vector<RadioOut> Engine::on_event(const Event& ev, const Config& cfg, std::int64_t now_ms) {
     using Handler = void (Engine::*)(const Event&, const Config&, std::int64_t,
                                      std::vector<RadioOut>&);
-    // session_start i heartbeat nie mają handlera — liczy się tylko resync niżej.
+    // heartbeat nie ma handlera; session_start dodatkowo wymusza resync niżej.
     static const std::map<std::string, Handler> kHandlers = {
+        {"session_start", &Engine::handle_session_start},
         {"combat_hit", &Engine::handle_combat_hit},
         {"grid_destroyed", &Engine::handle_grid_destroyed},
         {"proximity", &Engine::handle_proximity},
@@ -712,18 +725,17 @@ void Engine::handle_chat(const Event& ev, const Config& cfg, std::int64_t now_ms
 std::string Engine::pending_ransom_context(const std::string& faction, std::int64_t now_ms) {
     // Wiszący trybut w kontekście: bez tego na pytanie "ile mi zostało czasu?"
     // model zmyślał, bo o żadnym terminie nie wiedział (obserwacja z gry).
-    const auto ransom = pending_ransoms_.find(faction);
-    if (ransom == pending_ransoms_.end()) {
+    const auto ransom = active_ransom(faction, now_ms);
+    if (!ransom) {
         return {};
     }
-    const std::int64_t left_ms = ransom->second.deadline_ms - now_ms;
+    const std::int64_t left_ms = ransom->deadline_ms - now_ms;
     if (left_ms <= 0) {
-        pending_ransoms_.erase(ransom); // termin minął, zaraz przyjdzie ransom_expired
-        return {};
+        return {}; // termin minął, zaraz przyjdzie ransom_expired
     }
     const std::int64_t left_min = (left_ms + 59999) / 60000;
     return " Wisi twoje żądanie trybutu: gracz ma dostarczyć " +
-           std::to_string(ransom->second.amount) + " " + item_pl(ransom->second.item) +
+           std::to_string(ransom->amount) + " " + item_pl(ransom->item) +
            " do skrzynki zrzutu (ma ją oznaczoną na mapie jako ZRZUT " + faction +
            "), a do końca terminu zostało mu " + std::to_string(left_min) +
            " min. Jeśli pyta o czas, ilość albo miejsce — podaj te liczby wprost "
@@ -1007,7 +1019,7 @@ void Engine::apply_deescalation(const std::string& faction, const Config& cfg,
         return; // nie ma aktywnego rajdu — nie ma czego odwoływać
     }
     set_active_raid(faction, 0);
-    pending_ransoms_.erase(faction); // łaska nadrzędna nad wiszącym okupem surowcowym (mod sprząta skrzynkę)
+    db_.clear_pending_ransom(faction); // łaska nadrzędna nad wiszącym okupem surowcowym (mod sprząta skrzynkę)
     const double value = db_.adjust_relation(faction, kPlayer, cfg.deeskalacja_bonus);
     const std::string kwota = amount > 0 ? " (okup " + std::to_string(amount) + " kr)" : "";
     db_.add_memory(now_ms, faction, "deeskalacja", 1,
@@ -1092,7 +1104,7 @@ void Engine::request_goods_ransom(const std::string& faction, const Config& cfg,
     if (!has_active_raid(faction, now_ms)) {
         return; // brak aktywnego rajdu — nie ma pod co żądać trybutu
     }
-    if (pending_ransoms_.count(faction) > 0) {
+    if (active_ransom(faction, now_ms)) {
         return; // okup już wisi — nie dubluj skrzynki zrzutu
     }
     const std::vector<std::string> items = split_items(cfg.okup_towary);
@@ -1112,8 +1124,8 @@ void Engine::request_goods_ransom(const std::string& faction, const Config& cfg,
         amount = 50;
     }
 
-    pending_ransoms_[faction] = PendingRansom{
-        item, amount, now_ms + static_cast<std::int64_t>(cfg.okup_deadline_s) * 1000};
+    db_.set_pending_ransom(faction, PendingRansom{item, amount,
+                                                  now_ms + static_cast<std::int64_t>(cfg.okup_deadline_s) * 1000});
     pending_ransom_demands_.push_back({faction, item, amount, cfg.okup_deadline_s});
     db_.add_memory(now_ms, faction, "okup_surowce_zadanie", 1,
                    "Frakcja " + faction + " zażądała od gracza trybutu: " + std::to_string(amount) +
@@ -1133,7 +1145,7 @@ void Engine::handle_ransom_paid(const Event& ev, const Config& cfg, std::int64_t
         return;
     }
     ensure_known_faction(faction);
-    pending_ransoms_.erase(faction);
+    db_.clear_pending_ransom(faction);
     set_active_raid(faction, 0); // trybut dostarczony — rajd odwołany (mod despawnuje statki)
 
     const std::string item = ev.str("item");
@@ -1165,7 +1177,7 @@ void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int6
         return;
     }
     ensure_known_faction(faction);
-    pending_ransoms_.erase(faction);
+    db_.clear_pending_ransom(faction);
     // flaga rajdu w SQLite zostaje — ataki trwają dalej (mod wznawia ogień statków rajdu).
 
     // Mod zgłasza powód. "brak_skrzynki" = to skrzynka przepadła (sprzątacz śmieci SE),
@@ -1191,6 +1203,19 @@ void Engine::handle_ransom_expired(const Event& ev, const Config& cfg, std::int6
     emit(out, faction, render_first(faction, {"grozba", "kpina", "neutral"}, {{"sekundy", "30"}}),
          1, cfg, now_ms, "grozba",
          "Gracz obiecał wam trybut i nie dostarczył go na czas — oszukał was. Zareaguj gniewem i nie odpuszczaj.");
+}
+
+void Engine::handle_session_start(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                                  std::vector<RadioOut>& out) {
+    (void)ev;
+    (void)cfg;
+    (void)now_ms;
+    (void)out;
+    const int cleared = db_.clear_all_pending_ransoms();
+    if (cleared > 0) {
+        std::cout << "[brain] nowa sesja świata: " << cleared
+                  << " wiszące żądanie(a) trybutu wygaszone (mod nie pamięta skrzynek)\n";
+    }
 }
 
 void Engine::handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -1294,7 +1319,7 @@ void Engine::debug_goods_ransom(const Event& ev, const Config& cfg, std::int64_t
             system_msg("Frakcja " + faction + " nie prowadzi rajdu — nie ma pod co żądać trybutu."));
         return;
     }
-    if (pending_ransoms_.count(faction) > 0) {
+    if (active_ransom(faction, now_ms)) {
         out.push_back(system_msg("Frakcja " + faction + " już wystawiła żądanie trybutu."));
         return;
     }

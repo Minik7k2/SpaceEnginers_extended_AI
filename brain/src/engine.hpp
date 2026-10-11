@@ -198,14 +198,6 @@ private:
     std::vector<SpawnOut> pending_spawns_;
     std::vector<ContractOut> pending_contracts_;
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
-    // Wiszące okupy surowcowe: anty-dublowanie + treść żądania, żeby frakcja umiała
-    // odpowiedzieć na "ile mi zostało czasu?" (bez tego LLM zmyślał).
-    struct PendingRansom {
-        std::string item;
-        std::int64_t amount = 0;
-        std::int64_t deadline_ms = 0;
-    };
-    std::map<std::string, PendingRansom> pending_ransoms_;
     std::vector<RansomDemandOut> pending_ransom_demands_; // do wysłania jako ransom_demand
     // Ostatnio wysłane do gry wartości reputacji ("HEL" / "HEL|KRW" -> wartość vanilli).
     // W pamięci: przy starcie świata mod i tak dostaje pełny resync (session_start), a
@@ -236,6 +228,12 @@ private:
     // Rajd starszy niż to uznajemy za wygasły (MES i tak w końcu despawnuje statki) —
     // inaczej flaga z wczorajszej sesji wisiałaby w bazie w nieskończoność.
     static constexpr std::int64_t kRaidTtlMs = 60 * 60 * 1000;
+    // Wiszący trybut (tabela pending_ransom) żyje do terminu + zapas. Mod zgłasza
+    // ransom_expired kilka sekund po terminie; gdy zdarzenie zginie (świat zamknięty
+    // w trakcie, mod zgubił skrzynkę), wpis nie może blokować kolejnych żądań na zawsze.
+    static constexpr std::int64_t kRansomGraceMs = 5 * 60 * 1000;
+    // Żądanie trybutu frakcji, o ile jeszcze obowiązuje; przeterminowane kasuje.
+    std::optional<PendingRansom> active_ransom(const std::string& faction, std::int64_t now_ms);
     bool has_active_raid(const std::string& faction, std::int64_t now_ms) const;
     void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
 
@@ -251,7 +249,7 @@ private:
     std::string contract_faction(const Event& ev, const std::string& contract_id) const;
     // Głos frakcji szablonem "neutral" z pominięciem LLM (komendy /zf okup...).
     void push_template_voice(std::vector<RadioOut>& out, const std::string& faction) const;
-    // Opis wiszącego trybutu do kontekstu rozmowy ("" = brak; przeterminowany zostaje skasowany).
+    // Opis wiszącego trybutu do kontekstu rozmowy ("" = brak albo termin już minął).
     std::string pending_ransom_context(const std::string& faction, std::int64_t now_ms);
     // Startowe relacje frakcja↔frakcja (raz na świat) — bez nich polityka nie istnieje.
     void seed_faction_politics();
@@ -292,6 +290,11 @@ private:
                      std::vector<RadioOut>& out);
     void handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
+    // Świeżo wczytany świat: mod nie utrwala skrzynek zrzutu, więc wiszące żądania
+    // trybutu przepadają razem z nimi (inaczej frakcja kazałaby wozić do skrzynki,
+    // której nie ma).
+    void handle_session_start(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                              std::vector<RadioOut>& out);
     // Poszczególne komendy /zf obsługiwane przez handle_debug.
     void debug_spawn(const Event& ev, const Config& cfg, std::int64_t now_ms,
                      std::vector<RadioOut>& out);

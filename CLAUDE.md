@@ -83,7 +83,11 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
 - Dryf dotyczy WYŁĄCZNIE relacji do gracza. Wojny między frakcjami nie kończy
   upływ czasu, tylko zdarzenia.
 - Stan długiego oddechu (aktywny rajd z TTL 60 min, cooldowny spawnu i
-  kontraktów) siedzi w SQLite — restart brainu w trakcie rajdu nie gubi okupu.
+  kontraktów, wiszące żądanie trybutu — tabela `pending_ransom`) siedzi w SQLite —
+  restart brainu w trakcie rajdu nie gubi okupu. Żądanie trybutu gaśnie też przy
+  `session_start` (mod NIE utrwala skrzynek zrzutu, po wczytaniu świata sprząta je jako
+  sieroty i nie wysyła `ransom_expired`) oraz po terminie + 5 min — inaczej jeden
+  zgubiony `ransom_expired` blokowałby frakcji kolejne trybuty na zawsze.
 - **Reputacja natywna (hybryda):** po każdej zmianie relacji brain wysyła
   `reputation_sync`, a mod zapisuje wartość przez `MyAPIGateway.Session.Factions`
   (`SetReputationBetweenPlayerAndFaction`, dla polityki `SetReputation`). Odwzorowanie
@@ -402,10 +406,10 @@ docs/protocol.md                # spec mostka JSONL
   obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
   `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
   Wcześniej CI robiło `grep` na stdout, czyli sprawdzało tylko, że brain się nie wywrócił.
-  Cztery pliki, 112 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
+  Cztery pliki, 119 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
   wyłącznie ręcznie:
   `ceny.jsonl` (N2–N8, N12), `kontrakty.jsonl` (I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, M4),
-  `okup.jsonl` (K2–K6, L1–L3 + decyzje modelu), `reputacja.jsonl` (M1–M3, M7).
+  `okup.jsonl` (K2–K6, L1–L3 + decyzje modelu i trwałość trybutu), `reputacja.jsonl` (M1–M3, M7).
   Decyzję po odpowiedzi LLM (okup kredytowy / trybut / odpuszczenie) rozstrzyga
   `Engine::on_llm_reply` — woła ją i `main.cpp`, i oczekiwanie `okup_kredytowy`
   (pola `odpuszcza`/`zada_surowce` udają decyzję modelu). Wcześniej ta logika żyła

@@ -53,3 +53,14 @@ CREATE TABLE IF NOT EXISTS ransom_credibility (
   faction TEXT PRIMARY KEY,
   broken INTEGER NOT NULL DEFAULT 0        -- ile razy gracz złamał obietnicę okupu
 );
+
+-- Wiszące żądanie trybutu (B+): jedno na frakcję. W SQLite, a nie w RAM, bo restart
+-- brainu w trakcie żądania gubił termin — frakcja zmyślała wtedy „ile zostało czasu"
+-- i pozwalała zdublować skrzynkę. Gaśnie przy dostawie/terminie/pokoju, przy
+-- session_start (mod nie utrwala swoich skrzynek) i po terminie z zapasem.
+CREATE TABLE IF NOT EXISTS pending_ransom (
+  faction TEXT PRIMARY KEY,
+  item TEXT NOT NULL,                      -- logiczny klucz surowca (Iron, Nickel...)
+  amount INTEGER NOT NULL,
+  deadline_ms INTEGER NOT NULL             -- unix ms, czas braina
+);
