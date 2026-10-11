@@ -390,7 +390,8 @@ docs/protocol.md                # spec mostka JSONL
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
 - `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy
   zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
-  i wagami typów kontraktów. Testy wymuszają
+  i wagami typów kontraktów, słowniki (`types_test`: klucze stanów i typów na granicy
+  SQLite/JSON/TOML). Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
 - **Strażnicy długu technicznego** (2026-08-08). Osobna kategoria: nie bronią działającej
   mechaniki, tylko decyzji „tego jeszcze NIE WŁĄCZAMY, bo brakuje drugiej połowy". Taka
@@ -466,6 +467,12 @@ docs/protocol.md                # spec mostka JSONL
   Gotowiec: `tools/sprawdz-mod.ps1` (sam znajduje Bin64 i Roslyna, filtruje natywne DLL).
 
 ## Konwencje
+
+- Brain: stan frakcji i typ zlecenia to enumy (`FactionState`, `ContractKind` w
+  `brain/src/types.hpp`). Stringi („spokoj", „nagroda"…) WYŁĄCZNIE na granicach —
+  SQLite, JSON do moda, klucze w `rules.toml`, logi — przez `to_key`/`parse_*`.
+  Porównanie z gołym stringiem w środku silnika to błąd, którego kompilator już nie
+  przepuści; formaty na drucie i w bazie zostały bez zmian.
 
 - C#: ModAPI whitelist! Zero System.Net, zero plików poza
   MyAPIGateway.Utilities.*FileInStorage. Jeden MySessionComponentBase.

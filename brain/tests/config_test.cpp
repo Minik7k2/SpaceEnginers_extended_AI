@@ -99,28 +99,30 @@ int main() {
                              "[kontrakty.typy.KRW]\nnagroda = 5\nnaprawa = 0\n"
                              "[kontrakty.mnoznik]\nnagroda = 1.5\n");
     {
+        using K = zf::ContractKind;
+        using S = zf::FactionState;
         const zf::Config cfg = zf::load_config(cfg_path.string());
-        assert(zf::contract_kind_weight(cfg, "WGR", "dostawa", "spokoj") == 2 &&
+        assert(zf::contract_kind_weight(cfg, "WGR", K::Dostawa, S::Spokoj) == 2 &&
                "waga domyślna z [kontrakty.typy]");
-        assert(zf::contract_kind_weight(cfg, "KRW", "nagroda", "spokoj") == 5 &&
+        assert(zf::contract_kind_weight(cfg, "KRW", K::Nagroda, S::Spokoj) == 5 &&
                "[kontrakty.typy.KRW] bije wartość domyślną");
-        assert(zf::contract_kind_weight(cfg, "WGR", "nagroda", "spokoj") == 1 &&
+        assert(zf::contract_kind_weight(cfg, "WGR", K::Nagroda, S::Spokoj) == 1 &&
                "nadpisanie KRW nie dotyczy WGR");
-        assert(zf::contract_kind_weight(cfg, "WGR", "nagroda", "wojna") == 4 &&
+        assert(zf::contract_kind_weight(cfg, "WGR", K::Nagroda, S::Wojna) == 4 &&
                "wojna podbija wagę nagrody o mnoznik_nagrody_w_napieciu");
-        assert(zf::contract_kind_weight(cfg, "WGR", "poszukiwania", "wojna") == 0 &&
+        assert(zf::contract_kind_weight(cfg, "WGR", K::Poszukiwania, S::Wojna) == 0 &&
                "waga 0 wyłącza typ na dobre");
-        assert(zf::contract_kind_weight(cfg, "KRW", "naprawa", "spokoj") == 0);
-        assert(zf::contract_kind_weight(cfg, "WGR", "transport", "spokoj") == 2 &&
+        assert(zf::contract_kind_weight(cfg, "KRW", K::Naprawa, S::Spokoj) == 0);
+        assert(zf::contract_kind_weight(cfg, "WGR", K::Transport, S::Spokoj) == 2 &&
                "typ nieobecny w configu ma wagę wbudowaną");
-        assert(zf::contract_kind_multiplier(cfg, "nagroda") == 1.5);
-        assert(zf::contract_kind_multiplier(cfg, "dostawa") == 1.0 && "brak wpisu => 1.0");
+        assert(zf::contract_kind_multiplier(cfg, K::Nagroda) == 1.5);
+        assert(zf::contract_kind_multiplier(cfg, K::Dostawa) == 1.0 && "brak wpisu => 1.0");
 
         write_file(tmp / "rules.local.toml", "[kontrakty.typy]\nposzukiwania = 3\n");
         const zf::Config lokalny = zf::load_config(cfg_path.string());
-        assert(zf::contract_kind_weight(lokalny, "WGR", "poszukiwania", "spokoj") == 3 &&
+        assert(zf::contract_kind_weight(lokalny, "WGR", K::Poszukiwania, S::Spokoj) == 3 &&
                "rules.local.toml ma przestawiać pojedynczą wagę");
-        assert(zf::contract_kind_weight(lokalny, "KRW", "nagroda", "spokoj") == 5 &&
+        assert(zf::contract_kind_weight(lokalny, "KRW", K::Nagroda, S::Spokoj) == 5 &&
                "nakładka nie może gubić nadpisań frakcji z pliku głównego");
         fs::remove(tmp / "rules.local.toml", ec);
     }

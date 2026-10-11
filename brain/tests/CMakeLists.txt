@@ -18,6 +18,8 @@ zf_add_test(engine_test engine_test.cpp)
 # Sanityzacja wyjścia modelu — czysta logika tekstowa, działa też w buildzie bez llama.cpp.
 zf_add_test(llm_test llm_test.cpp)
 zf_add_test(config_test config_test.cpp)
+# Słowniki (stany frakcji, typy zleceń): klucze na granicy SQLite/JSON/TOML.
+zf_add_test(types_test types_test.cpp)
 
 # Strażnicy długu technicznego: pilnują, żeby rzeczy ŚWIADOMIE wyłączone (typy zleceń bez
 # drugiej połowy implementacji) nie wróciły do gry przez jedną cyfrę w configu. Test czyta

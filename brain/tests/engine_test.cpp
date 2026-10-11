@@ -105,7 +105,7 @@ int main() {
         bool krw_at_war = false;
         for (const zf::FactionRow& row : db.list_factions()) {
             if (row.tag == "KRW") {
-                krw_at_war = row.state == "wojna";
+                krw_at_war = row.state == zf::FactionState::Wojna;
             }
         }
         assert(krw_at_war && "relacja <= prog_wojna ma przełączać stan na wojnę");
@@ -120,7 +120,7 @@ int main() {
     engine.tick(cfg, now, /*force=*/true);
     for (const zf::FactionRow& row : db.list_factions()) {
         if (row.tag == "KRW") {
-            assert(row.state == "wojna" && "histereza: -55 to wciąż wojna");
+            assert(row.state == zf::FactionState::Wojna && "histereza: -55 to wciąż wojna");
         }
     }
 
@@ -130,7 +130,7 @@ int main() {
     engine.tick(cfg, now, /*force=*/true);
     for (const zf::FactionRow& row : db.list_factions()) {
         if (row.tag == "KRW") {
-            assert(row.state == "napiecie" && "powyżej histerezy wojna przechodzi w napięcie");
+            assert(row.state == zf::FactionState::Napiecie && "powyżej histerezy wojna przechodzi w napięcie");
         }
     }
 
@@ -321,7 +321,7 @@ int main() {
         bool still_war = false;
         for (const zf::FactionRow& row : rdb.list_factions()) {
             if (row.tag == "KRW") {
-                still_war = row.state == "wojna";
+                still_war = row.state == zf::FactionState::Wojna;
             }
         }
         assert(still_war && "po złamaniu obietnicy ataki trwają (wojna)");
@@ -540,30 +540,30 @@ int main() {
         te.on_event(make_event("session_start", {{"world", "T"}}), tcfg, t);
 
         // Waga 0 wyłącza typ: same dostawy, nic innego.
-        for (const std::string& kind : zf::Config::contract_kinds()) {
-            tcfg.kontrakty_wagi[""][kind] = kind == "dostawa" ? 1.0 : 0.0;
+        for (const zf::ContractKind kind : zf::kContractKinds) {
+            tcfg.kontrakty_wagi[""][kind] = kind == zf::ContractKind::Dostawa ? 1.0 : 0.0;
         }
         for (int i = 0; i < 20; i++) {
             auto out = te.on_event(
                 make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "WGR"}}), tcfg, t);
             (void)out;
             auto offers = te.take_contracts();
-            assert(offers.size() == 1 && offers[0].kind == "dostawa" &&
+            assert(offers.size() == 1 && offers[0].kind == zf::ContractKind::Dostawa &&
                    "waga 0 ma wyłączyć wszystkie typy poza dostawą");
         }
 
         // Nadpisanie per frakcja bije wartość domyślną.
-        tcfg.kontrakty_wagi["KRW"]["naprawa"] = 5.0;
-        tcfg.kontrakty_wagi["KRW"]["dostawa"] = 0.0;
+        tcfg.kontrakty_wagi["KRW"][zf::ContractKind::Naprawa] = 5.0;
+        tcfg.kontrakty_wagi["KRW"][zf::ContractKind::Dostawa] = 0.0;
         for (int i = 0; i < 20; i++) {
             te.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "KRW"}}), tcfg, t);
             auto offers = te.take_contracts();
-            assert(offers.size() == 1 && offers[0].kind == "naprawa" &&
+            assert(offers.size() == 1 && offers[0].kind == zf::ContractKind::Naprawa &&
                    "[kontrakty.typy.KRW] ma nadpisywać wagi domyślne");
         }
         // ...ale tylko dla swojej frakcji.
         te.on_event(make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "WGR"}}), tcfg, t);
-        assert(te.take_contracts()[0].kind == "dostawa" && "nadpisanie KRW nie dotyczy WGR");
+        assert(te.take_contracts()[0].kind == zf::ContractKind::Dostawa && "nadpisanie KRW nie dotyczy WGR");
 
         // Nagroda za głowę: cel to frakcja, z którą wystawca jest poniżej prog_wrogi
         // (polityka z session_start: HEL/KRW -70). Bez wroga typ w ogóle nie wchodzi.
@@ -571,12 +571,12 @@ int main() {
             make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "KRW"}, {"kind", "nagroda"}}),
             tcfg, t);
         auto offers = te.take_contracts();
-        assert(offers.size() == 1 && offers[0].kind == "nagroda");
+        assert(offers.size() == 1 && offers[0].kind == zf::ContractKind::Nagroda);
         assert(offers[0].target_faction == "HEL" && "cel nagrody = najgorsza relacja w polityce");
         assert(bounty.size() == 1 && bounty[0].faction == "SYSTEM");
 
         // Mnożnik trudności podnosi nagrodę w kredytach...
-        tcfg.kontrakty_mnoznik["nagroda"] = 2.0;
+        tcfg.kontrakty_mnoznik[zf::ContractKind::Nagroda] = 2.0;
         te.on_event(
             make_event("debug_command", {{"cmd", "kontrakt"}, {"faction", "KRW"}, {"kind", "nagroda"}}),
             tcfg, t);

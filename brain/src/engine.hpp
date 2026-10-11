@@ -80,11 +80,12 @@ struct PriceOut {
 struct ContractOut {
     std::string faction;
     // dostawa | nagroda | transport | naprawa | poszukiwania | wlasne
-    // (Config::contract_kinds(); każdy ma swoją klasę w Sandbox.ModAPI.Contracts).
+    // (kContractKinds; każdy ma swoją klasę w Sandbox.ModAPI.Contracts). Na drut idzie
+    // jako to_key(kind).
     // Silnik wybiera typ wagami z [kontrakty.typy], ale OSTATNIE słowo ma mod: jeśli
     // nie znajdzie w świecie celu (wrogiego pilota, drugiego bloku, uszkodzonej
     // siatki...), wystawia dostawę i to ona wraca w contract_created.
-    std::string kind;
+    ContractKind kind = ContractKind::Dostawa;
     std::int64_t reward = 0;   // kredyty (po mnożniku trudności typu)
     int duration_min = 45;
     // Tylko dla "nagroda": frakcja, na której głowę idzie zlecenie (najgorsza relacja
@@ -238,9 +239,9 @@ private:
     void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
 
     void ensure_known_faction(const std::string& tag);
-    // Wiersz frakcji z bazy (nullopt = nieznany tag) i sam jej stan ("spokoj" dla nieznanej).
+    // Wiersz frakcji z bazy (nullopt = nieznany tag) i sam jej stan (Spokoj dla nieznanej).
     std::optional<FactionRow> find_faction(const std::string& tag) const;
-    std::string faction_state(const std::string& tag) const;
+    FactionState faction_state(const std::string& tag) const;
     // Czy od znacznika czasu pod `key` w SQLite minęło mniej niż period_ms (0 = nigdy).
     bool on_cooldown(const std::string& key, std::int64_t period_ms, std::int64_t now_ms) const;
     // Zmiana relacji frakcja->gracz z linią logu "relacja X->gracz <delta> <why> => <wynik>".
@@ -332,11 +333,11 @@ private:
                               std::vector<RadioOut>& out);
     // Losowanie typu zlecenia wagami z [kontrakty.typy] (nadpisania per frakcja, podbicie
     // "nagrody" w napięciu/wojnie). Typy bez sensownego celu są odsiewane: nagroda wymaga
-    // frakcji, z którą wystawca jest na bakier. "" = brak choćby jednego typu z wagą > 0.
-    std::string pick_contract_kind(const std::string& faction, const Config& cfg);
+    // frakcji, z którą wystawca jest na bakier. nullopt = brak typu z wagą > 0.
+    std::optional<ContractKind> pick_contract_kind(const std::string& faction, const Config& cfg);
     // Wystawia zlecenie do bufora: nagroda po mnożniku trudności, cel dla nagrody,
     // a dla eskorty dorzuca konwój przez MES (nie ma czego eskortować bez statku).
-    void queue_contract(const std::string& faction, const std::string& kind, double relation,
+    void queue_contract(const std::string& faction, ContractKind kind, double relation,
                         const Config& cfg, std::int64_t now_ms);
     // Frakcja, na której głowę wystawca może dać nagrodę: najgorsza relacja w polityce
     // i musi być poniżej prog_wrogi. "" = wystawca z nikim nie jest na wojennej stopie.

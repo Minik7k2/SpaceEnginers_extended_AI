@@ -70,6 +70,7 @@ add_library(zf_core STATIC
   src/fallback.cpp
   src/llm.cpp
   src/scenariusz.cpp
+  src/types.cpp
 )
 
 target_include_directories(zf_core PUBLIC

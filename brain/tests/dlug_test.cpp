@@ -43,32 +43,32 @@ namespace {
 // wprost do komunikatu FAIL, żeby ten, kto zmienił wagę, przeczytał go bez wchodzenia
 // w CLAUDE.md.
 struct Blokada {
-    const char* typ;
+    zf::ContractKind typ;
     const char* powod;
     const char* warunek_odblokowania;
 };
 
 const std::vector<Blokada> kBlokady = {
-    {"wlasne",
+    {zf::ContractKind::Wlasne,
      "IMyContractCustom NIE MA warunku wykonania — MyContractConditionCustom kończy "
      "wyłącznie mod przez IMyContractSystem.TryFinishCustomContract(id), czego nie robimy. "
      "Gracz dostaje zlecenie bez zadania, które wygasa na karę relacji i przepadek kaucji",
      "zaimplementuj warunek po stronie moda (TryFinishCustomContract w Contracts.cs) "
      "i dopiero wtedy podnieś wagę"},
-    // "eskorta" NIE MA już w tej tabeli, bo nie ma jej w Config::contract_kinds() —
+    // "eskorta" NIE MA już w tej tabeli, bo nie ma jej w zf::kContractKinds —
     // typ został usunięty 2026-08-09, a nie tylko wyłączony wagą. Blokada pilnuje typów
     // ISTNIEJĄCYCH, ale niegotowych; typu, którego nie ma, pilnuje sama jego nieobecność
     // (D3 niżej wyłapie, gdyby ktoś wrócił z nim do listy bez wagi).
-    {"nagroda",
+    {zf::ContractKind::Nagroda,
      "vanillowa nagroda za głowę liczy zabicia GRACZY, nie NPC — zlecenie na tożsamość "
      "bota nie ma jak się zaliczyć",
      "potwierdź W GRZE (I14 w docs/testy-reczne.md), że zabicie NPC zamyka kontrakt"},
 };
 
-// Stany maszyny frakcji — waga może zależeć od stanu (nagroda × mnoznik_nagrody_w_napieciu).
-const std::vector<std::string> kStany = {"spokoj", "napiecie", "wojna"};
+// Klucz typu w komunikatach — ten sam, który człowiek zobaczy w rules.toml.
+std::string klucz(zf::ContractKind typ) { return zf::to_key(typ); }
 
-bool zablokowany(const std::string& typ) {
+bool zablokowany(zf::ContractKind typ) {
     return std::any_of(kBlokady.begin(), kBlokady.end(),
                        [&](const Blokada& b) { return typ == b.typ; });
 }
@@ -119,14 +119,15 @@ int main() {
         // a trzy identyczne akapity z powodem blokady tylko zaśmiecają raport.
         std::set<std::string> zle;
         for (const std::string& frakcja : frakcje) {
-            for (const std::string& stan : kStany) {
+            // Waga może zależeć od stanu (nagroda × mnoznik_nagrody_w_napieciu).
+            for (const zf::FactionState stan : zf::kFactionStates) {
                 if (zf::contract_kind_weight(cfg, frakcja, b.typ, stan) > 0) {
                     zle.insert(frakcja);
                 }
             }
         }
         if (zle.empty()) {
-            ok(std::string(b.typ) + " zablokowane wszędzie (domyślnie i per frakcja)");
+            ok(klucz(b.typ) + " zablokowane wszędzie (domyślnie i per frakcja)");
             continue;
         }
         std::string gdzie;
@@ -134,12 +135,12 @@ int main() {
             gdzie += (gdzie.empty() ? "" : ", ") + std::string("[kontrakty.typy") +
                      (frakcja.empty() ? "" : "." + frakcja) + "]";
         }
-        zglos(std::string(b.typ) + " ma wagę > 0 w: " + gdzie + " — a ma być 0 WSZĘDZIE.\n" +
+        zglos(klucz(b.typ) + " ma wagę > 0 w: " + gdzie + " — a ma być 0 WSZĘDZIE.\n" +
               "       POWÓD BLOKADY: " + b.powod + ".\n" +
               "       ŻEBY ODBLOKOWAĆ: " + b.warunek_odblokowania + ".\n" +
               "       UWAGA: nadpisanie [kontrakty.typy.<frakcja>] WYGRYWA z wartością "
-              "domyślną, więc `" + b.typ + " = 0` u góry pliku samo nie wystarcza.\n" +
-              "       Jeśli dług NAPRAWDĘ został spłacony — usuń wpis \"" + b.typ +
+              "domyślną, więc `" + klucz(b.typ) + " = 0` u góry pliku samo nie wystarcza.\n" +
+              "       Jeśli dług NAPRAWDĘ został spłacony — usuń wpis \"" + klucz(b.typ) +
               "\" z kBlokady w tym pliku. To skreślenie jest jedynym miejscem, w którym "
               "ktoś musi świadomie potwierdzić, że warunek wyżej jest spełniony.");
     }
@@ -149,35 +150,36 @@ int main() {
         // 0 × N = 0 — komentarz w config.cpp to obiecuje, więc niech to będzie sprawdzone.
         // Gdyby ktoś zmienił mnożnik na dodawanie, `nagroda` wróciłaby do puli w każdej
         // frakcji w napięciu i nikt by tego nie zauważył poza grą.
-        const double spokoj = zf::contract_kind_weight(cfg, "KRW", "nagroda", "spokoj");
-        const double wojna = zf::contract_kind_weight(cfg, "KRW", "nagroda", "wojna");
+        const double spokoj = zf::contract_kind_weight(cfg, "KRW", zf::ContractKind::Nagroda, zf::FactionState::Spokoj);
+        const double wojna = zf::contract_kind_weight(cfg, "KRW", zf::ContractKind::Nagroda, zf::FactionState::Wojna);
         sprawdz(spokoj == 0 && wojna == 0,
                 "nagroda: 0 w spokoju => 0 w wojnie (mnoznik_nagrody_w_napieciu nie włącza typu)");
     }
 
     std::cout << "== D3. Typy NIEzablokowane naprawdę wchodzą do losowania\n";
-    for (const std::string& typ : zf::Config::contract_kinds()) {
+    for (const zf::ContractKind typ : zf::kContractKinds) {
         if (zablokowany(typ)) {
             continue;
         }
         bool gdziekolwiek = false;
         for (const std::string& frakcja : frakcje) {
-            gdziekolwiek = gdziekolwiek || zf::contract_kind_weight(cfg, frakcja, typ, "spokoj") > 0;
+            gdziekolwiek = gdziekolwiek || zf::contract_kind_weight(cfg, frakcja, typ,
+                                                                    zf::FactionState::Spokoj) > 0;
         }
         // Typ z wagą 0 wszędzie, ale BEZ wpisu w kBlokady, to dług nieudokumentowany:
         // albo ktoś wyłączył go po cichu, albo zapomniał opisać dlaczego.
-        sprawdz(gdziekolwiek, "typ " + typ + " ma wagę > 0 u co najmniej jednej frakcji "
+        sprawdz(gdziekolwiek, "typ " + klucz(typ) + " ma wagę > 0 u co najmniej jednej frakcji "
                               "(inaczej: albo dopisz go do kBlokady z powodem, albo przywróć wagę)");
     }
 
     std::cout << "== D4. Każdy typ ma JAWNY mnożnik trudności w [kontrakty.mnoznik]\n";
-    for (const std::string& typ : zf::Config::contract_kinds()) {
+    for (const zf::ContractKind typ : zf::kContractKinds) {
         // Brak wpisu daje po cichu 1.0 — zlecenie jest wtedy wycenione jak dostawa, choć
         // może być dwa razy trudniejsze. Pytamy o KLUCZ, nie o wartość: „1.0, bo tak
         // zdecydowaliśmy" i „1.0, bo zapomnieliśmy wpisać" są nie do odróżnienia po samej
         // liczbie, a to druga wersja jest błędem.
         const bool jawny = cfg.kontrakty_mnoznik.count(typ) > 0;
-        sprawdz(jawny, "typ " + typ + " ma wpis w [kontrakty.mnoznik]" +
+        sprawdz(jawny, "typ " + klucz(typ) + " ma wpis w [kontrakty.mnoznik]" +
                            (jawny ? " (" + std::to_string(zf::contract_kind_multiplier(cfg, typ)) +
                                         ")"
                                   : " — brak wpisu, wycena po cichu spada do 1.0"));
@@ -227,11 +229,11 @@ int main() {
                 ev.data = {{"cmd", "kontrakt"}, {"faction", frakcja}};
                 engine.on_event(ev, cfg, ts);
                 for (const zf::ContractOut& c : engine.take_contracts()) {
-                    ++rozklad[c.kind];
+                    ++rozklad[klucz(c.kind)];
                     if (zablokowany(c.kind)) {
                         // Zliczamy zamiast meldować od razu: przy wadze 2 na 8 to byłoby
                         // 300 identycznych linii, w których ginie reszta raportu.
-                        ++wpadki[frakcja + " " + c.kind];
+                        ++wpadki[frakcja + " " + klucz(c.kind)];
                     }
                 }
             }

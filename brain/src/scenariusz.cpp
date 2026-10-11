@@ -77,7 +77,7 @@ std::string opis_kontraktow(const std::vector<ContractOut>& kontrakty) {
     }
     std::string s;
     for (const ContractOut& c : kontrakty) {
-        s += (s.empty() ? "" : ", ") + c.faction + " " + c.kind + " za " +
+        s += (s.empty() ? "" : ", ") + c.faction + " " + to_key(c.kind) + " za " +
              std::to_string(c.reward) + " kr";
     }
     return s;
@@ -250,7 +250,7 @@ void sprawdz_oczekiwanie(const nlohmann::json& linia, Bufory& buf, Db& db, Engin
         const ContractOut* znaleziony = nullptr;
         for (const ContractOut& c : buf.kontrakty) {
             if (c.faction == frakcja &&
-                (!ma(linia, "typ") || c.kind == linia["typ"].get<std::string>())) {
+                (!ma(linia, "typ") || to_key(c.kind) == linia["typ"].get<std::string>())) {
                 znaleziony = &c;
             }
         }
@@ -270,7 +270,7 @@ void sprawdz_oczekiwanie(const nlohmann::json& linia, Bufory& buf, Db& db, Engin
         if (ma(linia, "cel")) {
             dobrze = dobrze && znaleziony->target_faction == linia["cel"].get<std::string>();
         }
-        k.sprawdz(dobrze, "zlecenie " + frakcja + " " + znaleziony->kind,
+        k.sprawdz(dobrze, "zlecenie " + frakcja + " " + to_key(znaleziony->kind),
                   opis_kontraktow(buf.kontrakty));
         return;
     }

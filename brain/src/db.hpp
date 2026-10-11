@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "types.hpp"
+
 struct sqlite3;
 
 namespace zf {
@@ -13,7 +15,7 @@ namespace zf {
 struct FactionRow {
     std::string tag;
     std::string name;
-    std::string state;        // spokoj / napiecie / wojna
+    FactionState state = FactionState::Spokoj; // w SQLite jako klucz ("spokoj"...)
     int action_budget = 0;
 };
 
@@ -51,7 +53,7 @@ public:
     // Rejestruje frakcję jeśli nieznana (stan startowy: spokoj). Nie nadpisuje istniejącej.
     void ensure_faction(const std::string& tag, const std::string& name);
     std::vector<FactionRow> list_factions() const;
-    void set_faction_state(const std::string& tag, const std::string& state);
+    void set_faction_state(const std::string& tag, FactionState state);
     void set_faction_budget(const std::string& tag, int budget);
 
     // Relacja a→b (b to 'PLAYER' albo tag frakcji). Brak wiersza = 0 / cap 100.

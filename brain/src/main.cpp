@@ -278,9 +278,10 @@ int main(int argc, char** argv) {
         // Zlecenia kontraktów (Etap 6) — osobny kanał, tak jak spawny.
         const auto flush_contracts = [&commands, &engine]() {
             for (const zf::ContractOut& c : engine.take_contracts()) {
-                commands.write_contract_create(c.faction, c.kind, c.reward, c.duration_min,
-                                               c.target_faction);
-                std::cout << "[brain] contract_create [" << c.faction << "] " << c.kind << " za "
+                commands.write_contract_create(c.faction, zf::to_key(c.kind), c.reward,
+                                               c.duration_min, c.target_faction);
+                std::cout << "[brain] contract_create [" << c.faction << "] " << zf::to_key(c.kind)
+                          << " za "
                           << c.reward << " kr, " << c.duration_min << " min"
                           << (c.target_faction.empty() ? "" : ", cel " + c.target_faction) << "\n";
             }

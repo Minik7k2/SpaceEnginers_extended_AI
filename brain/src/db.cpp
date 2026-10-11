@@ -141,14 +141,14 @@ std::vector<FactionRow> Db::list_factions() const {
     Stmt s(handle_, "SELECT tag, name, state, action_budget FROM factions ORDER BY tag;");
     std::vector<FactionRow> rows;
     while (s.row()) {
-        rows.push_back({s.col_text(0), s.col_text(1), s.col_text(2), s.col_int(3)});
+        rows.push_back({s.col_text(0), s.col_text(1), parse_faction_state(s.col_text(2)), s.col_int(3)});
     }
     return rows;
 }
 
-void Db::set_faction_state(const std::string& tag, const std::string& state) {
+void Db::set_faction_state(const std::string& tag, FactionState state) {
     Stmt s(handle_, "UPDATE factions SET state = ? WHERE tag = ?;");
-    s.text(1, state).text(2, tag).done();
+    s.text(1, to_key(state)).text(2, tag).done();
 }
 
 void Db::set_faction_budget(const std::string& tag, int budget) {
