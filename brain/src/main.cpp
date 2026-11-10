@@ -8,6 +8,7 @@
 #include <iostream>
 #include <map>
 #include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -75,48 +76,54 @@ std::int64_t now_unix_ms() {
 
 // Log obserwacyjny zdarzenia (relacje i radio robi Engine).
 void log_event(const zf::Event& ev) {
-    const auto str = [&ev](const char* key) {
-        return ev.data.contains(key) && ev.data[key].is_string() ? ev.data[key].get<std::string>()
-                                                                 : std::string{};
-    };
-    const auto num = [&ev](const char* key) {
-        return ev.data.contains(key) && ev.data[key].is_number() ? ev.data[key].get<double>() : 0.0;
-    };
-
     if (ev.type == "session_start") {
-        std::cout << "[brain] session_start: świat=" << str("world") << " gracz=" << str("player_name")
-                  << "\n";
+        std::cout << "[brain] session_start: świat=" << ev.str("world")
+                  << " gracz=" << ev.str("player_name") << "\n";
     } else if (ev.type == "chat_message") {
-        std::cout << "[brain] chat_message: \"" << str("text") << "\"\n";
+        std::cout << "[brain] chat_message: \"" << ev.str("text") << "\"\n";
     } else if (ev.type == "combat_hit") {
-        std::cout << "[brain] combat_hit: frakcja=" << str("faction") << " dmg=" << num("damage")
-                  << " trafień=" << num("hits") << " broń=" << str("weapon") << "\n";
+        std::cout << "[brain] combat_hit: frakcja=" << ev.str("faction")
+                  << " dmg=" << ev.num("damage") << " trafień=" << ev.num("hits")
+                  << " broń=" << ev.str("weapon") << "\n";
     } else if (ev.type == "grid_destroyed") {
-        std::cout << "[brain] grid_destroyed: frakcja=" << str("faction") << " siatka=\"" << str("grid")
-                  << "\"\n";
+        std::cout << "[brain] grid_destroyed: frakcja=" << ev.str("faction")
+                  << " siatka=\"" << ev.str("grid") << "\"\n";
     } else if (ev.type == "proximity") {
-        std::cout << "[brain] proximity: frakcja=" << str("faction") << " stan=" << str("state")
-                  << " dystans=" << num("dist") << " m\n";
+        std::cout << "[brain] proximity: frakcja=" << ev.str("faction") << " stan=" << ev.str("state")
+                  << " dystans=" << ev.num("dist") << " m\n";
     } else if (ev.type == "debug_command") {
-        std::cout << "[brain] debug_command: " << str("cmd") << "\n";
+        std::cout << "[brain] debug_command: " << ev.str("cmd") << "\n";
     } else if (ev.type == "autotest_result") {
         // /zf autotest w grze: wynik ląduje też tutaj, żeby cały przebieg dało się
         // przeczytać w jednym miejscu (i wkleić z logu, zamiast przepisywać z czatu).
-        std::cout << "[brain] autotest [" << str("sekcja") << "] " << str("wynik") << " "
-                  << str("nazwa");
-        if (!str("opis").empty()) {
-            std::cout << " — " << str("opis");
+        std::cout << "[brain] autotest [" << ev.str("sekcja") << "] " << ev.str("wynik") << " "
+                  << ev.str("nazwa");
+        if (!ev.str("opis").empty()) {
+            std::cout << " — " << ev.str("opis");
         }
         std::cout << "\n";
     } else if (ev.type == "autotest_summary") {
         // Domknięcie przebiegu. Bez tej linii z logu nie dało się odróżnić testu, który
         // przeszedł w całości, od takiego, który urwał się w połowie sekcji — widać było
         // tylko pojedyncze kroki i nie wiadomo było, ile ich miało być.
-        std::cout << "[brain] autotest [" << str("sekcja") << "] KONIEC: " << num("pass")
-                  << " PASS, " << num("fail") << " FAIL, " << num("warn") << " OSTRZEŻEŃ (z "
-                  << num("krokow") << " kroków)\n";
+        std::cout << "[brain] autotest [" << ev.str("sekcja") << "] KONIEC: " << ev.num("pass")
+                  << " PASS, " << ev.num("fail") << " FAIL, " << ev.num("warn") << " OSTRZEŻEŃ (z "
+                  << ev.num("krokow") << " kroków)\n";
     }
     // heartbeat celowo bez logu — od Etapu 3 tylko zaśmiecał konsolę.
+}
+
+// Przycięcie po BAJTACH rozcinało polskie litery (2 bajty) i wstawiało do promptu
+// śmieć — cofamy się do początku znaku UTF-8.
+std::string clip_utf8(std::string text, std::size_t max_bytes) {
+    if (text.size() > max_bytes) {
+        std::size_t n = max_bytes;
+        while (n > 0 && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) {
+            --n;
+        }
+        text.resize(n);
+    }
+    return text;
 }
 
 // Prompt systemowy: karta persony z pliku + świeża pamięć frakcji z SQLite.
@@ -271,9 +278,10 @@ int main(int argc, char** argv) {
         // Zlecenia kontraktów (Etap 6) — osobny kanał, tak jak spawny.
         const auto flush_contracts = [&commands, &engine]() {
             for (const zf::ContractOut& c : engine.take_contracts()) {
-                commands.write_contract_create(c.faction, c.kind, c.reward, c.duration_min,
-                                               c.target_faction);
-                std::cout << "[brain] contract_create [" << c.faction << "] " << c.kind << " za "
+                commands.write_contract_create(c.faction, zf::to_key(c.kind), c.reward,
+                                               c.duration_min, c.target_faction);
+                std::cout << "[brain] contract_create [" << c.faction << "] " << zf::to_key(c.kind)
+                          << " za "
                           << c.reward << " kr, " << c.duration_min << " min"
                           << (c.target_faction.empty() ? "" : ", cel " + c.target_faction) << "\n";
             }
@@ -284,6 +292,7 @@ int main(int argc, char** argv) {
         // wiadomości (feedback z gry: „nie trzyma wątku"). Ephemeralna — na sesję braina.
         std::map<std::string, std::deque<std::pair<std::string, std::string>>> dialog;
         constexpr std::size_t kDialogTurns = 4;
+        constexpr std::size_t kDialogClipBytes = 200;
 
         const auto send_all = [&commands, &llm, &db, &dialog](const std::vector<zf::RadioOut>& msgs) {
             for (const zf::RadioOut& msg : msgs) {
@@ -345,51 +354,16 @@ int main(int argc, char** argv) {
                 // placeholder), żeby nie zaśmiecać historii. player_msg pusty poza czatem.
                 if (res.from_llm && !res.player_msg.empty()) {
                     auto& dq = dialog[res.faction];
-                    // Przycięcie po BAJTACH rozcinało polskie litery (2 bajty) i wstawiało
-                    // do promptu śmieć — cofamy się do początku znaku UTF-8.
-                    auto clip = [](std::string t) {
-                        if (t.size() > 200) {
-                            std::size_t n = 200;
-                            while (n > 0 && (static_cast<unsigned char>(t[n]) & 0xC0) == 0x80) {
-                                --n;
-                            }
-                            t.resize(n);
-                        }
-                        return t;
-                    };
-                    dq.emplace_back(clip(res.player_msg), clip(res.text));
+                    dq.emplace_back(clip_utf8(res.player_msg, kDialogClipBytes),
+                                    clip_utf8(res.text, kDialogClipBytes));
                     while (dq.size() > kDialogTurns) {
                         dq.pop_front();
                     }
                 }
-                // Twarda bramka na okup w kredytach: konkretna oferta pokryta saldem gracza
-                // kończy rajd, choćby model dalej mówił "dawaj więcej" (obserwacja z gry:
-                // 4,5B potrafi zapętlić targ i NIGDY nie ustawić odpuszcza=true).
-                const std::int64_t oferta = zf::parse_ransom_amount(res.player_msg);
-                const std::int64_t prog = engine.cash_ransom_threshold(res.faction, cfg);
-                const std::int64_t saldo = engine.player_balance();
-                // Ta sama funkcja jedzie w testach (scenariusze + engine_test) — decyzja
-                // o pokoju nie może się rozjechać między grą a tym, co sprawdza CI.
-                const zf::OcenaOkupu ocena = zf::ocen_oferte_okupu(oferta, prog, saldo);
-                const bool oferta_wiazaca = ocena == zf::OcenaOkupu::Wiazaca;
-                if (oferta_wiazaca) {
-                    std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
-                              << " kr >= próg " << prog << " kr (saldo " << saldo
-                              << ") — pokój niezależnie od decyzji modelu\n";
-                } else if (ocena == zf::OcenaOkupu::BezPokrycia) {
-                    std::cout << "[brain] okup kredytowy " << res.faction << ": oferta " << oferta
-                              << " kr bez pokrycia (saldo " << saldo << ") — pusta obietnica\n";
-                }
-
-                if (res.demand_goods && !oferta_wiazaca) {
-                    // B+: frakcja żąda trybutu w surowcach zamiast odpuścić — brain dobiera
-                    // towar/ilość/deadline z configu i wystawia ransom_demand (drenaż niżej).
-                    engine.request_goods_ransom(res.faction, cfg, now);
-                } else if (res.deescalate || oferta_wiazaca) {
-                    // Frakcja odpuszcza: kwota z wiadomości gracza (Etap 6) — mod pobierze ją
-                    // z konta przy stand_down.
-                    engine.apply_deescalation(res.faction, cfg, now, oferta);
-                }
+                // Decyzje (okup kredytowy, trybut, odpuszczenie) rozstrzyga silnik — ta sama
+                // ścieżka jedzie w scenariuszach, więc gra i CI nie mogą się rozjechać.
+                engine.on_llm_reply({res.faction, res.player_msg, res.deescalate, res.demand_goods},
+                                    cfg, now);
             }
             for (const auto& sd : engine.take_standdowns()) {
                 commands.write_stand_down(sd.first, sd.second);

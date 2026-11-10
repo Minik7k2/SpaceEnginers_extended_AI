@@ -83,7 +83,11 @@ napędzanym lokalnym LLM. Odpowiednik idei FS25_ZywiSasiedzi, ale w kosmosie.
 - Dryf dotyczy WYŁĄCZNIE relacji do gracza. Wojny między frakcjami nie kończy
   upływ czasu, tylko zdarzenia.
 - Stan długiego oddechu (aktywny rajd z TTL 60 min, cooldowny spawnu i
-  kontraktów) siedzi w SQLite — restart brainu w trakcie rajdu nie gubi okupu.
+  kontraktów, wiszące żądanie trybutu — tabela `pending_ransom`) siedzi w SQLite —
+  restart brainu w trakcie rajdu nie gubi okupu. Żądanie trybutu gaśnie też przy
+  `session_start` (mod NIE utrwala skrzynek zrzutu, po wczytaniu świata sprząta je jako
+  sieroty i nie wysyła `ransom_expired`) oraz po terminie + 5 min — inaczej jeden
+  zgubiony `ransom_expired` blokowałby frakcji kolejne trybuty na zawsze.
 - **Reputacja natywna (hybryda):** po każdej zmianie relacji brain wysyła
   `reputation_sync`, a mod zapisuje wartość przez `MyAPIGateway.Session.Factions`
   (`SetReputationBetweenPlayerAndFaction`, dla polityki `SetReputation`). Odwzorowanie
@@ -386,7 +390,8 @@ docs/protocol.md                # spec mostka JSONL
 - Mostek testowalny bez SE: dopisuj linie do events.jsonl ręcznie.
 - `ctest --test-dir brain/build`: mostek, silnik (relacje/stany/kontrakty/typy
   zleceń/polityka/cennik), sanityzacja wyjścia LLM, config z auto-wykrywaniem storage
-  i wagami typów kontraktów. Testy wymuszają
+  i wagami typów kontraktów, słowniki (`types_test`: klucze stanów i typów na granicy
+  SQLite/JSON/TOML). Testy wymuszają
   asserty także w Release (`-UNDEBUG`) — bez tego przechodziły nic nie sprawdzając.
 - **Strażnicy długu technicznego** (2026-08-08). Osobna kategoria: nie bronią działającej
   mechaniki, tylko decyzji „tego jeszcze NIE WŁĄCZAMY, bo brakuje drugiej połowy". Taka
@@ -402,10 +407,14 @@ docs/protocol.md                # spec mostka JSONL
   obok zdarzeń z gry stoją OCZEKIWANIA (`{"oczekuj":"ceny","frakcja":"WGR","mnoznik":1.18}`).
   `--replay` wraca kodem 1, gdy któreś nie wyjdzie, więc `ctest` uruchamia je wprost.
   Wcześniej CI robiło `grep` na stdout, czyli sprawdzało tylko, że brain się nie wywrócił.
-  Cztery pliki, 99 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
+  Cztery pliki, 119 sprawdzeń, pokrywają brainową połowę mechanik pilnowanych dotąd
   wyłącznie ręcznie:
   `ceny.jsonl` (N2–N8, N12), `kontrakty.jsonl` (I2/I5/I6/I8/I9/I14/I19/I20/I21/I22, M4),
-  `okup.jsonl` (K2–K6, L1–L3), `reputacja.jsonl` (M1–M3, M7).
+  `okup.jsonl` (K2–K6, L1–L3 + decyzje modelu i trwałość trybutu), `reputacja.jsonl` (M1–M3, M7).
+  Decyzję po odpowiedzi LLM (okup kredytowy / trybut / odpuszczenie) rozstrzyga
+  `Engine::on_llm_reply` — woła ją i `main.cpp`, i oczekiwanie `okup_kredytowy`
+  (pola `odpuszcza`/`zada_surowce` udają decyzję modelu). Wcześniej ta logika żyła
+  w pętli głównej, a scenariusz miał jej niepełną kopię bez gałęzi trybutu.
   Wartości nie są przepisane z przebiegu, tylko WYLICZONE z `rules.toml` — np. zlecenie
   wymuszone idzie po `prog_relacji`, czyli kosztuje dokładnie `nagroda_min × mnożnik typu`,
   co czyni tabelę `[kontrakty.mnoznik]` sprawdzalną co do złotówki i niezależną od losowania.
@@ -458,6 +467,12 @@ docs/protocol.md                # spec mostka JSONL
   Gotowiec: `tools/sprawdz-mod.ps1` (sam znajduje Bin64 i Roslyna, filtruje natywne DLL).
 
 ## Konwencje
+
+- Brain: stan frakcji i typ zlecenia to enumy (`FactionState`, `ContractKind` w
+  `brain/src/types.hpp`). Stringi („spokoj", „nagroda"…) WYŁĄCZNIE na granicach —
+  SQLite, JSON do moda, klucze w `rules.toml`, logi — przez `to_key`/`parse_*`.
+  Porównanie z gołym stringiem w środku silnika to błąd, którego kompilator już nie
+  przepuści; formaty na drucie i w bazie zostały bez zmian.
 
 - C#: ModAPI whitelist! Zero System.Net, zero plików poza
   MyAPIGateway.Utilities.*FileInStorage. Jeden MySessionComponentBase.

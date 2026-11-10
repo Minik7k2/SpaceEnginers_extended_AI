@@ -37,22 +37,8 @@ struct WynikScenariusza {
 WynikScenariusza uruchom_scenariusz(const std::string& sciezka, const Config& cfg,
                                     const std::string& fallback_path, std::ostream& out);
 
-// Kwota okupu wyłuskana z wiadomości gracza: pierwszy ciąg 2–12 cyfr
-// ("biorę okup, oto 4000 sztabek" -> 4000). 0 = brak kwoty (okup symboliczny).
-// Bez wyjątków (reguła pętli mostka): akumulacja ręczna, absurdalnie długie ciągi pomijane.
-std::int64_t parse_ransom_amount(const std::string& text);
+// parse_ransom_amount / ocen_oferte_okupu siedzą w engine.hpp — to logika decyzji
+// silnika (Engine::on_llm_reply), nie scenariusza.
 
-// Ocena oferty okupu w kredytach. Wydzielona z main.cpp, żeby ta sama decyzja szła
-// do gry i do testów — obserwacja z gry była taka, że model potrafi zapętlić targ
-// i NIGDY nie ustawić odpuszcza=true, więc konkretna oferta pokryta saldem musi
-// kończyć rajd niezależnie od niego.
-enum class OcenaOkupu {
-    Brak,          // bramka wyłączona configiem albo saldo gracza nieznane
-    ZaMalo,        // oferta poniżej progu — targ trwa
-    BezPokrycia,   // oferta >= próg, ale gracz tyle nie ma — pusta obietnica
-    Wiazaca,       // oferta >= próg i pokryta saldem — pokój niezależnie od modelu
-};
-
-OcenaOkupu ocen_oferte_okupu(std::int64_t oferta, std::int64_t prog, std::int64_t saldo);
 
 } // namespace zf

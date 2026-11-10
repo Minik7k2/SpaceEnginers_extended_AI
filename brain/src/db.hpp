@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "types.hpp"
 
 struct sqlite3;
 
@@ -12,8 +15,15 @@ namespace zf {
 struct FactionRow {
     std::string tag;
     std::string name;
-    std::string state;        // spokoj / napiecie / wojna
+    FactionState state = FactionState::Spokoj; // w SQLite jako klucz ("spokoj"...)
     int action_budget = 0;
+};
+
+// Wiszące żądanie trybutu w surowcach (B+), patrz tabela pending_ransom.
+struct PendingRansom {
+    std::string item;
+    std::int64_t amount = 0;
+    std::int64_t deadline_ms = 0;
 };
 
 struct RelationRow {
@@ -43,7 +53,7 @@ public:
     // Rejestruje frakcję jeśli nieznana (stan startowy: spokoj). Nie nadpisuje istniejącej.
     void ensure_faction(const std::string& tag, const std::string& name);
     std::vector<FactionRow> list_factions() const;
-    void set_faction_state(const std::string& tag, const std::string& state);
+    void set_faction_state(const std::string& tag, FactionState state);
     void set_faction_budget(const std::string& tag, int budget);
 
     // Relacja a→b (b to 'PLAYER' albo tag frakcji). Brak wiersza = 0 / cap 100.
@@ -65,6 +75,13 @@ public:
     // frakcji wobec gracza. 0 = czysto. Trwałe (świat mściwy), maleje odkupem czynem.
     int ransom_broken(const std::string& faction) const;
     void set_ransom_broken(const std::string& faction, int value);
+
+    // Wiszące żądanie trybutu frakcji (nullopt = brak). Jedno na frakcję.
+    std::optional<PendingRansom> get_pending_ransom(const std::string& faction) const;
+    void set_pending_ransom(const std::string& faction, const PendingRansom& ransom);
+    void clear_pending_ransom(const std::string& faction);
+    // Kasuje wszystkie żądania; zwraca, ile ich było (session_start: mod zaczyna od zera).
+    int clear_all_pending_ransoms();
 
     // Kontrakty (Etap 6): utrwalone — ID muszą przeżyć restart świata (odtworzenie).
     void upsert_contract(const std::string& id, const std::string& faction, const std::string& kind,

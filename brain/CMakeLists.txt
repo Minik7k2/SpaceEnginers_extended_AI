@@ -50,7 +50,12 @@ endif()
 
 # db/schema.sql jest jedynym źródłem prawdy dla schematu; wbijamy go do binarki,
 # żeby brain nie zależał od względnej ścieżki do repo w runtime.
+# file(READ) NIE rejestruje zależności: bez CMAKE_CONFIGURE_DEPENDS edycja schema.sql
+# nie przebudowywała nagłówka i lokalny build dalej wbijał stary schemat (brain padał
+# na „sqlite prepare nieudane" przy nowej tabeli; CI buduje od zera, więc tego nie widzi).
 file(READ ${CMAKE_CURRENT_SOURCE_DIR}/../db/schema.sql SCHEMA_SQL_CONTENT)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/../db/schema.sql)
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/schema_embed.hpp.in
   ${CMAKE_CURRENT_BINARY_DIR}/generated/schema_embed.hpp
@@ -65,6 +70,7 @@ add_library(zf_core STATIC
   src/fallback.cpp
   src/llm.cpp
   src/scenariusz.cpp
+  src/types.cpp
 )
 
 target_include_directories(zf_core PUBLIC

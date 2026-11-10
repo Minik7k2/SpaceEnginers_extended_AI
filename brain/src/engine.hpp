@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -79,16 +80,43 @@ struct PriceOut {
 struct ContractOut {
     std::string faction;
     // dostawa | nagroda | transport | naprawa | poszukiwania | wlasne
-    // (Config::contract_kinds(); każdy ma swoją klasę w Sandbox.ModAPI.Contracts).
+    // (kContractKinds; każdy ma swoją klasę w Sandbox.ModAPI.Contracts). Na drut idzie
+    // jako to_key(kind).
     // Silnik wybiera typ wagami z [kontrakty.typy], ale OSTATNIE słowo ma mod: jeśli
     // nie znajdzie w świecie celu (wrogiego pilota, drugiego bloku, uszkodzonej
     // siatki...), wystawia dostawę i to ona wraca w contract_created.
-    std::string kind;
+    ContractKind kind = ContractKind::Dostawa;
     std::int64_t reward = 0;   // kredyty (po mnożniku trudności typu)
     int duration_min = 45;
     // Tylko dla "nagroda": frakcja, na której głowę idzie zlecenie (najgorsza relacja
     // wystawcy wg polityki). Mod tłumaczy tag na identity właściciela jej siatki.
     std::string target_faction;
+};
+
+// Kwota okupu wyłuskana z wiadomości gracza: pierwszy ciąg 2–12 cyfr
+// ("biorę okup, oto 4000 sztabek" -> 4000). 0 = brak kwoty (okup symboliczny).
+// Bez wyjątków (reguła pętli mostka): akumulacja ręczna, absurdalnie długie ciągi pomijane.
+std::int64_t parse_ransom_amount(const std::string& text);
+
+// Ocena oferty okupu w kredytach. Jedna funkcja dla gry, testów i scenariuszy — obserwacja z gry była taka, że model potrafi zapętlić targ
+// i NIGDY nie ustawić odpuszcza=true, więc konkretna oferta pokryta saldem musi
+// kończyć rajd niezależnie od niego.
+enum class OcenaOkupu {
+    Brak,          // bramka wyłączona configiem albo saldo gracza nieznane
+    ZaMalo,        // oferta poniżej progu — targ trwa
+    BezPokrycia,   // oferta >= próg, ale gracz tyle nie ma — pusta obietnica
+    Wiazaca,       // oferta >= próg i pokryta saldem — pokój niezależnie od modelu
+};
+
+OcenaOkupu ocen_oferte_okupu(std::int64_t oferta, std::int64_t prog, std::int64_t saldo);
+
+// Odpowiedź modelu w tym, co obchodzi silnik. Celowo bez zależności od llm.hpp: ta sama
+// ścieżka decyzji ma iść z gry (main) i ze scenariuszy, które llama.cpp nie mają.
+struct LlmReply {
+    std::string faction;
+    std::string player_msg;      // surowa wiadomość gracza; pusta poza czatem
+    bool deescalate = false;     // pole JSON "odpuszcza"
+    bool demand_goods = false;   // pole JSON "zada_surowce"
 };
 
 // Silnik relacji (Etap 3): reguły zmian z configu, maszyna stanów frakcji
@@ -146,6 +174,14 @@ public:
     // Żądania trybutu nazbierane przez decyzję/komendę — zwraca i czyści bufor.
     std::vector<RansomDemandOut> take_ransom_demands();
 
+    // Skutki odpowiedzi modelu, wołane po każdym wyniku z wątku LLM. Pierwszeństwo:
+    // (1) oferta kredytowa pokryta saldem kończy rajd NIEZALEŻNIE od modelu (3B potrafi
+    // zapętlić targ i nigdy nie ustawić odpuszcza=true), (2) żądanie trybutu w surowcach,
+    // (3) odpuszczenie — z kwotą z wiadomości gracza, którą mod pobierze przy stand_down.
+    // Skutki lądują w take_standdowns()/take_ransom_demands(); zwrot to ocena oferty
+    // (log i scenariusze).
+    OcenaOkupu on_llm_reply(const LlmReply& reply, const Config& cfg, std::int64_t now_ms);
+
     // Ile kredytów gracz musi położyć na stole, żeby frakcja MUSIAŁA odwołać atak
     // niezależnie od decyzji modelu (0 = bramka wyłączona configiem).
     std::int64_t cash_ransom_threshold(const std::string& faction, const Config& cfg) const;
@@ -163,14 +199,6 @@ private:
     std::vector<SpawnOut> pending_spawns_;
     std::vector<ContractOut> pending_contracts_;
     std::vector<std::pair<std::string, std::int64_t>> pending_standdowns_; // (frakcja, kwota okupu)
-    // Wiszące okupy surowcowe: anty-dublowanie + treść żądania, żeby frakcja umiała
-    // odpowiedzieć na "ile mi zostało czasu?" (bez tego LLM zmyślał).
-    struct PendingRansom {
-        std::string item;
-        std::int64_t amount = 0;
-        std::int64_t deadline_ms = 0;
-    };
-    std::map<std::string, PendingRansom> pending_ransoms_;
     std::vector<RansomDemandOut> pending_ransom_demands_; // do wysłania jako ransom_demand
     // Ostatnio wysłane do gry wartości reputacji ("HEL" / "HEL|KRW" -> wartość vanilli).
     // W pamięci: przy starcie świata mod i tak dostaje pełny resync (session_start), a
@@ -201,10 +229,29 @@ private:
     // Rajd starszy niż to uznajemy za wygasły (MES i tak w końcu despawnuje statki) —
     // inaczej flaga z wczorajszej sesji wisiałaby w bazie w nieskończoność.
     static constexpr std::int64_t kRaidTtlMs = 60 * 60 * 1000;
+    // Wiszący trybut (tabela pending_ransom) żyje do terminu + zapas. Mod zgłasza
+    // ransom_expired kilka sekund po terminie; gdy zdarzenie zginie (świat zamknięty
+    // w trakcie, mod zgubił skrzynkę), wpis nie może blokować kolejnych żądań na zawsze.
+    static constexpr std::int64_t kRansomGraceMs = 5 * 60 * 1000;
+    // Żądanie trybutu frakcji, o ile jeszcze obowiązuje; przeterminowane kasuje.
+    std::optional<PendingRansom> active_ransom(const std::string& faction, std::int64_t now_ms);
     bool has_active_raid(const std::string& faction, std::int64_t now_ms) const;
     void set_active_raid(const std::string& faction, std::int64_t now_ms); // 0 = odwołaj
 
     void ensure_known_faction(const std::string& tag);
+    // Wiersz frakcji z bazy (nullopt = nieznany tag) i sam jej stan (Spokoj dla nieznanej).
+    std::optional<FactionRow> find_faction(const std::string& tag) const;
+    FactionState faction_state(const std::string& tag) const;
+    // Czy od znacznika czasu pod `key` w SQLite minęło mniej niż period_ms (0 = nigdy).
+    bool on_cooldown(const std::string& key, std::int64_t period_ms, std::int64_t now_ms) const;
+    // Zmiana relacji frakcja->gracz z linią logu "relacja X->gracz <delta> <why> => <wynik>".
+    double shift_player_relation(const std::string& faction, double delta, const std::string& why);
+    // Frakcja kontraktu z pola zdarzenia albo z bazy po ID ("" = nie wiadomo).
+    std::string contract_faction(const Event& ev, const std::string& contract_id) const;
+    // Głos frakcji szablonem "neutral" z pominięciem LLM (komendy /zf okup...).
+    void push_template_voice(std::vector<RadioOut>& out, const std::string& faction) const;
+    // Opis wiszącego trybutu do kontekstu rozmowy ("" = brak albo termin już minął).
+    std::string pending_ransom_context(const std::string& faction, std::int64_t now_ms);
     // Startowe relacje frakcja↔frakcja (raz na świat) — bez nich polityka nie istnieje.
     void seed_faction_politics();
     // Czy rozmowa z frakcją ma pozwolić LLM zdecydować o odpuszczeniu — gdy trwa
@@ -244,6 +291,20 @@ private:
                      std::vector<RadioOut>& out);
     void handle_debug(const Event& ev, const Config& cfg, std::int64_t now_ms,
                       std::vector<RadioOut>& out);
+    // Świeżo wczytany świat: mod nie utrwala skrzynek zrzutu, więc wiszące żądania
+    // trybutu przepadają razem z nimi (inaczej frakcja kazałaby wozić do skrzynki,
+    // której nie ma).
+    void handle_session_start(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                              std::vector<RadioOut>& out);
+    // Poszczególne komendy /zf obsługiwane przez handle_debug.
+    void debug_spawn(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                     std::vector<RadioOut>& out);
+    void debug_contract(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                        std::vector<RadioOut>& out);
+    void debug_ransom(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                      std::vector<RadioOut>& out);
+    void debug_goods_ransom(const Event& ev, const Config& cfg, std::int64_t now_ms,
+                            std::vector<RadioOut>& out);
     // Etap 6 — ekonomia: handel podnosi relację (+1..+3), wykonany kontrakt (+kontrakt_max),
     // zawalony (-kontrakt_min); status kontraktu utrwalany w SQLite.
     void handle_trade(const Event& ev, const Config& cfg, std::int64_t now_ms,
@@ -272,11 +333,11 @@ private:
                               std::vector<RadioOut>& out);
     // Losowanie typu zlecenia wagami z [kontrakty.typy] (nadpisania per frakcja, podbicie
     // "nagrody" w napięciu/wojnie). Typy bez sensownego celu są odsiewane: nagroda wymaga
-    // frakcji, z którą wystawca jest na bakier. "" = brak choćby jednego typu z wagą > 0.
-    std::string pick_contract_kind(const std::string& faction, const Config& cfg);
+    // frakcji, z którą wystawca jest na bakier. nullopt = brak typu z wagą > 0.
+    std::optional<ContractKind> pick_contract_kind(const std::string& faction, const Config& cfg);
     // Wystawia zlecenie do bufora: nagroda po mnożniku trudności, cel dla nagrody,
     // a dla eskorty dorzuca konwój przez MES (nie ma czego eskortować bez statku).
-    void queue_contract(const std::string& faction, const std::string& kind, double relation,
+    void queue_contract(const std::string& faction, ContractKind kind, double relation,
                         const Config& cfg, std::int64_t now_ms);
     // Frakcja, na której głowę wystawca może dać nagrodę: najgorsza relacja w polityce
     // i musi być poniżej prog_wrogi. "" = wystawca z nikim nie jest na wojennej stopie.
